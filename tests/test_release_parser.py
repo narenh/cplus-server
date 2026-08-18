@@ -161,6 +161,11 @@ def test_full_discs_are_dropped_at_the_parser_boundary() -> None:
         ("Movie.2024.2160p.WEB-DL.HDR10Plus.HEVC-GRP", True, False),
         ("Movie.2024.2160p.WEB-DL.HDR10+.HEVC-GRP", True, False),
         ("Movie 2024 2160p WEB-DL HDR10+ HEVC-GRP", True, False),
+        # HDR10P is the most common spelling in the wild.
+        ("Movie.2024.2160p.WEB-DL.HDR10P.HEVC-GRP", True, False),
+        ("Movie 2024 2160p WEB-DL HDR10P HEVC-GRP", True, False),
+        ("Movie.2024.2160p.WEB-DL.hdr10p.HEVC-GRP", True, False),
+        ("Movie.2024.2160p.WEB-DL.DV.HDR10P.HEVC-GRP", True, False),
         ("Movie.2024.2160p.WEB-DL.HDR10.HEVC-GRP", False, True),
         ("Movie.2024.2160p.WEB-DL.HDR.HEVC-GRP", False, True),
         ("Movie.2024.1080p.WEB-DL.H264-GRP", False, False),
@@ -175,6 +180,21 @@ def test_hdr_flags(title: str, hdr10plus: bool, hdr: bool) -> None:
 def test_hdr10plus_and_plain_hdr_are_mutually_exclusive_tags() -> None:
     parsed = parse_title("Movie.2024.2160p.WEB-DL.HDR10+.HEVC-GRP")
     assert parsed.hdr_tags == ["HDR10+"]
+
+
+@pytest.mark.parametrize(
+    "spelling", ["HDR10+", "HDR10P", "HDR10Plus", "HDRPlus", "HDR+", "hdr 10 +"]
+)
+def test_every_hdr10plus_spelling_produces_the_same_tag(spelling: str) -> None:
+    parsed = parse_title(f"Movie.2024.2160p.WEB-DL.{spelling}.HEVC-GRP")
+    assert parsed.is_hdr10plus is True
+    assert parsed.is_hdr is False
+    assert parsed.hdr_tags == ["HDR10+"]
+
+
+def test_hdr10plus_long_form_is_not_clipped_to_the_short_one() -> None:
+    # `hdr10p` must not swallow the `lus` of `hdr10plus` and leave it unmatched.
+    assert parse_title("Movie.2024.2160p.WEB-DL.HDR10PLUS.HEVC-GRP").is_hdr10plus is True
 
 
 @pytest.mark.parametrize(

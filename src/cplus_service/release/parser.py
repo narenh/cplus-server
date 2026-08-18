@@ -87,7 +87,10 @@ _DV_EXPLICIT_PROFILE = re.compile(
 _DVHE_PROFILE = re.compile(r"dvhe[\s-]*(\d{1,2})(?![0-9])")
 _DV_DUAL_LAYER = _tok(r"(?:fel|mel)")
 
-_HDR10PLUS = _tok(r"(?:hdr\s?10\s?\+|hdr10plus|hdrplus|hdr\+)")
+# `hdr10p` is the most common spelling in the wild; `hdr10plus`/`hdrplus` are the
+# older long forms.  Longer alternatives come first so `hdr10plus` cannot be
+# clipped to `hdr10p`.
+_HDR10PLUS = _tok(r"(?:hdr\s?10\s?\+|hdr10plus|hdrplus|hdr10p|hdr\+)")
 _HDR = _tok(r"(?:hdr10|hdr)")
 
 _ATMOS = _tok(r"atmos")
