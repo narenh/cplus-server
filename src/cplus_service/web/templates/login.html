@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow">
+  <p class="lede">
+    Sign in with the Plex account that owns your Seerr instance.
+    Seerr decides who the admin is — this page only checks with it.
+  </p>
+
+  <form id="signin">
+    <label for="seerr_url">Seerr URL</label>
+    <input type="url" id="seerr_url" name="seerr_url" value="{{ seerr_url }}"
+           placeholder="http://seerr.local:5055" required>
+    <p class="hint">Saved once it has successfully authenticated you.</p>
+    <button type="submit" id="go">Sign in with Plex</button>
+  </form>
+
+  <p id="status" class="status" role="status"></p>
+</div>
+
+<script>
+// Small enough to be inline, and this is the one page HTMX cannot express:
+// it has to open a popup and poll until Plex hands the token back.
+(function () {
+  const form = document.getElementById("signin");
+  const button = document.getElementById("go");
+  const status = document.getElementById("status");
+  let timer = null;
+
+  function say(text, kind) {
+    status.textContent = text;
+    status.className = "status" + (kind ? " " + kind : "");
+  }
+
+  async function poll(pinId) {
+    let response;
+    try {
+      response = await fetch("/admin/plex/pin/" + pinId);
+    } catch (err) {
+      return stop("Lost contact with the server.", "err");
+    }
+    const body = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      return stop(body.detail || "Sign-in failed.", "err");
+    }
+    if (body.claimed) {
+      clearInterval(timer);
+      say("Signed in. Redirecting…", "ok");
+      window.location = body.redirect || "/admin/config";
+      return;
+    }
+  }
+
+  function stop(message, kind) {
+    clearInterval(timer);
+    button.disabled = false;
+    say(message, kind);
+  }
+
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    button.disabled = true;
+    say("Opening Plex…");
+
+    const data = new FormData();
+    data.append("seerr_url", document.getElementById("seerr_url").value);
+
+    let response;
+    try {
+      response = await fetch("/admin/plex/pin", { method: "POST", body: data });
+    } catch (err) {
+      return stop("Could not reach the server.", "err");
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return stop(body.detail || "Could not start the Plex sign-in.", "err");
+    }
+
+    window.open(body.auth_url, "plex-auth", "width=800,height=720");
+    say("Waiting for you to approve access in the Plex window…");
+    timer = setInterval(function () { poll(body.pin_id); }, 2000);
+  });
+})();
+</script>
+{% endblock %}

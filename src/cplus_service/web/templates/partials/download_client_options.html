@@ -1,0 +1,10 @@
+{% if error %}
+  <option value="" disabled selected>— {{ error }} —</option>
+{% else %}
+  {% for client in clients %}
+    <option value="{{ client.id }}" {% if selected == client.id %}selected{% endif %}>
+      {{ client.name }}{% if not client.enable %} (disabled in Prowlarr){% endif %}
+    </option>
+  {% endfor %}
+  {% if not clients %}<option value="" disabled selected>No download clients in Prowlarr</option>{% endif %}
+{% endif %}

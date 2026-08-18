@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -58,6 +59,11 @@ class Config(Base):
     prowlarr_url: Mapped[str | None] = mapped_column(String(512))
     prowlarr_api_key: Mapped[str | None] = mapped_column(String(256))
     preferred_indexer_id: Mapped[int | None] = mapped_column(Integer)
+
+    #: Stable per-install identity for the plex.tv PIN flow.  Generated on
+    #: first sign-in.  It must not change between sign-ins, or every login
+    #: registers a fresh device on the admin's Plex account.
+    plex_client_identifier: Mapped[str | None] = mapped_column(String(64))
 
 
 class User(Base):
@@ -101,18 +107,33 @@ class Action(Base):
 
     Maps a Prowlarr download client to a quality profile.  Users are granted a
     subset of actions via :class:`Permission`.
+
+    The built-in Request action is the one exception: it is seeded with
+    ``is_system=True`` and carries neither a download client nor a quality
+    profile, because it never touches Prowlarr.  A system action cannot be
+    edited or deleted, which is what makes its name a stable identifier — the
+    tvOS client routes on ``name == "Request"``.  The CHECK constraint keeps
+    the nullable columns from being abused: only a system action may omit them.
     """
 
     __tablename__ = "actions"
+    __table_args__ = (
+        CheckConstraint(
+            "is_system = 1 OR (download_client_id IS NOT NULL"
+            " AND quality_profile_id IS NOT NULL)",
+            name="ck_action_targets_required_unless_system",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
-    download_client_id: Mapped[int] = mapped_column(Integer)
-    quality_profile_id: Mapped[int] = mapped_column(
+    download_client_id: Mapped[int | None] = mapped_column(Integer)
+    quality_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("quality_profiles.id", ondelete="RESTRICT")
     )
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
-    quality_profile: Mapped[QualityProfile] = relationship(
+    quality_profile: Mapped[QualityProfile | None] = relationship(
         back_populates="actions", lazy="selectin"
     )
     users: Mapped[list[User]] = relationship(secondary="permissions", back_populates="actions")
@@ -157,6 +178,49 @@ class Grab(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+
+class AdminSession(Base):
+    """A browser session for the admin webui.
+
+    Only the webui uses sessions.  tvOS has no session concept at all — it
+    presents its Plex token on every request (see
+    :mod:`cplus_service.auth.plex_cache`).
+
+    The cookie holds an opaque random token rather than signed claims, so there
+    is no signing secret to manage and revocation is a row delete.  Sessions are
+    persisted rather than held in memory so a restart does not log the admin out
+    mid-configuration.
+    """
+
+    __tablename__ = "admin_sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PlexTokenSession(Base):
+    """A validated Plex token, mapped to the local user it belongs to.
+
+    This is what lets ``/search`` and ``/grab`` authenticate without an outbound
+    call to Plex or Seerr.  ``GET /actions`` writes it after validating for
+    real; the fast paths only ever read it.
+
+    Rows store a SHA-256 **fingerprint**, never the token itself, so the table
+    cannot hand anyone a working Plex credential even if the database file
+    leaks.  There is deliberately no expiry: an entry stays valid until that
+    user's next ``/actions`` call overwrites it, or the user is deleted, which
+    cascades.
+    """
+
+    __tablename__ = "plex_token_sessions"
+
+    token_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class ActivityLog(Base):

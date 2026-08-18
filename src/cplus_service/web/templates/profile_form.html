@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<form class="card" method="post" action="/admin/quality-profiles">
+  {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% endif %}
+
+  <label for="name">Profile name</label>
+  <input type="text" id="name" name="name" value="{{ name }}" placeholder="4K Remux" required>
+
+  <h2>Rules</h2>
+  <p class="lede">
+    Filters remove candidates outright; their position does not matter.
+    Preferences rank whatever survives, and their order does — the first
+    preference decides, each later one breaks the previous one's ties.
+  </p>
+
+  <div id="rule-rows">
+    {% include "partials/rule_rows.html" %}
+  </div>
+
+  <div class="row add-rule">
+    <select name="rule_type" id="rule_type">
+      <optgroup label="Filters">
+        {% for spec in rule_specs if spec.kind == "filter" %}
+          <option value="{{ spec.type }}">{{ spec.label }}</option>
+        {% endfor %}
+      </optgroup>
+      <optgroup label="Preferences">
+        {% for spec in rule_specs if spec.kind == "preference" %}
+          <option value="{{ spec.type }}">{{ spec.label }}</option>
+        {% endfor %}
+      </optgroup>
+    </select>
+    <button type="button" class="secondary"
+            hx-post="/admin/quality-profiles/rows"
+            hx-include="closest form"
+            hx-vals='{"op": "add"}'
+            hx-target="#rule-rows" hx-swap="innerHTML">Add rule</button>
+  </div>
+
+  <div class="row">
+    <button type="submit">Save profile</button>
+    <a class="secondary button" href="/admin/quality-profiles">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title|default("Admin") }} · cplus-service</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {# Vendored, not from a CDN: a self-hosted box may have no outbound access. #}
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+{% if admin is defined and admin %}
+<header class="topbar">
+  <div class="brand">cplus-service</div>
+  <nav>
+    <a href="/admin/config" class="{{ 'on' if nav == 'config' }}">Configuration</a>
+    <a href="/admin/quality-profiles" class="{{ 'on' if nav == 'profiles' }}">Quality profiles</a>
+    <a href="/admin/actions" class="{{ 'on' if nav == 'actions' }}">Actions</a>
+    <a href="/admin/users" class="{{ 'on' if nav == 'users' }}">Permissions</a>
+    <a href="/admin/grabs" class="{{ 'on' if nav == 'grabs' }}">Grabs</a>
+    <a href="/admin/activity-log" class="{{ 'on' if nav == 'activity' }}">Activity</a>
+  </nav>
+  <form method="post" action="/admin/logout" class="signout">
+    <span class="who">{{ admin.plex_username }}</span>
+    <button type="submit" class="link">Sign out</button>
+  </form>
+</header>
+{% endif %}
+
+<main class="wrap">
+  {% if title %}<h1>{{ title }}</h1>{% endif %}
+  {% if errors %}
+    <ul class="errors">
+      {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

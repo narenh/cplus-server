@@ -10,14 +10,16 @@ Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 **Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
 (search, grab, indexers, download clients) and Seerr (auth, plus a built-in
 Request action) and nothing else. No library sync. The Prowlarr-backed side is
-movies-only and driven by IMDB ID — no free-text search, so no title-matching
-ambiguity to resolve.
+**movies-only** and driven by IMDB ID — no free-text search, so no
+title-matching ambiguity to resolve. The built-in **Request** action is the one
+exception: it supports TV as well, is keyed by TMDB id, and never touches
+Prowlarr at all.
 
 ---
 
 ## Build status
 
-This repository currently contains **stage 1 of 3**.
+All three build stages are complete.
 
 | | Component | Status |
 |---|---|---|
@@ -25,39 +27,86 @@ This repository currently contains **stage 1 of 3**.
 | 1 | Release parser | ✅ done |
 | 1 | Prowlarr client wrapper | ✅ done |
 | 1 | Quality profile rule engine | ✅ done |
-| 2 | Plex/Seerr auth, HTTP endpoints, Request action | not started |
-| 3 | Streaming, admin web UI | not started |
-
-Nothing in stage 1 needs a running HTTP server. Everything is verifiable through
-`pytest` and `scripts/demo.py`.
+| 2 | Seerr client + both auth flows | ✅ done |
+| 2 | `/actions`, `/search`, `/grab`, `/request` | ✅ done |
+| 2 | Built-in Request action | ✅ done |
+| 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
+| 3 | Docker packaging | ✅ done |
 
 ---
 
-## Getting started
+## Running it
+
+```bash
+docker compose up -d          # then open http://localhost:8080
+```
+
+That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
+quality profiles, actions, permissions — is configured in the web UI, not in
+environment variables or config files.
+
+### First-run setup
+
+1. Open `http://localhost:8080`. You land on the sign-in page.
+2. **Enter your Seerr URL** (e.g. `http://seerr.local:5055`) and click
+   *Sign in with Plex*. A Plex window opens; approve access there.
+3. The service asks Seerr who you are and checks Seerr's **ADMIN permission
+   bit**. If your account is not the Seerr admin you are refused — the web UI
+   has no non-admin use case. The Seerr URL is saved only once it has
+   successfully authenticated you, so a typo cannot lock you out.
+4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
+   Optionally pick a preferred indexer; the default, *All indexers*, is fine.
+5. **Create at least one quality profile.** Every Prowlarr-backed action needs
+   one. Add filter rules to eliminate candidates and preference rules to rank
+   what survives — preference order is what decides ties.
+6. **Create actions** — a name, a Prowlarr download client, and a quality
+   profile. These become the buttons in the client, e.g. "Stream Now", "Add 4K".
+7. **Assign permissions.** Users appear on the Permissions page the first time
+   their client signs in, so have each user open the app once, then tick the
+   actions they may use — including the built-in *Request* action.
+
+### Environment variables
+
+Only the handful that must exist before the UI does:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CPLUS_PORT` | `8080` | Listen port |
+| `CPLUS_HOST` | `0.0.0.0` | Bind address |
+| `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
+| `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
+
+There is no secret key to set. Admin sessions are opaque random tokens stored in
+the database, so there is nothing to sign, rotate or leak — revoking a session
+is a row delete, and the sessions live on the same volume as everything else.
+
+State lives entirely in the SQLite file on the `cplus-data` volume. Back that up
+and you have backed up the service. `alembic upgrade head` runs on every start,
+so upgrading is pull-and-restart.
+
+### Development
 
 ```bash
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 176 tests, no network or Prowlarr needed
-python scripts/demo.py      # parse a canned release set and recommend per profile
+pytest                      # 342 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
+
+export CPLUS_DB_PATH=./cplus.db
+alembic upgrade head
+python -m cplus_service
 ```
 
-Against a real Prowlarr:
+Exercise the stage-1 modules standalone, with no server:
 
 ```bash
+python scripts/demo.py               # canned release set, recommend per profile
+
 export PROWLARR_URL=http://prowlarr.local:9696
 export PROWLARR_API_KEY=...
 export PREFERRED_INDEXER_ID=3        # optional; unset means "All indexers"
-python scripts/demo.py tt1160419
-```
-
-Create the database:
-
-```bash
-export CPLUS_DB_PATH=./cplus.db      # optional; defaults to ./cplus.db
-alembic upgrade head
+python scripts/demo.py tt1160419     # against a real Prowlarr
 ```
 
 ---
@@ -66,17 +115,29 @@ alembic upgrade head
 
 ```
 src/cplus_service/
-  release/models.py    ParsedTitle / ParsedRelease — the stable client contract
-  release/parser.py    title -> structured metadata; drops full discs
-  quality/models.py    quality profile rule schema (pydantic, discriminated union)
-  quality/engine.py    recommend(candidates, profile) -> ParsedRelease | None
-  prowlarr/client.py   async Prowlarr API wrapper
-  prowlarr/models.py   Indexer / DownloadClient / SystemStatus / GrabResult
-  db/models.py         SQLAlchemy 2.0 schema
-  db/session.py        async engine, session factory, config singleton accessor
-migrations/            Alembic
-scripts/demo.py        offline + live REPL-style driver
-tests/                 unit tests for all of the above
+  release/models.py     ParsedTitle / ParsedRelease — the stable client contract
+  release/parser.py     title -> structured metadata; drops full discs
+  quality/models.py     quality profile rule schema (pydantic, discriminated union)
+  quality/engine.py     recommend(candidates, profile) -> ParsedRelease | None
+  prowlarr/client.py    async Prowlarr API wrapper
+  seerr/client.py       async Seerr API wrapper (auth + request creation only)
+  auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
+  auth/sessions.py      webui browser sessions
+  auth/identity.py      Seerr user -> local user upsert
+  search/stream.py      two-phase concurrent search, NDJSON phases
+  api/app.py            FastAPI factory + lifespan
+  api/deps.py           auth/config/client dependencies
+  api/routes/           actions, search, grab, request, auth
+  api/routes/admin/     the admin webui: config, profiles, actions,
+                        permissions, activity, login (Plex PIN flow)
+  plex/client.py        plex.tv PIN flow — webui sign-in only
+  web/                  Jinja2 templates + vendored HTMX and CSS
+  db/models.py          SQLAlchemy 2.0 schema
+  bootstrap.py          seeds the built-in Request action
+migrations/             Alembic
+docker/entrypoint.sh    migrate, then serve
+scripts/demo.py         offline + live REPL-style driver
+tests/                  unit + ASGI end-to-end tests
 ```
 
 ---
@@ -113,7 +174,7 @@ a pattern here, add a dot-delimited test for it.**
 | `is_hdr` | plain HDR10 — mutually exclusive with `is_hdr10plus` |
 | `has_atmos`, `has_dtsx`, `has_truehd` | independent; a release may carry all three |
 | `is_repack_or_proper` + `repack_version` | `REPACK2` → 2, `REAL.PROPER` → 2 |
-| `is_prerelease` | CAM / HDCAM / TS / telesync / telecine / screener / R5 / workprint / DCP |
+| `is_prerelease` | CAM / CAMRip / HDCAM / TS / HDTS / telesync / TC / HDTC / telecine / HDRip / screener / DVDSCR / R5 / workprint / DCP / DCPRip |
 | `is_full_disc` | always `False` on anything a caller receives |
 | `release_group` | best-effort trailing `-GROUP` |
 | `base_title` | normalised name with tags and group stripped, for repack title-diffing |
@@ -260,13 +321,15 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `plex_client_identifier` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
+| `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
+| `admin_sessions` | opaque browser session tokens for the web UI |
 
 `PRAGMA foreign_keys=ON` is set per connection — SQLite defaults it *off*, which
 would silently ignore every `ON DELETE` clause. Deleting a user cascades to
@@ -280,16 +343,249 @@ other.
 
 ---
 
-## For stage 2
+## Auth
 
-The contract above is stable — stage 2 and the tvOS client both depend on it.
-What stage 2 builds on top:
+Two flows that must not be conflated. tvOS already holds a user-scoped Plex
+token; a browser does not.
 
-* Plex auth validated against the admin's Seerr instance.
-* Search endpoint: fetch via `ProwlarrClient.search_movie`, apply
-  `preferred_indexer_candidates`, then call `recommend` once per action the
-  caller is permitted to use. Return the flat tagged list plus the per-action
-  recommendation — no sections, no categories.
-* Grab endpoint: check `permissions`, call `ProwlarrClient.grab` with the
-  action's `download_client_id`, write `grabs` + `activity_log`.
-* The built-in Request action (the one exception to movies-only).
+### tvOS — Plex token on every request
+
+No login step, no session token. The header is `X-Plex-Token`.
+
+1. `GET /actions` on app launch (and on reconnect in settings) validates the
+   token against Seerr's `/api/v1/auth/plex`, upserts the local `users` row, and
+   records the token → user mapping in `plex_token_sessions`.
+2. `/search` and `/grab` authenticate **against that mapping only** — no
+   outbound Plex or Seerr call, which is what keeps them fast.
+3. An unknown token is a `401`; the client's recovery is to call `/actions`,
+   which it does on launch anyway.
+4. `/request` is the exception: it always validates live, because it needs a
+   Seerr session to file the request as the user.
+
+The mapping is **persisted and survives a restart**, so restarting the service
+no longer 401s every client until its next launch. Only a SHA-256 fingerprint
+is stored, never the token itself, so the table cannot yield a working Plex
+credential even if the database file leaks.
+
+There is **no expiry**: an entry is valid until that user's next `/actions`
+call overwrites it, or until the user is deleted, which cascades. The tradeoff
+is that a Plex token revoked upstream keeps working on `/search` and `/grab`
+until one of those happens — removing the user in the admin UI is the immediate
+lever. Revoking a single *permission* likewise takes effect at their next
+`/actions` call, not at once.
+
+### Webui — Plex OAuth PIN flow + browser session
+
+1. The PIN flow against plex.tv is **proxied server-side** (`POST /admin/plex/pin`,
+   then polling `GET /admin/plex/pin/{id}`). The browser only opens the Plex
+   popup and polls one URL — the Plex token never reaches page JavaScript.
+2. There is exactly one admin sign-in path; the token is validated inside the
+   poll handler.
+3. The token is validated against Seerr, and Seerr's **ADMIN permission bit**
+   (`permissions & 2`) is checked — not `seerr_user_id == 1`, since Seerr grants
+   admin through the bitmask and the owner is not guaranteed to be user 1.
+4. A non-admin is rejected outright: the webui has no non-admin use case.
+5. An admin gets an opaque session token in an httpOnly `cplus_session` cookie,
+   backed by the `admin_sessions` table.
+
+`seerr_url` is accepted in the body to make first-run bootstrap possible —
+setting it needs an admin session, and getting a session needs it. It is
+persisted only after it has been proven to work, so a typo cannot brick config.
+
+---
+
+## Endpoints
+
+### Client (tvOS)
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /actions` | live Seerr | The auth checkpoint. Returns `{id, name}` only |
+| `GET /search?imdb_id=&type=movie` | cache | NDJSON stream, see below |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
+
+`/actions` returns just an id and a label — the client has no use for the
+download client or quality profile behind an action. It routes on the name:
+`"Request"` posts to `/request`, everything else to `/grab`. That is safe
+because the Request action is a **system action** and cannot be renamed or
+deleted.
+
+`POST /grab` echoes back the release fields the client already received in the
+search stream. `indexer_id` is what Prowlarr needs to identify the listing;
+`release_title` and `size_bytes` are stored on the `grabs` row so the admin
+UI's history is readable without re-querying an indexer for a listing that may
+no longer exist. `size_bytes` is optional, because not every indexer reports one
+— an unknown size is a real state rather than a client omission.
+
+The client never supplies `download_client_id`: that comes from the action, and
+the body rejects unknown fields.
+
+Because the grab body is self-contained, the server keeps **no state between
+search and grab** — a restart between the two is harmless.
+
+### Admin
+
+Session-gated, ADMIN-bit-gated, all server-rendered:
+
+| Endpoint | Notes |
+|---|---|
+| `GET /admin/login` | The only ungated admin route |
+| `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow |
+| `GET/POST /admin/config` | Seerr URL, Prowlarr, preferred indexer |
+| `POST /admin/config/verify-prowlarr` | Connect/Verify button |
+| `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
+| `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
+| `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, rule builder, delete |
+| `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
+| `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
+| `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+
+The three proxy/verify endpoints answer **JSON by default** and HTML with
+`?format=html`. JSON keeps them usable as an API; the HTML variant is what the
+page swaps straight into the DOM.
+
+---
+
+## Streaming search
+
+Both Prowlarr calls are issued **concurrently**:
+
+1. scoped to `config.preferred_indexer_id` — **skipped entirely** when that is
+   null, since there is nothing distinct to fetch early;
+2. across all indexers.
+
+The response is NDJSON, one object per line:
+
+```
+{"phase":"preferred","releases":[…],"recommendations":{"1":"guid-a","2":null}}
+{"phase":"all","releases":[…],"recommendations":{"1":"guid-a","2":"guid-b"}}
+```
+
+**Client merge rule: apply the last line you received, wholesale.** Union the
+`releases` arrays by guid.
+
+That is the documented choice for the "re-send all vs. only the unresolved
+ones" question: the `all` line always carries a recommendation for **every**
+permitted action, so the client needs no key-level merging and behaves the same
+whether or not phase 1 ran. The re-sent values never contradict phase 1 —
+scoring goes through `preferred_indexer_candidates`, so a non-empty preferred
+subset keeps its answer and an empty one falls back to the full set.
+
+`releases` in the `all` line excludes anything already sent in `preferred`,
+though clients should tolerate duplicates by guid regardless.
+
+The `all` line is **always** sent — on zero results, and on Prowlarr failure —
+so the client can always leave its loading state. Since the response has already
+committed to `200` by then, a late failure appears in-band as an `error` field
+rather than as a status code. A failure of the *preferred* call alone degrades
+silently to a single phase, because the unfiltered search covers that indexer
+too.
+
+The built-in Request action is excluded from recommendations: it has no quality
+profile and never touches Prowlarr.
+
+---
+
+## Built-in Request action
+
+Seeded idempotently on startup, marked `is_system`, and carrying neither a
+download client nor a quality profile — a CHECK constraint allows those nulls
+only for a system action. Granted per user through the normal `permissions`
+table like any other action, but not editable or deletable.
+
+It is the one part of the service that is **not** movies-only, and the one that
+is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
+endpoint takes. The client sends the TMDB id straight from Plex metadata; the
+service never resolves IMDB → TMDB.
+
+`seasons` is required and non-empty for `type=tv`, rejected for `type=movie`,
+and passed through to Seerr verbatim. Season `0` is specials. We never
+substitute the literal `"all"`, which would silently drop them.
+
+No `grabs` row is written — nothing was grabbed. It is recorded in
+`activity_log` instead, with `detail.kind == "request"`; the `event_type` enum
+is `search | grab` per the stage-1 schema, so requests are logged as `grab` with
+that discriminator rather than widening the enum.
+
+---
+
+## Admin web UI
+
+Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
+`web/static/`, so a container with no outbound access still works.
+
+### The rule builder
+
+The one genuinely interactive piece. Rules are numbered rows with ↑ / ↓ / ×
+controls and an add-rule dropdown; filters and preferences are colour-coded
+apart, since only preference *order* is meaningful.
+
+It holds **no server-side draft**. Every add, remove and move posts the whole
+current form to `POST /admin/quality-profiles/rows`, which decodes it, applies
+the operation and re-renders the rows. So two tabs cannot corrupt each other's
+draft, an abandoned edit leaves nothing to clean up, and a restart mid-edit
+costs nothing. Row indices carry order only and are renumbered on every render.
+
+Ordered rules (`resolution_order`, `source_order`, `hdr_match`, `audio_match`)
+use a comma-separated text input rather than a multi-select: order is the whole
+point of those rules, and browsers submit multi-select options in document
+order, not click order.
+
+Before saving, the decoded rules are validated through stage 1's pydantic
+schema. Stored JSON therefore can never hold a shape the engine will not accept,
+and an unknown token like `hdr_match: NOT_A_TAG` comes back as a form error
+instead of a broken profile.
+
+### Guards worth knowing about
+
+* The built-in **Request** action is listed but read-only, and no other action
+  may take its name (`Request`, case-insensitively). The tvOS client routes on
+  that name, so renaming or reusing it would silently break every client.
+* A quality profile still used by an action cannot be deleted; the page says
+  which action is holding it.
+* An empty API-key field means "leave the saved key alone", and the saved key is
+  never rendered back into the page.
+* Removing a user is immediate: it drops their browser sessions *and* evicts
+  their cached Plex tokens, which live in memory outside the transaction.
+  Revoking a single permission is not immediate — see below.
+
+---
+
+## Cross-stage notes
+
+Three places where a later stage's needs diverged from an earlier stage's
+guess. The first two were collapsed; the rest are deliberate.
+
+**Admin verbs drifted from stage 2's stubs.** The stubs named
+`PUT /admin/quality-profiles/{id}`, `DELETE /admin/actions/{id}` and
+`PUT /admin/users/{id}/permissions`. HTML forms can only issue GET and POST, so
+those became `POST .../{id}` and `POST .../{id}/delete`. Stage 2's
+`GET /admin/users/{id}/permissions` was dropped — the permissions matrix is
+rendered on `GET /admin/users` instead — and stage 3 added routes the stubs did
+not anticipate (`/quality-profiles/new`, `/quality-profiles/rows`,
+`/users/{id}/delete`, and the login/PIN routes).
+
+**Requests are logged as `grab` events.** `activity_log.event_type` is the
+stage-1 enum `search | grab`, and a request is neither a search nor a Prowlarr
+grab. It is stored as `grab` with `detail.kind == "request"`, and the activity
+page renders it as its own badge. Widening the enum would be cleaner but is a
+schema change nobody asked for.
+
+**Permission changes are not immediate.** Revoking an action takes effect at
+the user's next `/actions` call, because `/search` and `/grab` authenticate from
+the stored token mapping rather than re-checking Seerr. The UI says so rather
+than papering over it. Removing the user entirely *is* immediate — the delete
+cascades to their token mappings and browser sessions.
+
+### Resolved
+
+*Two admin sign-in paths.* Stage 2's `POST /auth` assumed the browser would run
+the PIN flow and hand over a token; stage 3 proxies the flow server-side, so
+nothing called it. It has been removed along with `POST /auth/logout`
+(superseded by `POST /admin/logout`), leaving one sign-in path and one
+admin-bit check.
+
+*Dead `deps.get_admin` / `AdminDep`.* Stage 2 wrote it for stage 3 to wire in,
+but a browser needs a redirect rather than 401 JSON. Removed in favour of
+`api/routes/admin/deps.require_admin_page`.

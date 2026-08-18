@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="row"><a class="button" href="/admin/quality-profiles/new">New quality profile</a></p>
+
+{% if not profiles %}
+  <p class="empty">No quality profiles yet. Every action needs one, so start here.</p>
+{% else %}
+<table>
+  <thead><tr><th>Name</th><th>Rules</th><th></th></tr></thead>
+  <tbody>
+  {% for profile in profiles %}
+    <tr>
+      <td><a href="/admin/quality-profiles/{{ profile.id }}">{{ profile.name }}</a></td>
+      <td class="muted">
+        {% if profile.rules %}
+          {{ profile.rules|map(attribute='type')|join(' → ') }}
+        {% else %}<em>no rules</em>{% endif %}
+      </td>
+      <td class="right">
+        {% if profile.id in in_use %}
+          <span class="muted" title="Used by at least one action">in use</span>
+        {% else %}
+          <form method="post" action="/admin/quality-profiles/{{ profile.id }}/delete"
+                onsubmit="return confirm('Delete {{ profile.name }}?')">
+            <button type="submit" class="link danger">Delete</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -87,7 +87,10 @@ _DV_EXPLICIT_PROFILE = re.compile(
 _DVHE_PROFILE = re.compile(r"dvhe[\s-]*(\d{1,2})(?![0-9])")
 _DV_DUAL_LAYER = _tok(r"(?:fel|mel)")
 
-_HDR10PLUS = _tok(r"(?:hdr\s?10\s?\+|hdr10plus|hdrplus|hdr\+)")
+# `hdr10p` is the most common spelling in the wild; `hdr10plus`/`hdrplus` are the
+# older long forms.  Longer alternatives come first so `hdr10plus` cannot be
+# clipped to `hdr10p`.
+_HDR10PLUS = _tok(r"(?:hdr\s?10\s?\+|hdr10plus|hdrplus|hdr10p|hdr\+)")
 _HDR = _tok(r"(?:hdr10|hdr)")
 
 _ATMOS = _tok(r"atmos")
@@ -99,9 +102,23 @@ _PROPER = _tok(r"proper")
 _REAL_PROPER = _tok(r"real[\s-]?proper")
 _RERIP = _tok(r"re[\s-]?rip")
 
+# Pre-release markers. The `*Rip` variants — HDRip, CAMRip, DCPRip — are the
+# newer spellings and need their own alternatives: a bare `dcp` cannot match
+# inside `dcprip`, since the token boundary rejects a trailing letter.
+#
+# These overlap with _RIP on purpose. A pre-release is still a re-encode, so it
+# stays encode evidence and can never be mistaken for an untouched disc; the two
+# flags answer different questions and a release can carry both.
 _PRERELEASE = _tok(
-    r"(?:hd)?(?:cam(?:rip)?|ts|telesync|tc|telecine|screener|scr|dvd\s?scr|bd\s?scr"
-    r"|r5|workprint|dcp|pre\s?dvd)"
+    r"(?:"
+    r"(?:hd)?cam(?:[\s-]?rip)?"
+    r"|(?:hd)?ts|telesync"
+    r"|(?:hd)?tc|telecine"
+    r"|screener|scr|dvd[\s-]?scr|bd[\s-]?scr"
+    r"|hd[\s-]?rip"
+    r"|dcp(?:[\s-]?rip)?"
+    r"|r5|workprint|pre[\s-]?dvd"
+    r")"
 )
 
 _YEAR = re.compile(r"(?<![0-9])(?:19|20)\d{2}(?![0-9])")
