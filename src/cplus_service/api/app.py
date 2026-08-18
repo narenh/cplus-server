@@ -18,12 +18,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from ..auth.plex_cache import PlexTokenCache
 from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
 from ..web import STATIC_DIR
-from .routes import actions, admin, auth, grab, request, search
+from .routes import actions, admin, grab, request, search
 from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,6 @@ def create_app(
             sessionmaker=sessionmaker,
             http=http,
             seerr_http=seerr_http,
-            plex_cache=PlexTokenCache(),
         )
 
         async with session_scope(sessionmaker) as session:
@@ -89,7 +87,6 @@ def create_app(
     app.include_router(search.router)
     app.include_router(grab.router)
     app.include_router(request.router)
-    app.include_router(auth.router)
     app.include_router(admin.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

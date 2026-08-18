@@ -201,6 +201,28 @@ class AdminSession(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class PlexTokenSession(Base):
+    """A validated Plex token, mapped to the local user it belongs to.
+
+    This is what lets ``/search`` and ``/grab`` authenticate without an outbound
+    call to Plex or Seerr.  ``GET /actions`` writes it after validating for
+    real; the fast paths only ever read it.
+
+    Rows store a SHA-256 **fingerprint**, never the token itself, so the table
+    cannot hand anyone a working Plex credential even if the database file
+    leaks.  There is deliberately no expiry: an entry stays valid until that
+    user's next ``/actions`` call overwrites it, or the user is deleted, which
+    cascades.
+    """
+
+    __tablename__ = "plex_token_sessions"
+
+    token_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class ActivityLog(Base):
     """Append-only audit trail of searches and grabs.
 

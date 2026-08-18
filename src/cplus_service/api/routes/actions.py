@@ -18,10 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth.identity import authenticate_plex_token
-from ...auth.plex_cache import CachedUser
+from ...auth.plex_cache import remember_token
 from ...db.models import Action, Permission, User
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
+from ..deps import DbDep, PlexTokenDep, SeerrDep
 from ..schemas import ActionOut, ActionsResponse
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,6 @@ async def permitted_actions(session: AsyncSession, user: User) -> list[Action]:
 
 @router.get("/actions", response_model=ActionsResponse)
 async def get_actions(
-    state: StateDep,
     db: DbDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
@@ -68,14 +67,7 @@ async def get_actions(
 
     actions = await permitted_actions(db, user)
 
-    await state.plex_cache.put(
-        plex_token,
-        CachedUser(
-            user_id=user.id,
-            seerr_user_id=user.seerr_user_id,
-            plex_username=user.plex_username,
-        ),
-    )
+    await remember_token(db, plex_token, user)
 
     return ActionsResponse(
         actions=[ActionOut(id=action.id, name=action.name) for action in actions]

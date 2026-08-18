@@ -90,7 +90,7 @@ so upgrading is pull-and-restart.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 339 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 342 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -121,7 +121,7 @@ src/cplus_service/
   quality/engine.py     recommend(candidates, profile) -> ParsedRelease | None
   prowlarr/client.py    async Prowlarr API wrapper
   seerr/client.py       async Seerr API wrapper (auth + request creation only)
-  auth/plex_cache.py    tvOS Plex-token -> user cache
+  auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
   search/stream.py      two-phase concurrent search, NDJSON phases
@@ -321,13 +321,15 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `plex_client_identifier` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
+| `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
+| `admin_sessions` | opaque browser session tokens for the web UI |
 
 `PRAGMA foreign_keys=ON` is set per connection — SQLite defaults it *off*, which
 would silently ignore every `ON DELETE` clause. Deleting a user cascades to
@@ -352,28 +354,33 @@ No login step, no session token. The header is `X-Plex-Token`.
 
 1. `GET /actions` on app launch (and on reconnect in settings) validates the
    token against Seerr's `/api/v1/auth/plex`, upserts the local `users` row, and
-   caches the token → user mapping.
-2. `/search` and `/grab` authenticate **against that cache only** — no outbound
-   Plex or Seerr call, which is what keeps them fast.
-3. A cache miss (server restarted) is a `401`; the client's recovery is to call
-   `/actions` again, which happens on next launch anyway.
+   records the token → user mapping in `plex_token_sessions`.
+2. `/search` and `/grab` authenticate **against that mapping only** — no
+   outbound Plex or Seerr call, which is what keeps them fast.
+3. An unknown token is a `401`; the client's recovery is to call `/actions`,
+   which it does on launch anyway.
 4. `/request` is the exception: it always validates live, because it needs a
    Seerr session to file the request as the user.
 
-The cache has **no TTL and no persistence**, deliberately. An entry is valid
-until that user's next `/actions` call overwrites it. Tokens are keyed by
-SHA-256, never stored raw.
+The mapping is **persisted and survives a restart**, so restarting the service
+no longer 401s every client until its next launch. Only a SHA-256 fingerprint
+is stored, never the token itself, so the table cannot yield a working Plex
+credential even if the database file leaks.
 
-Revoking a user's permissions therefore takes effect at their next `/actions`
-call, not immediately. That is the accepted tradeoff for cache-only search.
+There is **no expiry**: an entry is valid until that user's next `/actions`
+call overwrites it, or until the user is deleted, which cascades. The tradeoff
+is that a Plex token revoked upstream keeps working on `/search` and `/grab`
+until one of those happens — removing the user in the admin UI is the immediate
+lever. Revoking a single *permission* likewise takes effect at their next
+`/actions` call, not at once.
 
 ### Webui — Plex OAuth PIN flow + browser session
 
 1. The PIN flow against plex.tv is **proxied server-side** (`POST /admin/plex/pin`,
    then polling `GET /admin/plex/pin/{id}`). The browser only opens the Plex
    popup and polls one URL — the Plex token never reaches page JavaScript.
-2. `POST /auth` accepts `{plex_token, seerr_url?}` for a client that already
-   holds a token. The web UI does not use it; see *Known overlaps* below.
+2. There is exactly one admin sign-in path; the token is validated inside the
+   poll handler.
 3. The token is validated against Seerr, and Seerr's **ADMIN permission bit**
    (`permissions & 2`) is checked — not `seerr_user_id == 1`, since Seerr grants
    admin through the bitmask and the owner is not guaranteed to be user 1.
@@ -416,10 +423,6 @@ the body rejects unknown fields.
 
 Because the grab body is self-contained, the server keeps **no state between
 search and grab** — a restart between the two is harmless.
-
-### Webui
-
-`POST /auth`, `POST /auth/logout`.
 
 ### Admin
 
@@ -549,26 +552,12 @@ instead of a broken profile.
 
 ---
 
-## Known overlaps between build stages
+## Cross-stage notes
 
-Flagged rather than silently reconciled. None of these are bugs; each is a place
-where a later stage's needs diverged from an earlier stage's guess.
+Three places where a later stage's needs diverged from an earlier stage's
+guess. The first two were collapsed; the rest are deliberate.
 
-**1. Two admin sign-in paths.** Stage 2 built `POST /auth` for the web UI, on
-the assumption the browser would run the PIN flow and hand over a token. Stage 3
-proxies the PIN flow server-side instead, so the browser never holds a token and
-nothing calls `POST /auth`. It still works and is still tested — it is a usable
-API for a client that already has a Plex token — but the admin-bit check now
-exists in two places (`api/routes/auth.py` and `api/routes/admin/login.py`).
-Worth collapsing if `POST /auth` has no consumer.
-
-**2. `deps.get_admin` / `AdminDep` is unused.** Stage 2 wrote it expecting stage
-3 to wire it into the admin routes. The web UI needs to *redirect* a signed-out
-browser rather than answer 401 JSON, so stage 3 added
-`api/routes/admin/deps.require_admin_page` instead. `AdminDep` is now dead code,
-kept only because deleting a stage-2 export was not in scope.
-
-**3. Admin verbs drifted from stage 2's stubs.** The stubs named
+**Admin verbs drifted from stage 2's stubs.** The stubs named
 `PUT /admin/quality-profiles/{id}`, `DELETE /admin/actions/{id}` and
 `PUT /admin/users/{id}/permissions`. HTML forms can only issue GET and POST, so
 those became `POST .../{id}` and `POST .../{id}/delete`. Stage 2's
@@ -577,13 +566,26 @@ rendered on `GET /admin/users` instead — and stage 3 added routes the stubs di
 not anticipate (`/quality-profiles/new`, `/quality-profiles/rows`,
 `/users/{id}/delete`, and the login/PIN routes).
 
-**4. Requests are logged as `grab` events.** `activity_log.event_type` is the
+**Requests are logged as `grab` events.** `activity_log.event_type` is the
 stage-1 enum `search | grab`, and a request is neither a search nor a Prowlarr
 grab. It is stored as `grab` with `detail.kind == "request"`, and the activity
 page renders it as its own badge. Widening the enum would be cleaner but is a
 schema change nobody asked for.
 
-**5. Permission changes are not immediate.** Revoking an action takes effect at
+**Permission changes are not immediate.** Revoking an action takes effect at
 the user's next `/actions` call, because `/search` and `/grab` authenticate from
-the in-memory Plex-token cache. This is the stage-2 design tradeoff, stated in
-the UI rather than papered over. Removing the user entirely *is* immediate.
+the stored token mapping rather than re-checking Seerr. The UI says so rather
+than papering over it. Removing the user entirely *is* immediate — the delete
+cascades to their token mappings and browser sessions.
+
+### Resolved
+
+*Two admin sign-in paths.* Stage 2's `POST /auth` assumed the browser would run
+the PIN flow and hand over a token; stage 3 proxies the flow server-side, so
+nothing called it. It has been removed along with `POST /auth/logout`
+(superseded by `POST /admin/logout`), leaving one sign-in path and one
+admin-bit check.
+
+*Dead `deps.get_admin` / `AdminDep`.* Stage 2 wrote it for stage 3 to wire in,
+but a browser needs a redirect rather than 401 JSON. Removed in favour of
+`api/routes/admin/deps.require_admin_page`.

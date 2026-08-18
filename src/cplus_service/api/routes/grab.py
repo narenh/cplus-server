@@ -49,7 +49,7 @@ async def grab(
 
     Authenticated from the Plex-token cache only.
     """
-    action = await permitted_action(db, user.user_id, body.action_id)
+    action = await permitted_action(db, user.id, body.action_id)
 
     if action.is_system:
         raise HTTPException(
@@ -69,10 +69,10 @@ async def grab(
             download_client_id=action.download_client_id,
         )
     except ProwlarrError as exc:
-        logger.warning("grab failed for user=%s guid=%s: %s", user.user_id, body.release_guid, exc)
+        logger.warning("grab failed for user=%s guid=%s: %s", user.id, body.release_guid, exc)
         db.add(
             ActivityLog(
-                user_id=user.user_id,
+                user_id=user.id,
                 event_type=EventType.GRAB,
                 detail={
                     "action_id": action.id,
@@ -91,7 +91,7 @@ async def grab(
         )
 
     record = Grab(
-        user_id=user.user_id,
+        user_id=user.id,
         action_id=action.id,
         release_title=body.release_title,
         release_guid=body.release_guid,
@@ -103,7 +103,7 @@ async def grab(
 
     db.add(
         ActivityLog(
-            user_id=user.user_id,
+            user_id=user.id,
             event_type=EventType.GRAB,
             detail={
                 "action_id": action.id,

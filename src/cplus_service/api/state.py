@@ -11,8 +11,6 @@ from dataclasses import dataclass, field
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from ..auth.plex_cache import PlexTokenCache
-
 
 @dataclass
 class AppState:
@@ -30,8 +28,6 @@ class AppState:
     client's jar sends them. Keeping Seerr on its own client means a user's
     Seerr session can never be attached to an outbound Prowlarr call.
     """
-
-    plex_cache: PlexTokenCache
 
     pending_plex_logins: dict[int, str] = field(default_factory=dict)
     """In-flight webui sign-ins: plex.tv PIN id -> the Seerr URL to validate

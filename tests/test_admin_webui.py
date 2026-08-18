@@ -714,24 +714,22 @@ async def test_granting_twice_is_idempotent(
     assert len((await db.execute(select(Permission))).scalars().all()) == 1
 
 
-async def test_removing_a_user_revokes_cached_access_immediately(
-    app: FastAPI, client: httpx.AsyncClient, db: AsyncSession
+async def test_removing_a_user_revokes_stored_access_immediately(
+    client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
-    from cplus_service.auth.plex_cache import CachedUser
+    from cplus_service.auth.plex_cache import count_tokens, remember_token
 
     user = await signed_in(client, db)
-    await app.state.cplus.plex_cache.put(
-        "their-token",
-        CachedUser(user_id=user.id, seerr_user_id=1, plex_username="owner"),
-    )
-    assert await app.state.cplus.plex_cache.size() == 1
+    await remember_token(db, "their-token", user)
+    await db.commit()
+    assert await count_tokens(db) == 1
 
     await client.post(f"/admin/users/{user.id}/delete", follow_redirects=False)
 
-    # Cached tokens live outside the transaction, so they need explicit eviction
-    # or the user could keep searching until the next restart.
-    assert await app.state.cplus.plex_cache.size() == 0
+    # The FK cascade takes the stored Plex-token mapping with the user, so their
+    # access ends at once rather than at their next launch.
     db.expunge_all()
+    assert await count_tokens(db) == 0
     assert await db.get(User, user.id) is None
 
 

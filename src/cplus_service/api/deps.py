@@ -1,16 +1,14 @@
 """Shared request dependencies.
 
-The two auth dependencies here are the enforcement points for the split
-described in :mod:`cplus_service.auth.plex_cache`:
+``get_cached_user`` is the enforcement point for the split described in
+:mod:`cplus_service.auth.plex_cache`: it resolves a caller from the stored
+Plex-token mapping without any outbound call, and backs ``/search`` and
+``/grab``. ``/actions`` and ``/request`` validate against Seerr directly
+instead, so they do not use it.
 
-``cached_user``
-    Cache-only. Used by ``/search`` and ``/grab``, which must never make an
-    outbound call to Plex or Seerr.
-
-``live_user``
-    Always validates against Seerr. Used by ``/actions`` (which is the
-    checkpoint that populates the cache) and by ``/request`` (which needs a
-    Seerr session to act as the user).
+Admin routes are gated by
+:func:`cplus_service.api.routes.admin.deps.require_admin_page`, which redirects
+a signed-out browser rather than answering 401 JSON.
 """
 
 from __future__ import annotations
@@ -18,11 +16,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.plex_cache import CachedUser
-from ..auth.sessions import SESSION_COOKIE_NAME, resolve_session
+from ..auth.plex_cache import resolve_token
 from ..db.models import Config, User
 from ..db.session import get_config
 from ..prowlarr.client import ProwlarrClient
@@ -97,38 +94,21 @@ async def get_plex_token(
 PlexTokenDep = Annotated[str, Depends(get_plex_token)]
 
 
-async def get_cached_user(state: StateDep, plex_token: PlexTokenDep) -> CachedUser:
-    """Resolve the caller from the Plex-token cache alone.
+async def get_cached_user(db: DbDep, plex_token: PlexTokenDep) -> User:
+    """Resolve the caller from the stored Plex-token mapping alone.
 
-    A miss is a 401 with a body telling the client what to do about it: call
-    ``/actions`` again. That happens on the next app launch regardless, so this
-    path is mostly hit when the server restarted mid-session.
+    No outbound call to Plex or Seerr — that is the whole point. A miss means
+    this token has never been through ``/actions``, so the 401 says exactly
+    that. The mapping is persisted, so a restart no longer causes one.
     """
-    cached = await state.plex_cache.get(plex_token)
-    if cached is None:
+    user = await resolve_token(db, plex_token)
+    if user is None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Unrecognised Plex token. Call GET /actions to authenticate first.",
         )
-    return cached
-
-
-CachedUserDep = Annotated[CachedUser, Depends(get_cached_user)]
-
-
-async def get_admin(
-    db: DbDep,
-    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
-) -> User:
-    """Resolve the admin behind a webui session cookie.
-
-    Stage 3's admin routes depend on this; the stubs do not, so that the route
-    structure is browsable before the webui exists.
-    """
-    user = await resolve_session(db, session_cookie)
-    if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
     return user
 
 
-AdminDep = Annotated[User, Depends(get_admin)]
+CachedUserDep = Annotated[User, Depends(get_cached_user)]
+

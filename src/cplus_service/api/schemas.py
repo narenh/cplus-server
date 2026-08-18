@@ -91,27 +91,3 @@ class RequestResponse(BaseModel):
     success: bool
     message: str | None = None
     request_id: int | None = None
-
-
-class AuthRequest(BaseModel):
-    """``POST /auth`` — the webui flow only.
-
-    The browser obtains ``plex_token`` through the Plex OAuth PIN flow against
-    plex.tv; this service is not involved in that exchange.
-
-    ``seerr_url`` is accepted so first-run bootstrap works: before any config
-    exists there is no admin session, and without an admin session there is no
-    way to set the URL. When supplied it is validated by being used, then
-    persisted.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    plex_token: str = Field(min_length=1)
-    seerr_url: str | None = None
-
-
-class AuthResponse(BaseModel):
-    seerr_user_id: int
-    username: str
-    is_admin: bool

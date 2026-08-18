@@ -16,13 +16,13 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
 from ....auth.sessions import destroy_sessions_for_user
 from ....db.models import Action, Permission, User
 from ....web import templates
-from ...deps import DbDep, StateDep
+from ...deps import DbDep
 from .deps import AdminPageDep
 
 logger = logging.getLogger(__name__)
@@ -100,21 +100,17 @@ async def toggle_permission(
 
 
 @router.post("/{user_id}/delete")
-async def delete_user(
-    state: StateDep, db: DbDep, admin: AdminPageDep, user_id: int
-) -> Response:
+async def delete_user(db: DbDep, admin: AdminPageDep, user_id: int) -> Response:
     """Remove a user, revoking their access immediately rather than at next launch."""
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such user")
 
+    # Deleting the user cascades to their stored Plex-token mappings and to
+    # their browser sessions, so access ends immediately rather than at the
+    # user's next launch.
     await destroy_sessions_for_user(db, user_id)
     await db.delete(user)
     await db.flush()
-    # Cached Plex tokens live in memory, outside the transaction, so they have
-    # to be dropped explicitly or the user could keep searching until restart.
-    await state.plex_cache.forget_user(user_id)
-
-    from fastapi.responses import RedirectResponse
 
     return RedirectResponse("/admin/users", status_code=status.HTTP_303_SEE_OTHER)

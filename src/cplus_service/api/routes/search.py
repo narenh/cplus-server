@@ -78,13 +78,13 @@ async def search(
             "Only type=movie is supported; this service is movies-only outside of /request.",
         )
 
-    actions = await scorable_actions(db, user.user_id)
+    actions = await scorable_actions(db, user.id)
 
     # Logged up front rather than after the stream drains, so a client that
     # disconnects mid-search still leaves an audit trail.
     db.add(
         ActivityLog(
-            user_id=user.user_id,
+            user_id=user.id,
             event_type=EventType.SEARCH,
             detail={
                 "imdb_id": imdb_id,
