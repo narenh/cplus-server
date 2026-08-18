@@ -45,6 +45,31 @@ That is the whole deployment. Everything else — Seerr URL, Prowlarr connection
 quality profiles, actions, permissions — is configured in the web UI, not in
 environment variables or config files.
 
+### Deploying with Coolify
+
+1. **+ New Resource → Docker Compose**, pointed at this repository, branch
+   `master`, compose file `docker-compose.yml`.
+2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS` and
+   handles the proxy and TLS certificate; nothing else needs configuring.
+3. Deploy.
+
+**Check the volume before you rely on it.** All state — config, users, quality
+profiles, actions, permissions, grabs, sessions — is the single SQLite file at
+`/data/cplus.db`. The compose file declares `cplus-data:/data` as a named
+volume so redeploys keep it. If that ever becomes a non-persistent path, every
+redeploy silently resets the service to first-run, and the failure looks like
+"it asked me to sign in again" rather than like data loss. To back the service
+up, copy that one file.
+
+Migrations run on every container start, so upgrading is redeploy-and-done.
+
+The app runs behind Coolify's proxy with `proxy_headers` enabled, so it sees
+the original scheme and marks the admin session cookie `Secure` when you are on
+HTTPS — and leaves it unset for local plain-HTTP development, so both work
+without a flag to set. If you ever expose the container's port directly rather
+than through a proxy, set `CPLUS_FORWARDED_ALLOW_IPS` to the proxy address
+instead of leaving it at the default `*`.
+
 ### First-run setup
 
 1. Open `http://localhost:8080`. You land on the sign-in page.
@@ -75,6 +100,7 @@ Only the handful that must exist before the UI does:
 | `CPLUS_HOST` | `0.0.0.0` | Bind address |
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
+| `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
 
 There is no secret key to set. Admin sessions are opaque random tokens stored in
 the database, so there is nothing to sign, rotate or leak — revoking a session
@@ -90,7 +116,7 @@ so upgrading is pull-and-restart.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 342 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 344 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db

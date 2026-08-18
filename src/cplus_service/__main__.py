@@ -23,6 +23,17 @@ def main() -> None:
         host=os.environ.get("CPLUS_HOST", "0.0.0.0"),  # noqa: S104
         port=int(os.environ.get("CPLUS_PORT", "8080")),
         log_level=os.environ.get("CPLUS_LOG_LEVEL", "info"),
+        # This service is meant to run behind a reverse proxy (Coolify's, a
+        # bare Traefik, nginx, ...) which terminates TLS and forwards plain
+        # HTTP. Trusting the forwarded headers is what lets the app know the
+        # original request was HTTPS, which in turn is what marks the admin
+        # session cookie Secure.
+        #
+        # Trusting every peer is safe *because* of that topology: the container
+        # publishes to the proxy, not to the internet. If you ever expose this
+        # port directly, set CPLUS_FORWARDED_ALLOW_IPS to the proxy's address.
+        proxy_headers=True,
+        forwarded_allow_ips=os.environ.get("CPLUS_FORWARDED_ALLOW_IPS", "*"),
     )
 
 

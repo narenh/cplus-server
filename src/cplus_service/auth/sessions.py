@@ -13,6 +13,7 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from fastapi import Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,26 @@ SESSION_TOKEN_BYTES = 32
 #: server to the browser, and an expired row would otherwise stay valid forever
 #: to anyone who kept the token.
 SESSION_TTL = timedelta(days=30)
+
+
+def set_session_cookie(response: Response, request: Request, token: str) -> None:
+    """Attach the session cookie, marking it ``Secure`` when the request was HTTPS.
+
+    Detected per request rather than configured, so there is no flag to get
+    wrong: deployed behind a TLS-terminating proxy the cookie is Secure, and a
+    local ``python -m cplus_service`` over plain HTTP still works. This relies
+    on uvicorn running with ``proxy_headers`` so ``request.url.scheme`` reflects
+    ``X-Forwarded-Proto`` rather than the proxy's plaintext hop.
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        max_age=int(SESSION_TTL.total_seconds()),
+        path="/",
+    )
 
 
 def _is_expired(record: AdminSession, *, now: datetime) -> bool:

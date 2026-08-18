@@ -816,3 +816,59 @@ async def test_the_root_path_goes_to_the_admin_ui(client: httpx.AsyncClient) -> 
     response = await client.get("/", follow_redirects=False)
     assert response.status_code == 307
     assert response.headers["location"] == "/admin/config"
+
+
+# --------------------------------------------------------------------------- #
+# Behind a TLS-terminating proxy
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_the_session_cookie_is_secure_over_https(app: FastAPI) -> None:
+    # Coolify terminates TLS and forwards plain HTTP, so the Secure flag is
+    # decided from the forwarded scheme rather than from a setting.
+    respx.post(f"{PLEX_API}/pins").mock(
+        return_value=httpx.Response(201, json={"id": 31, "code": "CODE"})
+    )
+    respx.get(f"{PLEX_API}/pins/31").mock(
+        return_value=httpx.Response(200, json={"authToken": "tok"})
+    )
+    respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(
+            200, json={"id": 1, "permissions": 2, "plexUsername": "owner"}
+        )
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="https://test") as tls:
+        await tls.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+        response = await tls.get("/admin/plex/pin/31")
+
+    assert response.status_code == 200
+    assert "Secure" in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]
+
+
+@respx.mock
+async def test_the_session_cookie_is_not_secure_over_plain_http(
+    client: httpx.AsyncClient, configured: Config
+) -> None:
+    # Otherwise local development over http:// could never stay signed in.
+    respx.post(f"{PLEX_API}/pins").mock(
+        return_value=httpx.Response(201, json={"id": 32, "code": "CODE"})
+    )
+    respx.get(f"{PLEX_API}/pins/32").mock(
+        return_value=httpx.Response(200, json={"authToken": "tok"})
+    )
+    respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(
+            200, json={"id": 1, "permissions": 2, "plexUsername": "owner"}
+        )
+    )
+
+    await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+    response = await client.get("/admin/plex/pin/32")
+
+    assert response.status_code == 200
+    assert "Secure" not in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]

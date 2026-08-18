@@ -26,9 +26,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from ....auth.identity import upsert_user
 from ....auth.sessions import (
     SESSION_COOKIE_NAME,
-    SESSION_TTL,
     create_session,
     destroy_session,
+    set_session_cookie,
 )
 from ....db.session import get_config
 from ....plex.client import PlexError, PlexPinClient
@@ -100,7 +100,9 @@ async def start_pin(
 
 
 @router.get("/plex/pin/{pin_id}")
-async def poll_pin(pin_id: int, state: StateDep, db: DbDep) -> JSONResponse:
+async def poll_pin(
+    request: Request, pin_id: int, state: StateDep, db: DbDep
+) -> JSONResponse:
     """Poll a PIN; on success, sign the admin in and set the session cookie."""
     seerr_url = state.pending_plex_logins.get(pin_id)
     if seerr_url is None:
@@ -149,12 +151,5 @@ async def poll_pin(pin_id: int, state: StateDep, db: DbDep) -> JSONResponse:
 
     token = await create_session(db, user.id)
     response = JSONResponse({"claimed": True, "redirect": "/admin/config"})
-    response.set_cookie(
-        SESSION_COOKIE_NAME,
-        token,
-        httponly=True,
-        samesite="lax",
-        max_age=int(SESSION_TTL.total_seconds()),
-        path="/",
-    )
+    set_session_cookie(response, request, token)
     return response
