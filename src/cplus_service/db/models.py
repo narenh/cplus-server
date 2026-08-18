@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -101,18 +102,33 @@ class Action(Base):
 
     Maps a Prowlarr download client to a quality profile.  Users are granted a
     subset of actions via :class:`Permission`.
+
+    The built-in Request action is the one exception: it is seeded with
+    ``is_system=True`` and carries neither a download client nor a quality
+    profile, because it never touches Prowlarr.  A system action cannot be
+    edited or deleted, which is what makes its name a stable identifier — the
+    tvOS client routes on ``name == "Request"``.  The CHECK constraint keeps
+    the nullable columns from being abused: only a system action may omit them.
     """
 
     __tablename__ = "actions"
+    __table_args__ = (
+        CheckConstraint(
+            "is_system = 1 OR (download_client_id IS NOT NULL"
+            " AND quality_profile_id IS NOT NULL)",
+            name="ck_action_targets_required_unless_system",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
-    download_client_id: Mapped[int] = mapped_column(Integer)
-    quality_profile_id: Mapped[int] = mapped_column(
+    download_client_id: Mapped[int | None] = mapped_column(Integer)
+    quality_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("quality_profiles.id", ondelete="RESTRICT")
     )
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
-    quality_profile: Mapped[QualityProfile] = relationship(
+    quality_profile: Mapped[QualityProfile | None] = relationship(
         back_populates="actions", lazy="selectin"
     )
     users: Mapped[list[User]] = relationship(secondary="permissions", back_populates="actions")
@@ -150,13 +166,37 @@ class Grab(Base):
     # Nullable so deleting an action does not destroy the grab history that
     # referenced it.
     action_id: Mapped[int | None] = mapped_column(ForeignKey("actions.id", ondelete="SET NULL"))
-    release_title: Mapped[str] = mapped_column(String(1024))
+    # Nullable because the grab request carries only the guid, action and
+    # indexer; the title and size are enriched from the search-result cache and
+    # a cache miss must degrade the history entry rather than fail the grab.
+    release_title: Mapped[str | None] = mapped_column(String(1024))
     release_guid: Mapped[str] = mapped_column(String(1024))
     indexer_id: Mapped[int | None] = mapped_column(Integer)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+
+class AdminSession(Base):
+    """A browser session for the admin webui.
+
+    Only the webui uses sessions.  tvOS has no session concept at all — it
+    presents its Plex token on every request (see
+    :mod:`cplus_service.auth.plex_cache`).
+
+    The cookie holds an opaque random token rather than signed claims, so there
+    is no signing secret to manage and revocation is a row delete.  Sessions are
+    persisted rather than held in memory so a restart does not log the admin out
+    mid-configuration.
+    """
+
+    __tablename__ = "admin_sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class ActivityLog(Base):

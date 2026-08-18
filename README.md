@@ -17,7 +17,7 @@ ambiguity to resolve.
 
 ## Build status
 
-This repository currently contains **stage 1 of 3**.
+This repository currently contains **stages 1 and 2 of 3**.
 
 | | Component | Status |
 |---|---|---|
@@ -25,11 +25,11 @@ This repository currently contains **stage 1 of 3**.
 | 1 | Release parser | ✅ done |
 | 1 | Prowlarr client wrapper | ✅ done |
 | 1 | Quality profile rule engine | ✅ done |
-| 2 | Plex/Seerr auth, HTTP endpoints, Request action | not started |
-| 3 | Streaming, admin web UI | not started |
-
-Nothing in stage 1 needs a running HTTP server. Everything is verifiable through
-`pytest` and `scripts/demo.py`.
+| 2 | Seerr client + both auth flows | ✅ done |
+| 2 | `/actions`, `/search`, `/grab`, `/request` | ✅ done |
+| 2 | Built-in Request action | ✅ done |
+| 3 | Admin web UI | routes stubbed (501) |
+| 3 | Docker packaging | not started |
 
 ---
 
@@ -39,25 +39,27 @@ Nothing in stage 1 needs a running HTTP server. Everything is verifiable through
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 176 tests, no network or Prowlarr needed
-python scripts/demo.py      # parse a canned release set and recommend per profile
+pytest                      # 269 tests; no network, Prowlarr or Seerr needed
 ruff check .
 ```
 
-Against a real Prowlarr:
-
-```bash
-export PROWLARR_URL=http://prowlarr.local:9696
-export PROWLARR_API_KEY=...
-export PREFERRED_INDEXER_ID=3        # optional; unset means "All indexers"
-python scripts/demo.py tt1160419
-```
-
-Create the database:
+Run the service:
 
 ```bash
 export CPLUS_DB_PATH=./cplus.db      # optional; defaults to ./cplus.db
 alembic upgrade head
+python -m cplus_service              # CPLUS_HOST / CPLUS_PORT to override
+```
+
+Exercise the stage-1 modules standalone, with no server:
+
+```bash
+python scripts/demo.py               # canned release set, recommend per profile
+
+export PROWLARR_URL=http://prowlarr.local:9696
+export PROWLARR_API_KEY=...
+export PREFERRED_INDEXER_ID=3        # optional; unset means "All indexers"
+python scripts/demo.py tt1160419     # against a real Prowlarr
 ```
 
 ---
@@ -66,17 +68,25 @@ alembic upgrade head
 
 ```
 src/cplus_service/
-  release/models.py    ParsedTitle / ParsedRelease — the stable client contract
-  release/parser.py    title -> structured metadata; drops full discs
-  quality/models.py    quality profile rule schema (pydantic, discriminated union)
-  quality/engine.py    recommend(candidates, profile) -> ParsedRelease | None
-  prowlarr/client.py   async Prowlarr API wrapper
-  prowlarr/models.py   Indexer / DownloadClient / SystemStatus / GrabResult
-  db/models.py         SQLAlchemy 2.0 schema
-  db/session.py        async engine, session factory, config singleton accessor
-migrations/            Alembic
-scripts/demo.py        offline + live REPL-style driver
-tests/                 unit tests for all of the above
+  release/models.py     ParsedTitle / ParsedRelease — the stable client contract
+  release/parser.py     title -> structured metadata; drops full discs
+  quality/models.py     quality profile rule schema (pydantic, discriminated union)
+  quality/engine.py     recommend(candidates, profile) -> ParsedRelease | None
+  prowlarr/client.py    async Prowlarr API wrapper
+  seerr/client.py       async Seerr API wrapper (auth + request creation only)
+  auth/plex_cache.py    tvOS Plex-token -> user cache
+  auth/sessions.py      webui browser sessions
+  auth/identity.py      Seerr user -> local user upsert
+  search/stream.py      two-phase concurrent search, NDJSON phases
+  search/release_cache.py  guid -> title/size, for grab history enrichment
+  api/app.py            FastAPI factory + lifespan
+  api/deps.py           auth/config/client dependencies
+  api/routes/           actions, search, grab, request, auth, admin (stubs)
+  db/models.py          SQLAlchemy 2.0 schema
+  bootstrap.py          seeds the built-in Request action
+migrations/             Alembic
+scripts/demo.py         offline + live REPL-style driver
+tests/                  unit + ASGI end-to-end tests
 ```
 
 ---
@@ -280,16 +290,158 @@ other.
 
 ---
 
-## For stage 2
+## Auth
 
-The contract above is stable — stage 2 and the tvOS client both depend on it.
-What stage 2 builds on top:
+Two flows that must not be conflated. tvOS already holds a user-scoped Plex
+token; a browser does not.
 
-* Plex auth validated against the admin's Seerr instance.
-* Search endpoint: fetch via `ProwlarrClient.search_movie`, apply
-  `preferred_indexer_candidates`, then call `recommend` once per action the
-  caller is permitted to use. Return the flat tagged list plus the per-action
-  recommendation — no sections, no categories.
-* Grab endpoint: check `permissions`, call `ProwlarrClient.grab` with the
-  action's `download_client_id`, write `grabs` + `activity_log`.
-* The built-in Request action (the one exception to movies-only).
+### tvOS — Plex token on every request
+
+No login step, no session token. The header is `X-Plex-Token`.
+
+1. `GET /actions` on app launch (and on reconnect in settings) validates the
+   token against Seerr's `/api/v1/auth/plex`, upserts the local `users` row, and
+   caches the token → user mapping.
+2. `/search` and `/grab` authenticate **against that cache only** — no outbound
+   Plex or Seerr call, which is what keeps them fast.
+3. A cache miss (server restarted) is a `401`; the client's recovery is to call
+   `/actions` again, which happens on next launch anyway.
+4. `/request` is the exception: it always validates live, because it needs a
+   Seerr session to file the request as the user.
+
+The cache has **no TTL and no persistence**, deliberately. An entry is valid
+until that user's next `/actions` call overwrites it. Tokens are keyed by
+SHA-256, never stored raw.
+
+Revoking a user's permissions therefore takes effect at their next `/actions`
+call, not immediately. That is the accepted tradeoff for cache-only search.
+
+### Webui — Plex OAuth PIN flow + browser session
+
+1. The browser runs the standard Plex PIN flow against plex.tv. This service
+   takes no part in it and only ever sees the finished token.
+2. `POST /auth` with `{plex_token, seerr_url?}`.
+3. The token is validated against Seerr, and Seerr's **ADMIN permission bit**
+   (`permissions & 2`) is checked — not `seerr_user_id == 1`, since Seerr grants
+   admin through the bitmask and the owner is not guaranteed to be user 1.
+4. A non-admin is rejected outright: the webui has no non-admin use case.
+5. An admin gets an opaque session token in an httpOnly `cplus_session` cookie,
+   backed by the `admin_sessions` table.
+
+`seerr_url` is accepted in the body to make first-run bootstrap possible —
+setting it needs an admin session, and getting a session needs it. It is
+persisted only after it has been proven to work, so a typo cannot brick config.
+
+---
+
+## Endpoints
+
+### Client (tvOS)
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /actions` | live Seerr | The auth checkpoint. Returns `{id, name}` only |
+| `GET /search?imdb_id=&type=movie` | cache | NDJSON stream, see below |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id}` |
+| `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
+
+`/actions` returns just an id and a label — the client has no use for the
+download client or quality profile behind an action. It routes on the name:
+`"Request"` posts to `/request`, everything else to `/grab`. That is safe
+because the Request action is a **system action** and cannot be renamed or
+deleted.
+
+`POST /grab` carries `indexer_id` (which the client already received on the
+release) but not the title or size. Those are recovered server-side from the
+search cache purely to make the history readable; a cache miss degrades the
+`grabs` row rather than failing the grab.
+
+### Webui
+
+`POST /auth`, `POST /auth/logout`.
+
+### Admin
+
+`/admin/*` is stubbed at `501` — the URL space is settled so stage 3 fills in
+bodies rather than designing routes. `deps.get_admin` is written and tested,
+ready to be wired in.
+
+---
+
+## Streaming search
+
+Both Prowlarr calls are issued **concurrently**:
+
+1. scoped to `config.preferred_indexer_id` — **skipped entirely** when that is
+   null, since there is nothing distinct to fetch early;
+2. across all indexers.
+
+The response is NDJSON, one object per line:
+
+```
+{"phase":"preferred","releases":[…],"recommendations":{"1":"guid-a","2":null}}
+{"phase":"all","releases":[…],"recommendations":{"1":"guid-a","2":"guid-b"}}
+```
+
+**Client merge rule: apply the last line you received, wholesale.** Union the
+`releases` arrays by guid.
+
+That is the documented choice for the "re-send all vs. only the unresolved
+ones" question: the `all` line always carries a recommendation for **every**
+permitted action, so the client needs no key-level merging and behaves the same
+whether or not phase 1 ran. The re-sent values never contradict phase 1 —
+scoring goes through `preferred_indexer_candidates`, so a non-empty preferred
+subset keeps its answer and an empty one falls back to the full set.
+
+`releases` in the `all` line excludes anything already sent in `preferred`,
+though clients should tolerate duplicates by guid regardless.
+
+The `all` line is **always** sent — on zero results, and on Prowlarr failure —
+so the client can always leave its loading state. Since the response has already
+committed to `200` by then, a late failure appears in-band as an `error` field
+rather than as a status code. A failure of the *preferred* call alone degrades
+silently to a single phase, because the unfiltered search covers that indexer
+too.
+
+The built-in Request action is excluded from recommendations: it has no quality
+profile and never touches Prowlarr.
+
+---
+
+## Built-in Request action
+
+Seeded idempotently on startup, marked `is_system`, and carrying neither a
+download client nor a quality profile — a CHECK constraint allows those nulls
+only for a system action. Granted per user through the normal `permissions`
+table like any other action, but not editable or deletable.
+
+It is the one part of the service that is **not** movies-only, and the one that
+is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
+endpoint takes. The client sends the TMDB id straight from Plex metadata; the
+service never resolves IMDB → TMDB.
+
+`seasons` is required and non-empty for `type=tv`, rejected for `type=movie`,
+and passed through to Seerr verbatim. Season `0` is specials. We never
+substitute the literal `"all"`, which would silently drop them.
+
+No `grabs` row is written — nothing was grabbed. It is recorded in
+`activity_log` instead, with `detail.kind == "request"`; the `event_type` enum
+is `search | grab` per the stage-1 schema, so requests are logged as `grab` with
+that discriminator rather than widening the enum.
+
+---
+
+## Notes for stage 3
+
+* Admin routes are stubbed at `501` in `api/routes/admin.py`; wire
+  `deps.AdminDep` in as you implement each.
+* **Stage 3's admin UI must reserve the name `Request`** — the tvOS client
+  routes on it. `bootstrap.REQUEST_ACTION_NAME` is the constant to check
+  against, and system actions must be refused for edit and delete.
+* `auth.plex_cache.forget_user` and `auth.sessions.destroy_sessions_for_user`
+  exist so deleting a user can invalidate their access immediately rather than
+  at their next launch.
+* Seerr and Prowlarr use **separate** `httpx` clients (`state.http` vs
+  `state.seerr_http`) and `SeerrClient` builds requests without consulting the
+  cookie jar. Both guard against one user's Seerr session cookie being attached
+  to another user's request, or leaking to Prowlarr. Keep them separate.

@@ -1,11 +1,13 @@
 [project]
 name = "cplus-service"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-hostable service exposing a curated, permissioned subset of Prowlarr to Seerr users"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
     "greenlet>=3.1",
     "httpx>=0.28",
     "pydantic>=2.10",
@@ -18,6 +20,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
     "respx>=0.22",
+    "asgi-lifespan>=2.1",
     "ruff>=0.8",
 ]
 

@@ -3,6 +3,7 @@
 from .models import (
     Action,
     ActivityLog,
+    AdminSession,
     Base,
     Config,
     EventType,
@@ -23,6 +24,7 @@ from .session import (
 __all__ = [
     "Action",
     "ActivityLog",
+    "AdminSession",
     "Base",
     "Config",
     "EventType",

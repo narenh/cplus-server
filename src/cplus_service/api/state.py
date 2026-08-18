@@ -1,0 +1,36 @@
+"""Process-wide resources shared by every request.
+
+Lives apart from the application factory so dependencies can import it without
+importing the app, which would be circular (app -> routes -> deps -> app).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import httpx
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from ..auth.plex_cache import PlexTokenCache
+from ..search.release_cache import ReleaseCache
+
+
+@dataclass
+class AppState:
+    """Long-lived objects created once in the lifespan and hung off ``app.state``."""
+
+    engine: AsyncEngine
+    sessionmaker: async_sessionmaker[AsyncSession]
+    http: httpx.AsyncClient
+    """Shared outbound client for Prowlarr."""
+
+    seerr_http: httpx.AsyncClient
+    """Separate from :attr:`http` on purpose.
+
+    Seerr responses drop a ``connect.sid`` session cookie into whichever
+    client's jar sends them. Keeping Seerr on its own client means a user's
+    Seerr session can never be attached to an outbound Prowlarr call.
+    """
+
+    plex_cache: PlexTokenCache
+    release_cache: ReleaseCache
