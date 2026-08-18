@@ -261,7 +261,13 @@ async def test_grab_sends_the_release_to_the_actions_download_client(
 
     response = await client.post(
         "/grab",
-        json={"action_id": action.id, "release_guid": "guid-uhd", "indexer_id": 1},
+        json={
+            "action_id": action.id,
+            "release_guid": "guid-uhd",
+            "indexer_id": 1,
+            "release_title": WEB_2160["title"],
+            "size_bytes": 25 * GB,
+        },
         headers=plex_headers,
     )
 
@@ -275,11 +281,10 @@ async def test_grab_sends_the_release_to_the_actions_download_client(
 
 
 @respx.mock
-async def test_grab_enriches_the_history_row_from_the_search_cache(
+async def test_grab_records_the_release_fields_for_the_admin_history(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
-    mock_prowlarr_search([WEB_2160])
     respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
         return_value=httpx.Response(201, json={})
     )
@@ -288,23 +293,48 @@ async def test_grab_enriches_the_history_row_from_the_search_cache(
     user = (await db.execute(select(User))).scalar_one()
     action = await make_action(db, "Stream Now")
     await grant(db, user, action)
-    await client.get("/search", params={"imdb_id": "tt0111161"}, headers=plex_headers)
 
+    # No prior /search: the grab carries everything the history row needs, so
+    # the server holds no state between the two calls.
     await client.post(
         "/grab",
-        json={"action_id": action.id, "release_guid": "guid-uhd", "indexer_id": 1},
+        json={
+            "action_id": action.id,
+            "release_guid": "guid-uhd",
+            "indexer_id": 1,
+            "release_title": WEB_2160["title"],
+            "size_bytes": 25 * GB,
+        },
         headers=plex_headers,
     )
 
     record = (await db.execute(select(Grab))).scalar_one()
-    # The client never sent these; they came from the cache.
     assert record.release_title == WEB_2160["title"]
     assert record.size_bytes == 25 * GB
+    assert record.indexer_id == 1
     assert record.user_id == user.id
 
 
 @respx.mock
-async def test_a_cache_miss_degrades_the_history_but_still_grabs(
+async def test_grab_requires_a_release_title(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    for body in (
+        {"action_id": action.id, "release_guid": "g", "indexer_id": 1},
+        {"action_id": action.id, "release_guid": "g", "indexer_id": 1, "release_title": ""},
+    ):
+        response = await client.post("/grab", json=body, headers=plex_headers)
+        assert response.status_code == 422, body
+
+
+@respx.mock
+async def test_grab_accepts_a_release_whose_size_the_indexer_did_not_report(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
@@ -317,17 +347,45 @@ async def test_a_cache_miss_degrades_the_history_but_still_grabs(
     action = await make_action(db, "Stream Now")
     await grant(db, user, action)
 
-    # No /search first, so nothing is cached — as after a restart.
     response = await client.post(
         "/grab",
-        json={"action_id": action.id, "release_guid": "guid-unknown", "indexer_id": 3},
+        json={
+            "action_id": action.id,
+            "release_guid": "g",
+            "indexer_id": 3,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
 
     assert response.status_code == 200
     record = (await db.execute(select(Grab))).scalar_one()
-    assert record.release_title is None
-    assert record.indexer_id == 3
+    assert record.size_bytes is None
+    assert record.release_title == "Movie.2024.1080p.WEB-DL-GRP"
+
+
+@respx.mock
+async def test_grab_rejects_unknown_body_fields(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    response = await client.post(
+        "/grab",
+        json={
+            "action_id": action.id,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "t",
+            "downloadClientId": 99,  # not the client's to choose
+        },
+        headers=plex_headers,
+    )
+    assert response.status_code == 422
 
 
 @respx.mock
@@ -340,7 +398,12 @@ async def test_grab_refuses_an_action_the_user_lacks_permission_for(
 
     response = await client.post(
         "/grab",
-        json={"action_id": action.id, "release_guid": "g", "indexer_id": 1},
+        json={
+            "action_id": action.id,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
 
@@ -357,7 +420,12 @@ async def test_grab_refuses_an_unknown_action_the_same_way(
 
     response = await client.post(
         "/grab",
-        json={"action_id": 9999, "release_guid": "g", "indexer_id": 1},
+        json={
+            "action_id": 9999,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
     assert response.status_code == 403
@@ -378,7 +446,12 @@ async def test_grab_rejects_the_request_action(
 
     response = await client.post(
         "/grab",
-        json={"action_id": request_action.id, "release_guid": "g", "indexer_id": 1},
+        json={
+            "action_id": request_action.id,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
 
@@ -402,7 +475,12 @@ async def test_a_prowlarr_failure_is_reported_and_logged(
 
     response = await client.post(
         "/grab",
-        json={"action_id": action.id, "release_guid": "g", "indexer_id": 1},
+        json={
+            "action_id": action.id,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
 
@@ -423,7 +501,12 @@ async def test_grab_requires_a_cached_token(
 ) -> None:
     response = await client.post(
         "/grab",
-        json={"action_id": 1, "release_guid": "g", "indexer_id": 1},
+        json={
+            "action_id": 1,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
         headers=plex_headers,
     )
     assert response.status_code == 401

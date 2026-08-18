@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from ..auth.plex_cache import PlexTokenCache
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
-from ..search.release_cache import ReleaseCache
 from .routes import actions, admin, auth, grab, request, search
 from .state import AppState
 
@@ -58,7 +57,6 @@ def create_app(
             http=http,
             seerr_http=seerr_http,
             plex_cache=PlexTokenCache(),
-            release_cache=ReleaseCache(),
         )
 
         async with session_scope(sessionmaker) as session:

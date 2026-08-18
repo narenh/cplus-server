@@ -43,7 +43,6 @@ from ..prowlarr.client import ProwlarrClient, ProwlarrError
 from ..quality.engine import preferred_indexer_candidates, recommend
 from ..quality.models import QualityProfile
 from ..release.models import ParsedRelease
-from .release_cache import ReleaseCache
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +103,8 @@ async def stream_search(
     imdb_id: str,
     actions: Sequence[ScorableAction],
     preferred_indexer_id: int | None,
-    release_cache: ReleaseCache | None = None,
 ) -> AsyncIterator[SearchPhase]:
-    """Yield the search phases in the order they resolve.
-
-    ``release_cache`` is populated as results arrive so a later ``/grab`` can
-    recover the title and size for its history row.
-    """
+    """Yield the search phases in the order they resolve."""
     preferred_task: asyncio.Task[list[ParsedRelease]] | None = None
     if preferred_indexer_id is not None:
         preferred_task = asyncio.create_task(
@@ -128,8 +122,6 @@ async def stream_search(
             # and its results include this indexer's anyway.
             logger.warning("preferred-indexer search failed, falling back: %s", exc)
         else:
-            if release_cache is not None:
-                await release_cache.remember(preferred_releases)
             yield SearchPhase(
                 phase=PHASE_PREFERRED,
                 releases=preferred_releases,
@@ -150,9 +142,6 @@ async def stream_search(
         for release in all_releases
         if not release.guid or release.guid not in already_sent
     ]
-    if release_cache is not None:
-        await release_cache.remember(fresh)
-
     merged = [*preferred_releases, *fresh]
     effective = preferred_indexer_candidates(merged, preferred_indexer_id)
 

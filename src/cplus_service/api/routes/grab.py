@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.models import Action, ActivityLog, EventType, Grab, Permission
 from ...prowlarr.client import ProwlarrError
-from ..deps import CachedUserDep, DbDep, ProwlarrDep, StateDep
+from ..deps import CachedUserDep, DbDep, ProwlarrDep
 from ..schemas import GrabRequest, GrabResponse
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,6 @@ async def permitted_action(session: AsyncSession, user_id: int, action_id: int) 
 
 @router.post("/grab", response_model=GrabResponse)
 async def grab(
-    state: StateDep,
     db: DbDep,
     prowlarr: ProwlarrDep,
     user: CachedUserDep,
@@ -62,10 +61,6 @@ async def grab(
             status.HTTP_409_CONFLICT,
             f"Action '{action.name}' has no download client configured.",
         )
-
-    # Enrichment only: the title and size make the history readable, and their
-    # absence must not stop the grab.
-    cached = await state.release_cache.get(body.release_guid)
 
     try:
         await prowlarr.grab(
@@ -98,10 +93,10 @@ async def grab(
     record = Grab(
         user_id=user.user_id,
         action_id=action.id,
-        release_title=cached.title if cached else None,
+        release_title=body.release_title,
         release_guid=body.release_guid,
         indexer_id=body.indexer_id,
-        size_bytes=cached.size_bytes if cached else None,
+        size_bytes=body.size_bytes,
     )
     db.add(record)
     await db.flush()
@@ -114,9 +109,9 @@ async def grab(
                 "action_id": action.id,
                 "action_name": action.name,
                 "release_guid": body.release_guid,
-                "release_title": cached.title if cached else None,
+                "release_title": body.release_title,
                 "indexer_id": body.indexer_id,
-                "size_bytes": cached.size_bytes if cached else None,
+                "size_bytes": body.size_bytes,
                 "success": True,
             },
         )

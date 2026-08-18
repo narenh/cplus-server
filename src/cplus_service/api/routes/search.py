@@ -102,7 +102,6 @@ async def search(
             imdb_id=imdb_id,
             actions=actions,
             preferred_indexer_id=preferred_indexer_id,
-            release_cache=state.release_cache,
         ):
             yield phase.to_ndjson_line()
 

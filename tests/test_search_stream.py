@@ -19,7 +19,6 @@ from cplus_service.quality.models import (
     SizeCapGbRule,
 )
 from cplus_service.release.models import ParsedRelease, Resolution
-from cplus_service.search.release_cache import ReleaseCache
 from cplus_service.search.stream import ScorableAction, stream_search
 
 GB = 1024**3
@@ -342,28 +341,6 @@ async def test_streamed_releases_carry_the_parser_tags() -> None:
     assert "hdr_tags" in release_json
     assert "audio_tags" in release_json
     assert "category" not in release_json
-
-
-async def test_search_populates_the_release_cache_for_a_later_grab() -> None:
-    cache = ReleaseCache()
-    prowlarr = StubProwlarr(
-        preferred=[release("p", indexer_id=7)],
-        everything=[release("p", indexer_id=7), release("a", indexer_id=2)],
-    )
-
-    await collect(
-        prowlarr=prowlarr,
-        imdb_id="tt1",
-        actions=[action(1)],
-        preferred_indexer_id=7,
-        release_cache=cache,
-    )
-
-    assert await cache.size() == 2
-    cached = await cache.get("a")
-    assert cached is not None
-    assert cached.indexer_id == 2
-    assert cached.size_bytes == int(20 * GB)
 
 
 @pytest.mark.parametrize("preferred_id", [None, 7])

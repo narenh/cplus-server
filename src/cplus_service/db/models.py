@@ -166,10 +166,7 @@ class Grab(Base):
     # Nullable so deleting an action does not destroy the grab history that
     # referenced it.
     action_id: Mapped[int | None] = mapped_column(ForeignKey("actions.id", ondelete="SET NULL"))
-    # Nullable because the grab request carries only the guid, action and
-    # indexer; the title and size are enriched from the search-result cache and
-    # a cache miss must degrade the history entry rather than fail the grab.
-    release_title: Mapped[str | None] = mapped_column(String(1024))
+    release_title: Mapped[str] = mapped_column(String(1024))
     release_guid: Mapped[str] = mapped_column(String(1024))
     indexer_id: Mapped[int | None] = mapped_column(Integer)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)

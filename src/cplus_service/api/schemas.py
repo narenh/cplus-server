@@ -31,10 +31,14 @@ class ActionsResponse(BaseModel):
 class GrabRequest(BaseModel):
     """``POST /grab``.
 
-    ``indexer_id`` comes back from the release the client was already sent in
-    the search stream; Prowlarr needs it to identify the listing. The title and
-    size are *not* asked for — the server recovers those from its own search
-    cache so the client never has to echo data back.
+    Every release field here comes straight back from the search stream the
+    client was already sent. ``indexer_id`` is what Prowlarr needs to identify
+    the listing; ``release_title`` and ``size_bytes`` are recorded on the
+    ``grabs`` row so the admin UI's history is readable without having to
+    re-query an indexer for a listing that may no longer exist.
+
+    ``size_bytes`` is optional because not every indexer reports a size — an
+    unknown size is a real state, not a client omission.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -42,6 +46,8 @@ class GrabRequest(BaseModel):
     action_id: int
     release_guid: str = Field(min_length=1)
     indexer_id: int
+    release_title: str = Field(min_length=1)
+    size_bytes: int | None = Field(default=None, ge=0)
 
 
 class GrabResponse(BaseModel):

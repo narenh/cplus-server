@@ -12,7 +12,6 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ..auth.plex_cache import PlexTokenCache
-from ..search.release_cache import ReleaseCache
 
 
 @dataclass
@@ -33,4 +32,3 @@ class AppState:
     """
 
     plex_cache: PlexTokenCache
-    release_cache: ReleaseCache

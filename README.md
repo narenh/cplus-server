@@ -39,7 +39,7 @@ This repository currently contains **stages 1 and 2 of 3**.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 269 tests; no network, Prowlarr or Seerr needed
+pytest                      # 270 tests; no network, Prowlarr or Seerr needed
 ruff check .
 ```
 
@@ -78,7 +78,6 @@ src/cplus_service/
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
   search/stream.py      two-phase concurrent search, NDJSON phases
-  search/release_cache.py  guid -> title/size, for grab history enrichment
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
   api/routes/           actions, search, grab, request, auth, admin (stubs)
@@ -342,7 +341,7 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 |---|---|---|
 | `GET /actions` | live Seerr | The auth checkpoint. Returns `{id, name}` only |
 | `GET /search?imdb_id=&type=movie` | cache | NDJSON stream, see below |
-| `POST /grab` | cache | `{action_id, release_guid, indexer_id}` |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 
 `/actions` returns just an id and a label — the client has no use for the
@@ -351,10 +350,18 @@ download client or quality profile behind an action. It routes on the name:
 because the Request action is a **system action** and cannot be renamed or
 deleted.
 
-`POST /grab` carries `indexer_id` (which the client already received on the
-release) but not the title or size. Those are recovered server-side from the
-search cache purely to make the history readable; a cache miss degrades the
-`grabs` row rather than failing the grab.
+`POST /grab` echoes back the release fields the client already received in the
+search stream. `indexer_id` is what Prowlarr needs to identify the listing;
+`release_title` and `size_bytes` are stored on the `grabs` row so the admin
+UI's history is readable without re-querying an indexer for a listing that may
+no longer exist. `size_bytes` is optional, because not every indexer reports one
+— an unknown size is a real state rather than a client omission.
+
+The client never supplies `download_client_id`: that comes from the action, and
+the body rejects unknown fields.
+
+Because the grab body is self-contained, the server keeps **no state between
+search and grab** — a restart between the two is harmless.
 
 ### Webui
 
