@@ -41,6 +41,11 @@ All three build stages are complete.
 docker compose up -d          # then open http://localhost:8080
 ```
 
+Locally, `docker-compose.override.yml` is merged automatically and is what
+publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken. Coolify never
+applies that file — it invokes compose with an explicit `-f`, which disables
+the automatic override merge.
+
 That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
 quality profiles, actions, permissions — is configured in the web UI, not in
 environment variables or config files.
@@ -49,9 +54,17 @@ environment variables or config files.
 
 1. **+ New Resource → Docker Compose**, pointed at this repository, branch
    `master`, compose file `docker-compose.yml`.
-2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS` and
+2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS_8080` and
    handles the proxy and TLS certificate; nothing else needs configuring.
 3. Deploy.
+
+**Do not add a `ports:` mapping to `docker-compose.yml`.** Coolify's proxy
+reaches the container over the Docker network, so `expose: 8080` is all it
+needs. Publishing a host port there binds `0.0.0.0:8080` on the Coolify host,
+which fails the deploy outright if anything already holds that port — and if it
+succeeds, leaves the service reachable bypassing the proxy and its TLS. The
+port lives in the magic variable's *name* (`SERVICE_FQDN_<NAME>_<PORT>`), not
+in its value.
 
 **Check the volume before you rely on it.** All state — config, users, quality
 profiles, actions, permissions, grabs, sessions — is the single SQLite file at

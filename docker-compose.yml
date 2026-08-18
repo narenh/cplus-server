@@ -1,21 +1,24 @@
-# Deployment for Coolify (Docker Compose resource) and for a plain
-# `docker compose up` on any host.
+# Deployment for Coolify (Docker Compose resource).
 #
-# No `image:` line: nothing is published to a registry, so both Coolify and a
-# local compose build from this repo.
+# No `image:` line: nothing is published to a registry, so Coolify builds from
+# this repo.
+#
+# No `ports:` either — see the note on `expose` below. For running this on your
+# own machine, docker-compose.override.yml adds the host port binding; Compose
+# merges it automatically, and Coolify never sees it because Coolify invokes
+# compose with an explicit `-f docker-compose.yml`.
 
 services:
   cplus-service:
     build: .
-    container_name: cplus-service
     restart: unless-stopped
 
     environment:
-      # Coolify replaces this with the domain you assign to the service and
-      # wires up its proxy and TLS certificate. The `:8080` suffix tells it
-      # which container port to route to. Outside Coolify it is simply unset
-      # and unused — the app never reads it.
-      SERVICE_FQDN_CPLUS: /:8080
+      # Coolify replaces this with the domain you assign and wires up its proxy
+      # and TLS certificate. The port belongs in the variable NAME, not the
+      # value — `SERVICE_FQDN_<IDENTIFIER>_<PORT>` — and the value is the path
+      # to route. Outside Coolify it is simply unset; the app never reads it.
+      SERVICE_FQDN_CPLUS_8080: /
 
       # Everything else — Seerr URL, Prowlarr connection, actions, quality
       # profiles, permissions — is configured in the web UI after first
@@ -26,11 +29,13 @@ services:
       CPLUS_LOG_LEVEL: info
       TZ: UTC
 
-    # Published for a direct `docker compose up`. Coolify ignores this and
-    # routes through its own proxy using SERVICE_FQDN_CPLUS above, so the
-    # service does not need to be reachable on the host.
-    ports:
-      - "8080:8080"
+    # `expose`, not `ports`. Coolify's proxy reaches the container over the
+    # Docker network, so publishing a host port is both unnecessary and
+    # actively harmful: it binds 0.0.0.0:8080 on the host, which fails outright
+    # if anything else already holds that port, and otherwise leaves the
+    # service reachable bypassing the proxy and its TLS.
+    expose:
+      - "8080"
 
     volumes:
       # The whole of the service's state is the SQLite file in here: config,

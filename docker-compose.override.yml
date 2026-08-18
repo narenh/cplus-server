@@ -1,0 +1,17 @@
+# Local development only.
+#
+# Compose merges this automatically on a bare `docker compose up`, which is
+# what makes the service reachable at http://localhost:8080 on your own
+# machine.
+#
+# Coolify never applies it: Coolify invokes compose with an explicit
+# `-f docker-compose.yml`, and naming any file with `-f` disables the automatic
+# override merge. That is deliberate — publishing a host port on a Coolify host
+# collides with whatever already holds the port, and bypasses the proxy's TLS.
+#
+# Set CPLUS_HOST_PORT to move it if 8080 is taken locally.
+
+services:
+  cplus-service:
+    ports:
+      - "${CPLUS_HOST_PORT:-8080}:8080"
