@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not users %}
+  <p class="empty">
+    No users yet. A user appears here the first time their client signs in —
+    identity comes from Seerr, so there is nobody to grant access to until then.
+  </p>
+{% else %}
+<table class="perms">
+  <thead>
+    <tr>
+      <th>User</th>
+      {% for action in actions %}
+        <th>{{ action.name }}{% if action.is_system %} <span class="badge">built in</span>{% endif %}</th>
+      {% endfor %}
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for user in users %}
+    <tr>
+      <td>{{ user.plex_username }} <span class="muted">#{{ user.seerr_user_id }}</span></td>
+      {% for action in actions %}
+        <td class="center">
+          {% with is_granted = (user.id, action.id) in granted %}
+            {% include "partials/permission_cell.html" %}
+          {% endwith %}
+        </td>
+      {% endfor %}
+      <td class="right">
+        <form method="post" action="/admin/users/{{ user.id }}/delete"
+              onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
+          <button type="submit" class="link danger">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="hint">
+  Granting takes effect at the user's next app launch, when their client calls
+  <code>/actions</code> again — searches authenticate from a cache rather than
+  re-checking Seerr on every request. Removing a user is immediate.
+</p>
+{% endif %}
+{% endblock %}

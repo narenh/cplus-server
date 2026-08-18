@@ -1,0 +1,23 @@
+services:
+  cplus-service:
+    # Both are set on purpose: `docker compose up` builds from this checkout
+    # and tags the result. Drop `build:` once a published image exists.
+    image: ghcr.io/narenh/cplus-service:latest
+    build: .
+    container_name: cplus-service
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - cplus-data:/data
+    environment:
+      # Everything else — Seerr URL, Prowlarr connection, actions, quality
+      # profiles, permissions — is configured in the web UI after first launch,
+      # not here. These are only the things needed before the UI can exist.
+      CPLUS_PORT: "8080"
+      CPLUS_DB_PATH: /data/cplus.db
+      CPLUS_LOG_LEVEL: info
+      TZ: UTC
+
+volumes:
+  cplus-data:

@@ -6,7 +6,7 @@ importing the app, which would be circular (app -> routes -> deps -> app).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -32,3 +32,8 @@ class AppState:
     """
 
     plex_cache: PlexTokenCache
+
+    pending_plex_logins: dict[int, str] = field(default_factory=dict)
+    """In-flight webui sign-ins: plex.tv PIN id -> the Seerr URL to validate
+    against. Held only for the life of a sign-in; abandoning one leaks a single
+    short string until restart."""

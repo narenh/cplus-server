@@ -74,9 +74,9 @@ class PlexTokenCache:
     async def forget_user(self, user_id: int) -> None:
         """Drop every token belonging to a user.
 
-        Not used by the request path — it exists for stage 3's admin UI, so
-        deleting a user can invalidate their cached tokens immediately instead
-        of leaving them able to search until their next launch.
+        Not used by the request path. The admin UI calls it when removing a
+        user, so their cached tokens are invalidated immediately instead of
+        leaving them able to search until their next launch.
         """
         async with self._lock:
             stale = [key for key, entry in self._entries.items() if entry.user_id == user_id]

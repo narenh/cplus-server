@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "partials/user_filter.html" %}
+
+{% if not entries %}
+  <p class="empty">Nothing logged yet.</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>When</th><th>User</th><th>Event</th><th>Detail</th></tr>
+  </thead>
+  <tbody>
+  {% for entry in entries %}
+    {% set detail = entry.detail or {} %}
+    <tr>
+      <td class="nowrap muted">{{ entry.created_at|when }}</td>
+      <td>{{ usernames.get(entry.user_id, "—") }}</td>
+      <td>
+        {# Requests are logged as grab events with a kind marker: the stored
+           event_type enum is search|grab, and a request is neither a search nor
+           a Prowlarr grab. #}
+        {% if detail.get("kind") == "request" %}
+          <span class="badge">request</span>
+        {% else %}
+          <span class="badge">{{ entry.event_type }}</span>
+        {% endif %}
+        {% if detail.get("success") is false %}<span class="err">failed</span>{% endif %}
+      </td>
+      <td class="detail">
+        {% if entry.event_type == "search" and detail.get("kind") != "request" %}
+          {{ detail.get("imdb_id", "?") }}
+          <span class="muted">· {{ detail.get("action_ids", [])|length }} action(s)</span>
+        {% elif detail.get("kind") == "request" %}
+          tmdb {{ detail.get("tmdb_id", "?") }} · {{ detail.get("type", "?") }}
+          {% if detail.get("seasons") %}<span class="muted">seasons {{ detail.seasons|join(", ") }}</span>{% endif %}
+        {% else %}
+          {{ detail.get("release_title") or detail.get("release_guid") or "—" }}
+        {% endif %}
+        {% if detail.get("error") %}<div class="err">{{ detail.error }}</div>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

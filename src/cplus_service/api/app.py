@@ -14,11 +14,15 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..auth.plex_cache import PlexTokenCache
+from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
+from ..web import STATIC_DIR
 from .routes import actions, admin, auth, grab, request, search
 from .state import AppState
 
@@ -61,6 +65,7 @@ def create_app(
 
         async with session_scope(sessionmaker) as session:
             await ensure_request_action(session)
+            await purge_expired_sessions(session)
 
         try:
             yield
@@ -76,7 +81,7 @@ def create_app(
             "A permissioned Prowlarr front door for Seerr users. "
             "Talks to Prowlarr and Seerr only — never Sonarr or Radarr."
         ),
-        version="0.2.0",
+        version="1.0.0",
         lifespan=lifespan,
     )
 
@@ -86,6 +91,13 @@ def create_app(
     app.include_router(request.router)
     app.include_router(auth.router)
     app.include_router(admin.router)
+
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        """There is no public web page; the only UI is the admin one."""
+        return RedirectResponse("/admin/config")
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

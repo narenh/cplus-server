@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<form class="card" hx-post="/admin/config" hx-target="#save-result" hx-swap="innerHTML">
+  <h2>Seerr</h2>
+  <label for="seerr_url">Seerr URL</label>
+  <input type="url" id="seerr_url" name="seerr_url" value="{{ config.seerr_url or '' }}"
+         placeholder="http://seerr.local:5055">
+  <p class="hint">Used to authenticate every user and to file requests on their behalf.</p>
+
+  <h2>Prowlarr</h2>
+  <label for="prowlarr_url">Prowlarr URL</label>
+  <input type="url" id="prowlarr_url" name="prowlarr_url" value="{{ config.prowlarr_url or '' }}"
+         placeholder="http://prowlarr.local:9696">
+
+  <label for="prowlarr_api_key">API key</label>
+  <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off"
+         placeholder="{{ '············ (unchanged)' if config.prowlarr_api_key else 'required' }}">
+  <p class="hint">
+    {% if config.prowlarr_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
+    Your users never see this key.
+  </p>
+
+  <label for="preferred_indexer_id">Preferred indexer</label>
+  <select id="preferred_indexer_id" name="preferred_indexer_id"
+          hx-get="/admin/prowlarr/indexers?format=html"
+          hx-trigger="load"
+          hx-target="this"
+          hx-swap="innerHTML">
+    <option value="">All indexers</option>
+  </select>
+  <p class="hint">
+    Applies to every quality profile. When set, a search is scored against this
+    indexer's results if it returned any, and falls back to all indexers if it
+    returned none.
+  </p>
+
+  <div class="row">
+    <button type="submit">Save</button>
+    <button type="button" class="secondary"
+            hx-post="/admin/config/verify-prowlarr?format=html"
+            hx-target="#verify-result"
+            hx-swap="innerHTML">Verify Prowlarr connection</button>
+    <span id="verify-result" class="inline-result"></span>
+  </div>
+  <div id="save-result" class="inline-result"></div>
+</form>
+{% endblock %}

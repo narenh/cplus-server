@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "partials/user_filter.html" %}
+
+{% if not grabs %}
+  <p class="empty">No grabs recorded yet.</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>When</th><th>User</th><th>Action</th><th>Release</th><th>Size</th></tr>
+  </thead>
+  <tbody>
+  {% for grab in grabs %}
+    <tr>
+      <td class="nowrap muted">{{ grab.created_at|when }}</td>
+      <td>{{ usernames.get(grab.user_id, "—") }}</td>
+      <td>{{ action_names.get(grab.action_id, "deleted action") }}</td>
+      <td class="release">{{ grab.release_title }}</td>
+      <td class="nowrap">{{ grab.size_bytes|size }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

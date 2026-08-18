@@ -60,6 +60,11 @@ class Config(Base):
     prowlarr_api_key: Mapped[str | None] = mapped_column(String(256))
     preferred_indexer_id: Mapped[int | None] = mapped_column(Integer)
 
+    #: Stable per-install identity for the plex.tv PIN flow.  Generated on
+    #: first sign-in.  It must not change between sign-ins, or every login
+    #: registers a fresh device on the admin's Plex account.
+    plex_client_identifier: Mapped[str | None] = mapped_column(String(64))
+
 
 class User(Base):
     """A Seerr user permitted to use this service.

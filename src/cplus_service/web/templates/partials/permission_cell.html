@@ -1,0 +1,9 @@
+{# Swapped in place after each toggle, so the checkbox reflects what was stored
+   rather than what was clicked. #}
+<input type="checkbox" name="granted"
+       {% if is_granted %}checked{% endif %}
+       hx-post="/admin/users/{{ user.id }}/permissions"
+       hx-vals='{"action_id": "{{ action.id }}"}'
+       hx-target="closest td"
+       hx-swap="innerHTML"
+       aria-label="{{ action.name }} for {{ user.plex_username }}">

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+{% if client_error %}<p class="err">Download clients unavailable: {{ client_error }}</p>{% endif %}
+{% if not profiles %}
+  <p class="err">Create a quality profile first — every Prowlarr-backed action needs one.</p>
+{% endif %}
+
+<table class="actions">
+  <thead>
+    <tr><th>Name</th><th>Download client</th><th>Quality profile</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for action in actions %}
+    {% if action.is_system %}
+      <tr class="system">
+        <td>{{ action.name }} <span class="badge">built in</span></td>
+        <td class="muted" colspan="2">
+          Files a request in Seerr. Never touches Prowlarr, so it has no
+          download client or quality profile — and it is the only action that
+          supports TV as well as films.
+        </td>
+        <td class="right muted">grant per user</td>
+      </tr>
+    {% else %}
+      <tr>
+        <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
+        <td><input form="action-{{ action.id }}" type="text" name="name" value="{{ action.name }}" required></td>
+        <td>
+          <select form="action-{{ action.id }}" name="download_client_id" required>
+            {% for client in clients %}
+              <option value="{{ client.id }}" {% if client.id == action.download_client_id %}selected{% endif %}>
+                {{ client.name }}
+              </option>
+            {% endfor %}
+            {% if action.download_client_id not in client_names %}
+              <option value="{{ action.download_client_id }}" selected>
+                #{{ action.download_client_id }} (not in Prowlarr)
+              </option>
+            {% endif %}
+          </select>
+        </td>
+        <td>
+          <select form="action-{{ action.id }}" name="quality_profile_id" required>
+            {% for profile in profiles %}
+              <option value="{{ profile.id }}" {% if profile.id == action.quality_profile_id %}selected{% endif %}>
+                {{ profile.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </td>
+        <td class="right nowrap">
+          <button form="action-{{ action.id }}" type="submit" class="link">Save</button>
+          <form method="post" action="/admin/actions/{{ action.id }}/delete" class="inline"
+                onsubmit="return confirm('Delete {{ action.name }}?')">
+            <button type="submit" class="link danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endif %}
+  {% endfor %}
+
+  <tr class="new-row">
+    <form method="post" action="/admin/actions" id="new-action"></form>
+    <td><input form="new-action" type="text" name="name" placeholder="Stream Now" required></td>
+    <td>
+      <select form="new-action" name="download_client_id" required
+              hx-get="/admin/prowlarr/download-clients?format=html"
+              hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+      </select>
+    </td>
+    <td>
+      <select form="new-action" name="quality_profile_id" required>
+        {% for profile in profiles %}
+          <option value="{{ profile.id }}">{{ profile.name }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td class="right">
+      <button form="new-action" type="submit" {% if not profiles %}disabled{% endif %}>Add</button>
+    </td>
+  </tr>
+  </tbody>
+</table>
+<p class="hint">
+  The name of the built-in <code>{{ request_action_name }}</code> action is part of the
+  client contract — clients route a button to the request endpoint by matching it,
+  which is why it cannot be renamed or reused.
+</p>
+{% endblock %}

@@ -10,14 +10,16 @@ Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 **Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
 (search, grab, indexers, download clients) and Seerr (auth, plus a built-in
 Request action) and nothing else. No library sync. The Prowlarr-backed side is
-movies-only and driven by IMDB ID — no free-text search, so no title-matching
-ambiguity to resolve.
+**movies-only** and driven by IMDB ID — no free-text search, so no
+title-matching ambiguity to resolve. The built-in **Request** action is the one
+exception: it supports TV as well, is keyed by TMDB id, and never touches
+Prowlarr at all.
 
 ---
 
 ## Build status
 
-This repository currently contains **stages 1 and 2 of 3**.
+All three build stages are complete.
 
 | | Component | Status |
 |---|---|---|
@@ -28,27 +30,72 @@ This repository currently contains **stages 1 and 2 of 3**.
 | 2 | Seerr client + both auth flows | ✅ done |
 | 2 | `/actions`, `/search`, `/grab`, `/request` | ✅ done |
 | 2 | Built-in Request action | ✅ done |
-| 3 | Admin web UI | routes stubbed (501) |
-| 3 | Docker packaging | not started |
+| 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
+| 3 | Docker packaging | ✅ done |
 
 ---
 
-## Getting started
+## Running it
+
+```bash
+docker compose up -d          # then open http://localhost:8080
+```
+
+That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
+quality profiles, actions, permissions — is configured in the web UI, not in
+environment variables or config files.
+
+### First-run setup
+
+1. Open `http://localhost:8080`. You land on the sign-in page.
+2. **Enter your Seerr URL** (e.g. `http://seerr.local:5055`) and click
+   *Sign in with Plex*. A Plex window opens; approve access there.
+3. The service asks Seerr who you are and checks Seerr's **ADMIN permission
+   bit**. If your account is not the Seerr admin you are refused — the web UI
+   has no non-admin use case. The Seerr URL is saved only once it has
+   successfully authenticated you, so a typo cannot lock you out.
+4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
+   Optionally pick a preferred indexer; the default, *All indexers*, is fine.
+5. **Create at least one quality profile.** Every Prowlarr-backed action needs
+   one. Add filter rules to eliminate candidates and preference rules to rank
+   what survives — preference order is what decides ties.
+6. **Create actions** — a name, a Prowlarr download client, and a quality
+   profile. These become the buttons in the client, e.g. "Stream Now", "Add 4K".
+7. **Assign permissions.** Users appear on the Permissions page the first time
+   their client signs in, so have each user open the app once, then tick the
+   actions they may use — including the built-in *Request* action.
+
+### Environment variables
+
+Only the handful that must exist before the UI does:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CPLUS_PORT` | `8080` | Listen port |
+| `CPLUS_HOST` | `0.0.0.0` | Bind address |
+| `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
+| `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
+
+There is no secret key to set. Admin sessions are opaque random tokens stored in
+the database, so there is nothing to sign, rotate or leak — revoking a session
+is a row delete, and the sessions live on the same volume as everything else.
+
+State lives entirely in the SQLite file on the `cplus-data` volume. Back that up
+and you have backed up the service. `alembic upgrade head` runs on every start,
+so upgrading is pull-and-restart.
+
+### Development
 
 ```bash
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 285 tests; no network, Prowlarr or Seerr needed
+pytest                      # 339 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
-```
 
-Run the service:
-
-```bash
-export CPLUS_DB_PATH=./cplus.db      # optional; defaults to ./cplus.db
+export CPLUS_DB_PATH=./cplus.db
 alembic upgrade head
-python -m cplus_service              # CPLUS_HOST / CPLUS_PORT to override
+python -m cplus_service
 ```
 
 Exercise the stage-1 modules standalone, with no server:
@@ -80,10 +127,15 @@ src/cplus_service/
   search/stream.py      two-phase concurrent search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           actions, search, grab, request, auth, admin (stubs)
+  api/routes/           actions, search, grab, request, auth
+  api/routes/admin/     the admin webui: config, profiles, actions,
+                        permissions, activity, login (Plex PIN flow)
+  plex/client.py        plex.tv PIN flow — webui sign-in only
+  web/                  Jinja2 templates + vendored HTMX and CSS
   db/models.py          SQLAlchemy 2.0 schema
   bootstrap.py          seeds the built-in Request action
 migrations/             Alembic
+docker/entrypoint.sh    migrate, then serve
 scripts/demo.py         offline + live REPL-style driver
 tests/                  unit + ASGI end-to-end tests
 ```
@@ -317,9 +369,11 @@ call, not immediately. That is the accepted tradeoff for cache-only search.
 
 ### Webui — Plex OAuth PIN flow + browser session
 
-1. The browser runs the standard Plex PIN flow against plex.tv. This service
-   takes no part in it and only ever sees the finished token.
-2. `POST /auth` with `{plex_token, seerr_url?}`.
+1. The PIN flow against plex.tv is **proxied server-side** (`POST /admin/plex/pin`,
+   then polling `GET /admin/plex/pin/{id}`). The browser only opens the Plex
+   popup and polls one URL — the Plex token never reaches page JavaScript.
+2. `POST /auth` accepts `{plex_token, seerr_url?}` for a client that already
+   holds a token. The web UI does not use it; see *Known overlaps* below.
 3. The token is validated against Seerr, and Seerr's **ADMIN permission bit**
    (`permissions & 2`) is checked — not `seerr_user_id == 1`, since Seerr grants
    admin through the bitmask and the owner is not guaranteed to be user 1.
@@ -369,9 +423,24 @@ search and grab** — a restart between the two is harmless.
 
 ### Admin
 
-`/admin/*` is stubbed at `501` — the URL space is settled so stage 3 fills in
-bodies rather than designing routes. `deps.get_admin` is written and tested,
-ready to be wired in.
+Session-gated, ADMIN-bit-gated, all server-rendered:
+
+| Endpoint | Notes |
+|---|---|
+| `GET /admin/login` | The only ungated admin route |
+| `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow |
+| `GET/POST /admin/config` | Seerr URL, Prowlarr, preferred indexer |
+| `POST /admin/config/verify-prowlarr` | Connect/Verify button |
+| `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
+| `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
+| `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, rule builder, delete |
+| `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
+| `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
+| `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+
+The three proxy/verify endpoints answer **JSON by default** and HTML with
+`?format=html`. JSON keeps them usable as an API; the HTML variant is what the
+page swaps straight into the DOM.
 
 ---
 
@@ -438,17 +507,83 @@ that discriminator rather than widening the enum.
 
 ---
 
-## Notes for stage 3
+## Admin web UI
 
-* Admin routes are stubbed at `501` in `api/routes/admin.py`; wire
-  `deps.AdminDep` in as you implement each.
-* **Stage 3's admin UI must reserve the name `Request`** — the tvOS client
-  routes on it. `bootstrap.REQUEST_ACTION_NAME` is the constant to check
-  against, and system actions must be refused for edit and delete.
-* `auth.plex_cache.forget_user` and `auth.sessions.destroy_sessions_for_user`
-  exist so deleting a user can invalidate their access immediately rather than
-  at their next launch.
-* Seerr and Prowlarr use **separate** `httpx` clients (`state.http` vs
-  `state.seerr_http`) and `SeerrClient` builds requests without consulting the
-  cookie jar. Both guard against one user's Seerr session cookie being attached
-  to another user's request, or leaking to Prowlarr. Keep them separate.
+Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
+`web/static/`, so a container with no outbound access still works.
+
+### The rule builder
+
+The one genuinely interactive piece. Rules are numbered rows with ↑ / ↓ / ×
+controls and an add-rule dropdown; filters and preferences are colour-coded
+apart, since only preference *order* is meaningful.
+
+It holds **no server-side draft**. Every add, remove and move posts the whole
+current form to `POST /admin/quality-profiles/rows`, which decodes it, applies
+the operation and re-renders the rows. So two tabs cannot corrupt each other's
+draft, an abandoned edit leaves nothing to clean up, and a restart mid-edit
+costs nothing. Row indices carry order only and are renumbered on every render.
+
+Ordered rules (`resolution_order`, `source_order`, `hdr_match`, `audio_match`)
+use a comma-separated text input rather than a multi-select: order is the whole
+point of those rules, and browsers submit multi-select options in document
+order, not click order.
+
+Before saving, the decoded rules are validated through stage 1's pydantic
+schema. Stored JSON therefore can never hold a shape the engine will not accept,
+and an unknown token like `hdr_match: NOT_A_TAG` comes back as a form error
+instead of a broken profile.
+
+### Guards worth knowing about
+
+* The built-in **Request** action is listed but read-only, and no other action
+  may take its name (`Request`, case-insensitively). The tvOS client routes on
+  that name, so renaming or reusing it would silently break every client.
+* A quality profile still used by an action cannot be deleted; the page says
+  which action is holding it.
+* An empty API-key field means "leave the saved key alone", and the saved key is
+  never rendered back into the page.
+* Removing a user is immediate: it drops their browser sessions *and* evicts
+  their cached Plex tokens, which live in memory outside the transaction.
+  Revoking a single permission is not immediate — see below.
+
+---
+
+## Known overlaps between build stages
+
+Flagged rather than silently reconciled. None of these are bugs; each is a place
+where a later stage's needs diverged from an earlier stage's guess.
+
+**1. Two admin sign-in paths.** Stage 2 built `POST /auth` for the web UI, on
+the assumption the browser would run the PIN flow and hand over a token. Stage 3
+proxies the PIN flow server-side instead, so the browser never holds a token and
+nothing calls `POST /auth`. It still works and is still tested — it is a usable
+API for a client that already has a Plex token — but the admin-bit check now
+exists in two places (`api/routes/auth.py` and `api/routes/admin/login.py`).
+Worth collapsing if `POST /auth` has no consumer.
+
+**2. `deps.get_admin` / `AdminDep` is unused.** Stage 2 wrote it expecting stage
+3 to wire it into the admin routes. The web UI needs to *redirect* a signed-out
+browser rather than answer 401 JSON, so stage 3 added
+`api/routes/admin/deps.require_admin_page` instead. `AdminDep` is now dead code,
+kept only because deleting a stage-2 export was not in scope.
+
+**3. Admin verbs drifted from stage 2's stubs.** The stubs named
+`PUT /admin/quality-profiles/{id}`, `DELETE /admin/actions/{id}` and
+`PUT /admin/users/{id}/permissions`. HTML forms can only issue GET and POST, so
+those became `POST .../{id}` and `POST .../{id}/delete`. Stage 2's
+`GET /admin/users/{id}/permissions` was dropped — the permissions matrix is
+rendered on `GET /admin/users` instead — and stage 3 added routes the stubs did
+not anticipate (`/quality-profiles/new`, `/quality-profiles/rows`,
+`/users/{id}/delete`, and the login/PIN routes).
+
+**4. Requests are logged as `grab` events.** `activity_log.event_type` is the
+stage-1 enum `search | grab`, and a request is neither a search nor a Prowlarr
+grab. It is stored as `grab` with `detail.kind == "request"`, and the activity
+page renders it as its own badge. Widening the enum would be cleaner but is a
+schema change nobody asked for.
+
+**5. Permission changes are not immediate.** Revoking an action takes effect at
+the user's next `/actions` call, because `/search` and `/grab` authenticate from
+the in-memory Plex-token cache. This is the stage-2 design tradeoff, stated in
+the UI rather than papered over. Removing the user entirely *is* immediate.

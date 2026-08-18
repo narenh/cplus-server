@@ -717,11 +717,17 @@ async def test_request_writes_activity_log_but_no_grab_row(
 # --------------------------------------------------------------------------- #
 
 
-async def test_admin_routes_are_stubbed_for_stage_three(client: httpx.AsyncClient) -> None:
+async def test_admin_routes_require_a_session(client: httpx.AsyncClient) -> None:
     for path in ("/admin/config", "/admin/prowlarr/indexers", "/admin/activity-log"):
-        response = await client.get(path)
-        assert response.status_code == 501, path
-        assert "stage 3" in response.json()["detail"]
+        response = await client.get(path, follow_redirects=False)
+        assert response.status_code == 303, path
+        assert response.headers["location"] == "/admin/login"
+
+
+async def test_the_login_page_is_open(client: httpx.AsyncClient) -> None:
+    response = await client.get("/admin/login")
+    assert response.status_code == 200
+    assert "Sign in with Plex" in response.text
 
 
 async def test_health_is_open(client: httpx.AsyncClient) -> None:

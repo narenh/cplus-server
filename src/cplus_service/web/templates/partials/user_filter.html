@@ -1,0 +1,12 @@
+<form method="get" class="filter">
+  <label for="user_id">Filter by user</label>
+  <select id="user_id" name="user_id" onchange="this.form.submit()">
+    <option value="">Everyone</option>
+    {% for user in users %}
+      <option value="{{ user.id }}" {% if selected_user == user.id %}selected{% endif %}>
+        {{ user.plex_username }}
+      </option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Apply</button></noscript>
+</form>

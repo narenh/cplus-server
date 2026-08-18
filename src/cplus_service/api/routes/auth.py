@@ -20,7 +20,12 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 
 from ...auth.identity import upsert_user
-from ...auth.sessions import SESSION_COOKIE_NAME, create_session, destroy_session
+from ...auth.sessions import (
+    SESSION_COOKIE_NAME,
+    SESSION_TTL,
+    create_session,
+    destroy_session,
+)
 from ...db.session import get_config
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
 from ..deps import DbDep, StateDep
@@ -29,8 +34,6 @@ from ..schemas import AuthRequest, AuthResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webui"])
-
-SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 
 @router.post("/auth", response_model=AuthResponse)
@@ -81,7 +84,7 @@ async def sign_in(
         token,
         httponly=True,
         samesite="lax",
-        max_age=SESSION_MAX_AGE_SECONDS,
+        max_age=int(SESSION_TTL.total_seconds()),
         path="/",
     )
 

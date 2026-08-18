@@ -1,0 +1,145 @@
+/* Admin webui styling.
+
+   One small stylesheet, no framework. This is a single-admin tool that gets
+   looked at during setup and rarely after, so it aims for legible and quick to
+   scan rather than designed. Respects the OS light/dark preference. */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #1b1d21;
+  --muted: #6b7280;
+  --line: #dfe3e8;
+  --accent: #3b6ea5;
+  --ok: #1f7a4d;
+  --err: #b3261e;
+  --filter: #8a5a00;
+  --preference: #3b6ea5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f24;
+    --ink: #e6e8eb;
+    --muted: #9aa1ab;
+    --line: #2c3138;
+    --accent: #7aa9dd;
+    --ok: #6ed49b;
+    --err: #f08a84;
+    --filter: #e0b060;
+    --preference: #7aa9dd;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 24px 20px 64px; }
+h1 { font-size: 22px; margin: 8px 0 20px; }
+h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
+     color: var(--muted); margin: 28px 0 10px; }
+
+/* Header ------------------------------------------------------------------ */
+
+.topbar {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 600; }
+.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
+.topbar nav a { color: var(--muted); text-decoration: none; }
+.topbar nav a:hover { color: var(--ink); }
+.topbar nav a.on { color: var(--accent); font-weight: 600; }
+.signout { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.who { color: var(--muted); }
+
+/* Panels ------------------------------------------------------------------ */
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 20px;
+}
+.card.narrow { max-width: 460px; margin: 48px auto; }
+.lede { color: var(--muted); margin-top: 0; }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
+.empty { color: var(--muted); padding: 24px 0; }
+.muted { color: var(--muted); }
+.right { text-align: right; }
+.center { text-align: center; }
+.nowrap { white-space: nowrap; }
+
+/* Forms ------------------------------------------------------------------- */
+
+label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+label.check { font-weight: 400; display: flex; align-items: center; gap: 8px; }
+
+input[type=text], input[type=url], input[type=password], input[type=number], select {
+  width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button, .button {
+  font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid transparent;
+  background: var(--accent); color: #fff; cursor: pointer; text-decoration: none;
+  display: inline-block;
+}
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.secondary, .button.secondary {
+  background: transparent; color: var(--ink); border-color: var(--line);
+}
+button.link {
+  background: none; border: none; color: var(--accent); padding: 0 6px; cursor: pointer;
+}
+button.link.danger, .danger { color: var(--err); }
+button.icon {
+  background: transparent; border: 1px solid var(--line); color: var(--ink);
+  padding: 2px 8px; line-height: 1.4;
+}
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0; }
+form.inline { display: inline; }
+.inline-result { font-size: 14px; }
+.status { min-height: 1.4em; margin-top: 14px; }
+.ok { color: var(--ok); }
+.err { color: var(--err); }
+.errors { color: var(--err); padding-left: 18px; }
+
+/* Tables ------------------------------------------------------------------ */
+
+table {
+  width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 13px; color: var(--muted); font-weight: 600; }
+tbody tr:last-child td { border-bottom: none; }
+tr.system td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+tr.new-row td { background: color-mix(in srgb, var(--ok) 6%, transparent); }
+td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.filter { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
+.filter select { width: auto; }
+
+.badge {
+  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
+}
+
+/* Rule builder ------------------------------------------------------------ */
+
+.rule {
+  border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
+}
+.rule.filter { border-left-color: var(--filter); }
+.rule.preference { border-left-color: var(--preference); }
+.rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rule-head .kind { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+.rule-controls { margin-left: auto; display: flex; gap: 4px; }
+.add-rule select { width: auto; min-width: 220px; }

@@ -1,0 +1,8 @@
+{# Always offer "All indexers" — it is the null default, not a sentinel row. #}
+<option value="" {% if selected is none %}selected{% endif %}>All indexers</option>
+{% for indexer in indexers %}
+  <option value="{{ indexer.id }}" {% if selected == indexer.id %}selected{% endif %}>
+    {{ indexer.name }}{% if not indexer.enable %} (disabled in Prowlarr){% endif %}
+  </option>
+{% endfor %}
+{% if error %}<option value="" disabled>— {{ error }} —</option>{% endif %}
