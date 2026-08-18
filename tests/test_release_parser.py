@@ -322,10 +322,48 @@ def test_different_movies_do_not_share_a_base_title() -> None:
         "Movie.2024.R5.LiNE.XviD-GRP",
         "Movie.2024.WORKPRINT.x264-GRP",
         "Movie.2024.DCP.1080p.x264-GRP",
+        # Newer `*Rip` spellings.
+        "Movie.2024.HDRip.1080p.x264-GRP",
+        "Movie 2024 HDRip 1080p x264-GRP",
+        "Movie.2024.HD-Rip.1080p.x264-GRP",
+        "Movie.2024.DCPRip.1080p.x264-GRP",
+        "Movie.2024.DCP-Rip.1080p.x264-GRP",
+        "Movie.2024.CAMRip.1080p.x264-GRP",
+        "Movie.2024.HDTS.1080p.x264-GRP",
+        "Movie.2024.HDTC.1080p.x264-GRP",
     ],
 )
 def test_prerelease_detected(title: str) -> None:
     assert parse_title(title).is_prerelease is True
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Movie.2024.HDRip.1080p.x264-GRP",
+        "Movie.2024.DCPRip.1080p.x264-GRP",
+        "Movie.2024.CAMRip.XviD-GRP",
+    ],
+)
+def test_a_prerelease_rip_is_still_an_encode_not_a_full_disc(title: str) -> None:
+    # The two flags answer different questions, and a release carries both.
+    parsed = parse_title(title)
+    assert parsed.is_prerelease is True
+    assert parsed.is_full_disc is False
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Movie.2024.1080p.BDRip.x265-GRP",
+        "Movie.2024.1080p.BRRip.x264-GRP",
+        "Movie.2024.1080p.WEBRip.x264-GRP",
+        "Movie.2024.1080p.DVDRip.XviD-GRP",
+    ],
+)
+def test_other_rip_tags_are_not_prereleases(title: str) -> None:
+    # Only the pre-release *Rip spellings count; ordinary source rips do not.
+    assert parse_title(title).is_prerelease is False
 
 
 @pytest.mark.parametrize(

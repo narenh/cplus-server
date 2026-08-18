@@ -102,9 +102,23 @@ _PROPER = _tok(r"proper")
 _REAL_PROPER = _tok(r"real[\s-]?proper")
 _RERIP = _tok(r"re[\s-]?rip")
 
+# Pre-release markers. The `*Rip` variants — HDRip, CAMRip, DCPRip — are the
+# newer spellings and need their own alternatives: a bare `dcp` cannot match
+# inside `dcprip`, since the token boundary rejects a trailing letter.
+#
+# These overlap with _RIP on purpose. A pre-release is still a re-encode, so it
+# stays encode evidence and can never be mistaken for an untouched disc; the two
+# flags answer different questions and a release can carry both.
 _PRERELEASE = _tok(
-    r"(?:hd)?(?:cam(?:rip)?|ts|telesync|tc|telecine|screener|scr|dvd\s?scr|bd\s?scr"
-    r"|r5|workprint|dcp|pre\s?dvd)"
+    r"(?:"
+    r"(?:hd)?cam(?:[\s-]?rip)?"
+    r"|(?:hd)?ts|telesync"
+    r"|(?:hd)?tc|telecine"
+    r"|screener|scr|dvd[\s-]?scr|bd[\s-]?scr"
+    r"|hd[\s-]?rip"
+    r"|dcp(?:[\s-]?rip)?"
+    r"|r5|workprint|pre[\s-]?dvd"
+    r")"
 )
 
 _YEAR = re.compile(r"(?<![0-9])(?:19|20)\d{2}(?![0-9])")

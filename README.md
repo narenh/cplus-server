@@ -39,7 +39,7 @@ This repository currently contains **stages 1 and 2 of 3**.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 270 tests; no network, Prowlarr or Seerr needed
+pytest                      # 285 tests; no network, Prowlarr or Seerr needed
 ruff check .
 ```
 
@@ -122,7 +122,7 @@ a pattern here, add a dot-delimited test for it.**
 | `is_hdr` | plain HDR10 — mutually exclusive with `is_hdr10plus` |
 | `has_atmos`, `has_dtsx`, `has_truehd` | independent; a release may carry all three |
 | `is_repack_or_proper` + `repack_version` | `REPACK2` → 2, `REAL.PROPER` → 2 |
-| `is_prerelease` | CAM / HDCAM / TS / telesync / telecine / screener / R5 / workprint / DCP |
+| `is_prerelease` | CAM / CAMRip / HDCAM / TS / HDTS / telesync / TC / HDTC / telecine / HDRip / screener / DVDSCR / R5 / workprint / DCP / DCPRip |
 | `is_full_disc` | always `False` on anything a caller receives |
 | `release_group` | best-effort trailing `-GROUP` |
 | `base_title` | normalised name with tags and group stripped, for repack title-diffing |
