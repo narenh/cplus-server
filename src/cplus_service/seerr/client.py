@@ -1,16 +1,20 @@
 """Async Seerr API client.
 
-Two operations only:
+``authenticate_plex`` trades a Plex auth token for a Seerr user identity, and is
+the single source of truth for "who is this?" in the whole service — cplus never
+talks to plex.tv itself outside the admin sign-in, and never stores a password.
 
-``authenticate_plex``
-    Trade a Plex auth token for a Seerr user identity.  This is the single
-    source of truth for "who is this?" in the whole service — cplus-service
-    never talks to plex.tv itself, and never stores a password.
+Every other call here is made **as that user**, with the session cookie
+``authenticate_plex`` opened: creating a request, listing requests, approving or
+declining one, deleting one, and reading ``/auth/me``.  Nothing is done with an
+API key, because cplus holds no Seerr credential at all — only a URL.  That is
+what lets these back client features whose credential would otherwise have to
+live on every device.
 
-``create_request``
-    Create a request on behalf of a user, using the Seerr session cookie that
-    ``authenticate_plex`` opened.  Requests are attributed to the real user in
-    Seerr, not to the admin.
+The set of operations is a deliberate allowlist, not a general proxy.  Seerr's
+``/settings/*`` endpoints return the Radarr, Sonarr and Overseerr API keys to
+any caller with owner authority, so a blanket proxy would hand them straight
+back out — the same failure this service exists to prevent for Prowlarr.
 """
 
 from __future__ import annotations
@@ -99,6 +103,7 @@ class SeerrClient:
         path: str,
         *,
         json: Any | None = None,
+        params: dict[str, Any] | None = None,
         cookies: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Issue a request with an explicitly controlled cookie header.
@@ -121,6 +126,7 @@ class SeerrClient:
             method,
             url,
             json=json,
+            params=params,
             headers=headers,
             extensions={"timeout": self._timeout.as_dict()},
         )
@@ -176,6 +182,87 @@ class SeerrClient:
             user=SeerrUser.model_validate(payload),
             session_cookie=response.cookies.get(SESSION_COOKIE_NAME),
         )
+
+    async def _as_user(
+        self,
+        method: str,
+        path: str,
+        *,
+        session_cookie: str | None,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+    ) -> Any:
+        """Call Seerr as the signed-in user and return the decoded body.
+
+        Bodies are returned **verbatim**. These endpoints are a thin proxy: the
+        clients already parse Seerr's own shapes, so reshaping them here would
+        buy nothing and cost a client rewrite.
+        """
+        cookies = {SESSION_COOKIE_NAME: session_cookie} if session_cookie else None
+        response = await self._request(method, path, params=params, json=json, cookies=cookies)
+
+        if response.status_code >= 400:
+            raise SeerrError(
+                f"Seerr returned {response.status_code} for {method} {path}",
+                status_code=response.status_code,
+                detail=self._detail_of(response),
+            )
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return None
+
+    async def list_requests(
+        self,
+        *,
+        session_cookie: str | None,
+        take: int = 50,
+        skip: int = 0,
+        filter: str | None = None,
+        sort: str | None = None,
+    ) -> Any:
+        """List requests as the user.
+
+        Seerr scopes this itself: a caller without ``MANAGE_REQUESTS`` or
+        ``REQUEST_VIEW`` sees only their own requests, which is exactly what a
+        end-user client should get, while an admin sees everything. One endpoint
+        serves both apps without branching here.
+        """
+        params: dict[str, Any] = {"take": take, "skip": skip}
+        if filter:
+            params["filter"] = filter
+        if sort:
+            params["sort"] = sort
+        return await self._as_user("GET", "request", session_cookie=session_cookie, params=params)
+
+    async def update_request_status(
+        self, *, session_cookie: str | None, request_id: int, status: str
+    ) -> Any:
+        """Approve or decline a request. ``status`` is ``approve`` or ``decline``.
+
+        Seerr guards this with ``MANAGE_REQUESTS``; callers should refuse
+        non-admins before getting here rather than relying on the 403.
+        """
+        if status not in ("approve", "decline"):
+            raise ValueError("status must be 'approve' or 'decline'")
+        return await self._as_user(
+            "POST", f"request/{request_id}/{status}", session_cookie=session_cookie
+        )
+
+    async def delete_request(self, *, session_cookie: str | None, request_id: int) -> Any:
+        """Delete a request.
+
+        Seerr allows a user to delete their own, and an admin to delete any.
+        """
+        return await self._as_user(
+            "DELETE", f"request/{request_id}", session_cookie=session_cookie
+        )
+
+    async def get_current_user(self, *, session_cookie: str | None) -> Any:
+        """``/auth/me`` — the signed-in user, for push registration."""
+        return await self._as_user("GET", "auth/me", session_cookie=session_cookie)
 
     async def create_request(
         self,

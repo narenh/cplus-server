@@ -8,8 +8,8 @@ without those users ever seeing the Prowlarr API key. It is consumed by the
 Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 
 **Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
-(search, grab, indexers, download clients) and Seerr (auth, plus a built-in
-Request action) and nothing else. No library sync. The Prowlarr-backed side is
+(search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
+set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
 **movies-only** when driven by IMDB ID. Two things sit outside that: the
 built-in **Request** action, which supports TV, is keyed by TMDB id and never
 touches Prowlarr at all; and **free-text search**, which is not category-scoped
@@ -129,7 +129,7 @@ so upgrading is pull-and-restart.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 363 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 383 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -159,14 +159,14 @@ src/cplus_service/
   quality/models.py     quality profile rule schema (pydantic, discriminated union)
   quality/engine.py     recommend(candidates, profile) -> ParsedRelease | None
   prowlarr/client.py    async Prowlarr API wrapper
-  seerr/client.py       async Seerr API wrapper (auth + request creation only)
+  seerr/client.py       async Seerr API wrapper (auth + allowlisted request ops)
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
   search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           actions, search, grab, request, auth
+  api/routes/           actions, search, grab, request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
@@ -444,6 +444,10 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 | `GET /search?query=` | cache | NDJSON stream, never scored, any category |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
+| `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
+| `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
+| `POST /seerr/requests/{id}/approve\|decline` | live Seerr | **admin only** |
+| `DELETE /seerr/requests/{id}` | live Seerr | own request, or any for an admin |
 
 `/actions` returns just an id and a label — the client has no use for the
 download client or quality profile behind an action. It routes on the name:
@@ -549,6 +553,41 @@ too.
 
 The built-in Request action is excluded from recommendations: it has no quality
 profile and never touches Prowlarr.
+
+---
+
+## The `/seerr/*` passthrough
+
+These exist so the Seerr admin API key stops living on client devices — the same
+problem this service already solves for Prowlarr, one service over. The client
+sends its Plex token, cplus exchanges it for **that user's own** Seerr session,
+and makes the call as them.
+
+cplus still holds **no Seerr credential** — only a URL. The session is fetched
+fresh per call and discarded, exactly as `/request` always has. That costs one
+extra Seerr round trip, which is fine for these: they are user actions and badge
+refreshes, not paging.
+
+**It is an allowlist, not a general proxy.** Only these five operations are
+reachable. Seerr's `/settings/*` returns the Radarr, Sonarr and Overseerr API
+keys to any caller with owner authority, so a blanket proxy would hand them back
+out through this service — precisely the leak cplus exists to prevent.
+
+Authorisation is Seerr's, with one addition:
+
+* `GET /seerr/requests` needs no branching here. Seerr scopes it itself — a
+  caller without `MANAGE_REQUESTS` or `REQUEST_VIEW` sees only their own
+  requests — so one endpoint serves the tvOS app and the admin app correctly.
+* **Approve and decline are admin-only**, and cplus refuses a non-admin *before*
+  calling Seerr rather than relying on its 403, so the rule is stated in our
+  code rather than merely inherited. It matches Seerr's own guard,
+  `MANAGE_REQUESTS`, with the owner passing implicitly.
+* Delete is left to Seerr's inline rule: your own, or anything if you manage
+  requests.
+
+Response bodies are passed through **verbatim**, so a client that previously
+talked to Seerr directly only has to change its base URL and swap the API key
+for its Plex token.
 
 ---
 

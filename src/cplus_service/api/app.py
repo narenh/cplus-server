@@ -22,7 +22,7 @@ from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
 from ..web import STATIC_DIR
-from .routes import actions, admin, grab, request, search
+from .routes import actions, admin, grab, request, search, seerr
 from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ def create_app(
     app.include_router(search.router)
     app.include_router(grab.router)
     app.include_router(request.router)
+    app.include_router(seerr.router)
     app.include_router(admin.router)
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

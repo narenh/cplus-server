@@ -47,6 +47,18 @@ class SeerrUser(BaseModel):
         return bool(self.permissions & SeerrPermission.ADMIN)
 
     @property
+    def can_manage_requests(self) -> bool:
+        """Whether this user may approve or decline requests.
+
+        Mirrors Seerr's own rule for those endpoints, which guard on
+        ``MANAGE_REQUESTS``. Seerr treats ADMIN as implying every permission, so
+        the owner passes without the bit being set explicitly.
+        """
+        return bool(
+            self.permissions & (SeerrPermission.ADMIN | SeerrPermission.MANAGE_REQUESTS)
+        )
+
+    @property
     def best_username(self) -> str:
         """Whatever Seerr gave us that is fit to show an admin, in preference order."""
         for candidate in (self.plex_username, self.username, self.display_name, self.email):
