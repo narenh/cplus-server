@@ -152,9 +152,10 @@ class ProwlarrClient:
     ) -> list[ParsedRelease]:
         """Search for a movie by IMDB id.
 
-        ``imdb_id`` may be given with or without the ``tt`` prefix.  Search is
-        IMDB-driven only — there is deliberately no free-text search anywhere in
-        this service, so there is no title-matching ambiguity to resolve.
+        ``imdb_id`` may be given with or without the ``tt`` prefix.  Being
+        IMDB-keyed, this path has no title-matching ambiguity to resolve, and is
+        scoped to the movie category.  See :meth:`search_query` for the
+        free-text path, which is neither.
 
         ``indexer_ids`` scopes the search to specific indexers; omit it to
         search all of them.  Results come back parsed, tagged and free of full
@@ -175,6 +176,38 @@ class ProwlarrClient:
         logger.debug(
             "prowlarr search imdb=%s raw=%d parsed=%d (full discs dropped=%d)",
             imdb_id,
+            len(raw_results),
+            len(releases),
+            len(raw_results) - len(releases),
+        )
+        return releases
+
+    async def search_query(
+        self, query: str, *, indexer_ids: Sequence[int] | None = None
+    ) -> list[ParsedRelease]:
+        """Search for an arbitrary string.
+
+        Unlike :meth:`search_movie` this is **not** category-scoped: the user
+        typed the string, so TV, anime and everything else are fair game.  It is
+        also inherently ambiguous — Prowlarr matches on the text, and nothing
+        here tries to resolve what the user meant.
+
+        Results are parsed and full-disc-filtered exactly as for a movie search,
+        so callers get the same tagged shape.  Be aware the parser is tuned for
+        movie release names: a TV release will still tag its resolution, source
+        and HDR correctly, while ``base_title`` and ``release_group`` are less
+        meaningful.
+        """
+        params: dict[str, Any] = {"query": query, "type": "search"}
+        if indexer_ids:
+            params["indexerIds"] = list(indexer_ids)
+
+        payload = await self._request("GET", "search", params=params)
+        raw_results = payload or []
+        releases = parse_prowlarr_results(raw_results)
+        logger.debug(
+            "prowlarr text search %r raw=%d parsed=%d (full discs dropped=%d)",
+            query,
             len(raw_results),
             len(releases),
             len(raw_results) - len(releases),

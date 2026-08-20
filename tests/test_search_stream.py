@@ -62,13 +62,22 @@ class StubProwlarr:
         self._preferred = preferred if preferred is not None else []
         self._everything = everything if everything is not None else []
         self.calls: list[tuple[str, tuple[int, ...] | None]] = []
+        self.modes: list[str] = []
 
-    async def search_movie(self, imdb_id, *, indexer_ids=None):  # noqa: ANN001, ANN201
-        self.calls.append((imdb_id, tuple(indexer_ids) if indexer_ids else None))
+    def _answer(self, term, indexer_ids):  # noqa: ANN001, ANN202
+        self.calls.append((term, tuple(indexer_ids) if indexer_ids else None))
         result = self._preferred if indexer_ids else self._everything
         if isinstance(result, Exception):
             raise result
         return list(result)
+
+    async def search_movie(self, imdb_id, *, indexer_ids=None):  # noqa: ANN001, ANN201
+        self.modes.append("movie")
+        return self._answer(imdb_id, indexer_ids)
+
+    async def search_query(self, query, *, indexer_ids=None):  # noqa: ANN001, ANN201
+        self.modes.append("query")
+        return self._answer(query, indexer_ids)
 
 
 async def collect(**kwargs):  # noqa: ANN003, ANN201
@@ -357,3 +366,180 @@ async def test_the_all_phase_is_always_last(preferred_id: int | None) -> None:
     )
 
     assert phases[-1].phase == "all"
+
+
+# --------------------------------------------------------------------------- #
+# Free-text query mode
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_text_query_uses_the_free_text_prowlarr_call() -> None:
+    prowlarr = StubProwlarr(everything=[release("a")])
+
+    phases = await collect(
+        prowlarr=prowlarr, query="the office", actions=[action(1)], preferred_indexer_id=None
+    )
+
+    assert prowlarr.modes == ["query"]
+    assert prowlarr.calls == [("the office", None)]
+    assert [p.phase for p in phases] == ["all"]
+
+
+async def test_a_text_query_never_recommends() -> None:
+    # No quality profile can rank an arbitrary string's results, so none is
+    # consulted and nothing is recommended.
+    prowlarr = StubProwlarr(everything=[release("a"), release("b")])
+
+    (everything,) = await collect(
+        prowlarr=prowlarr,
+        query="dune",
+        actions=[action(1), action(2)],
+        preferred_indexer_id=None,
+    )
+
+    assert everything.recommendations == {}
+    assert [r.guid for r in everything.releases] == ["a", "b"]
+
+
+async def test_a_text_query_is_a_single_phase_even_with_a_preferred_indexer() -> None:
+    prowlarr = StubProwlarr(
+        preferred=[release("p", indexer_id=7)],
+        everything=[release("a", indexer_id=2)],
+    )
+
+    phases = await collect(
+        prowlarr=prowlarr, query="dune", actions=[action(1)], preferred_indexer_id=7
+    )
+
+    assert [p.phase for p in phases] == ["all"]
+    # One call, unscoped: there is no recommendation to race for.
+    assert prowlarr.calls == [("dune", None)]
+
+
+async def test_a_failing_text_query_still_terminates_the_stream() -> None:
+    prowlarr = StubProwlarr(everything=ProwlarrError("prowlarr exploded"))
+
+    (everything,) = await collect(
+        prowlarr=prowlarr, query="dune", actions=[], preferred_indexer_id=None
+    )
+
+    assert everything.phase == "all"
+    assert everything.releases == []
+    assert everything.error is not None
+
+
+async def test_a_text_query_with_no_results_still_sends_the_all_phase() -> None:
+    prowlarr = StubProwlarr(everything=[])
+
+    phases = await collect(
+        prowlarr=prowlarr, query="nothing matches this", actions=[], preferred_indexer_id=None
+    )
+
+    assert [p.phase for p in phases] == ["all"]
+    assert phases[0].releases == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"imdb_id": "tt1", "query": "dune"},
+    ],
+)
+async def test_exactly_one_of_imdb_id_or_query_is_required(kwargs: dict) -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        await collect(
+            prowlarr=StubProwlarr(), actions=[], preferred_indexer_id=None, **kwargs
+        )
+
+
+# --------------------------------------------------------------------------- #
+# preferred_only
+# --------------------------------------------------------------------------- #
+
+
+async def test_preferred_only_makes_one_scoped_call_and_one_phase() -> None:
+    prowlarr = StubProwlarr(
+        preferred=[release("p", indexer_id=7)],
+        everything=[release("a", indexer_id=2)],
+    )
+
+    phases = await collect(
+        prowlarr=prowlarr,
+        imdb_id="tt1",
+        actions=[action(1)],
+        preferred_indexer_id=7,
+        preferred_only=True,
+    )
+
+    assert prowlarr.calls == [("tt1", (7,))]
+    assert [p.phase for p in phases] == ["all"]
+    assert [r.guid for r in phases[0].releases] == ["p"]
+    # Still scored — only the indexer scope changed, not the mode.
+    assert phases[0].recommendations == {"1": "p"}
+
+
+async def test_preferred_only_falls_back_to_all_when_none_is_configured() -> None:
+    # The flag asks for the fast path; with nothing to be fast about, searching
+    # everything is the honest answer rather than an error.
+    prowlarr = StubProwlarr(everything=[release("a", indexer_id=2)])
+
+    phases = await collect(
+        prowlarr=prowlarr,
+        imdb_id="tt1",
+        actions=[action(1)],
+        preferred_indexer_id=None,
+        preferred_only=True,
+    )
+
+    assert prowlarr.calls == [("tt1", None)]
+    assert [p.phase for p in phases] == ["all"]
+    assert phases[0].recommendations == {"1": "a"}
+
+
+async def test_preferred_only_applies_to_text_queries_too() -> None:
+    prowlarr = StubProwlarr(preferred=[release("p", indexer_id=7)])
+
+    phases = await collect(
+        prowlarr=prowlarr,
+        query="dune",
+        actions=[action(1)],
+        preferred_indexer_id=7,
+        preferred_only=True,
+    )
+
+    assert prowlarr.modes == ["query"]
+    assert prowlarr.calls == [("dune", (7,))]
+    assert [p.phase for p in phases] == ["all"]
+    assert phases[0].recommendations == {}
+
+
+async def test_the_default_is_all_indexers_not_preferred_only() -> None:
+    prowlarr = StubProwlarr(
+        preferred=[release("p", indexer_id=7)],
+        everything=[release("p", indexer_id=7), release("a", indexer_id=2)],
+    )
+
+    phases = await collect(
+        prowlarr=prowlarr, imdb_id="tt1", actions=[action(1)], preferred_indexer_id=7
+    )
+
+    # Unchanged two-phase behaviour: the unscoped call is still made.
+    assert set(prowlarr.calls) == {("tt1", None), ("tt1", (7,))}
+    assert [p.phase for p in phases] == ["preferred", "all"]
+
+
+async def test_a_failing_preferred_only_search_still_terminates() -> None:
+    prowlarr = StubProwlarr(preferred=ProwlarrError("indexer down"))
+
+    (everything,) = await collect(
+        prowlarr=prowlarr,
+        imdb_id="tt1",
+        actions=[action(1)],
+        preferred_indexer_id=7,
+        preferred_only=True,
+    )
+
+    assert everything.phase == "all"
+    assert everything.error is not None
+    assert everything.recommendations == {"1": None}

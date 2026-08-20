@@ -212,6 +212,159 @@ async def test_search_rejects_non_movie_types(
 
 
 @respx.mock
+async def test_a_free_text_query_returns_releases_with_no_recommendations(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    route = mock_prowlarr_search([WEB_2160, WEB_1080])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    response = await client.get(
+        "/search", params={"query": "the office"}, headers=plex_headers
+    )
+
+    assert response.status_code == 200
+    lines = ndjson(response)
+    assert [line["phase"] for line in lines] == ["all"]
+    assert [r["guid"] for r in lines[0]["releases"]] == ["guid-uhd", "guid-fhd"]
+    # Every profile is ignored for a text query.
+    assert lines[0]["recommendations"] == {}
+
+    params = route.calls[0].request.url.params
+    assert params["query"] == "the office"
+    assert params["type"] == "search"
+    # Not category-scoped: TV and anything else Prowlarr indexes can come back.
+    assert "categories" not in params
+
+
+@respx.mock
+async def test_a_free_text_query_is_still_parsed_and_full_disc_filtered(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160, FULL_DISC])
+    await authenticate(client, plex_headers)
+
+    response = await client.get("/search", params={"query": "dune"}, headers=plex_headers)
+
+    releases = ndjson(response)[0]["releases"]
+    assert [r["guid"] for r in releases] == ["guid-uhd"]
+    assert releases[0]["has_atmos"] is True
+
+
+@respx.mock
+async def test_search_requires_exactly_one_of_imdb_id_or_query(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    neither = await client.get("/search", headers=plex_headers)
+    assert neither.status_code == 400
+
+    both = await client.get(
+        "/search", params={"imdb_id": "tt1", "query": "dune"}, headers=plex_headers
+    )
+    assert both.status_code == 400
+
+
+@respx.mock
+async def test_preferred_only_scopes_the_search_to_one_indexer(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    configured.preferred_indexer_id = 1
+    db.add(configured)
+    await db.commit()
+
+    route = mock_prowlarr_search([WEB_2160])
+    response = await client.get(
+        "/search",
+        params={"imdb_id": "tt0111161", "preferred_only": "true"},
+        headers=plex_headers,
+    )
+
+    assert response.status_code == 200
+    assert [line["phase"] for line in ndjson(response)] == ["all"]
+    assert route.call_count == 1
+    assert route.calls[0].request.url.params.get_list("indexerIds") == ["1"]
+
+
+@respx.mock
+async def test_the_search_default_is_all_indexers(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    configured.preferred_indexer_id = 1
+    db.add(configured)
+    await db.commit()
+
+    def by_indexer(request: httpx.Request) -> httpx.Response:
+        scoped = request.url.params.get("indexerIds")
+        return httpx.Response(200, json=[WEB_2160] if scoped else [WEB_2160, WEB_1080])
+
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(side_effect=by_indexer)
+
+    response = await client.get(
+        "/search", params={"imdb_id": "tt0111161"}, headers=plex_headers
+    )
+
+    # No preferred_only: the unscoped search still happens, so the client ends
+    # up with every indexer's results.
+    assert [line["phase"] for line in ndjson(response)] == ["preferred", "all"]
+
+
+@respx.mock
+async def test_preferred_only_without_a_preferred_indexer_searches_everything(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    route = mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    response = await client.get(
+        "/search",
+        params={"imdb_id": "tt0111161", "preferred_only": "true"},
+        headers=plex_headers,
+    )
+
+    assert response.status_code == 200
+    assert "indexerIds" not in route.calls[0].request.url.params
+
+
+@respx.mock
+async def test_a_text_query_is_logged_to_the_activity_log(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    await client.get(
+        "/search",
+        params={"query": "dune part two", "preferred_only": "true"},
+        headers=plex_headers,
+    )
+
+    entry = (
+        await db.execute(
+            select(ActivityLog).where(ActivityLog.event_type == EventType.SEARCH)
+        )
+    ).scalar_one()
+    assert entry.detail["query"] == "dune part two"
+    assert entry.detail["imdb_id"] is None
+    assert entry.detail["preferred_only"] is True
+
+
+@respx.mock
 async def test_search_is_logged_to_the_activity_log(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:

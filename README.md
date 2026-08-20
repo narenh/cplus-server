@@ -10,10 +10,10 @@ Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 **Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
 (search, grab, indexers, download clients) and Seerr (auth, plus a built-in
 Request action) and nothing else. No library sync. The Prowlarr-backed side is
-**movies-only** and driven by IMDB ID — no free-text search, so no
-title-matching ambiguity to resolve. The built-in **Request** action is the one
-exception: it supports TV as well, is keyed by TMDB id, and never touches
-Prowlarr at all.
+**movies-only** when driven by IMDB ID. Two things sit outside that: the
+built-in **Request** action, which supports TV, is keyed by TMDB id and never
+touches Prowlarr at all; and **free-text search**, which is not category-scoped
+and returns whatever Prowlarr indexes.
 
 ---
 
@@ -129,7 +129,7 @@ so upgrading is pull-and-restart.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 344 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 363 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -163,7 +163,7 @@ src/cplus_service/
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
-  search/stream.py      two-phase concurrent search, NDJSON phases
+  search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
   api/routes/           actions, search, grab, request, auth
@@ -440,7 +440,8 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /actions` | live Seerr | The auth checkpoint. Returns `{id, name}` only |
-| `GET /search?imdb_id=&type=movie` | cache | NDJSON stream, see below |
+| `GET /search?imdb_id=` | cache | NDJSON stream, scored, movies only |
+| `GET /search?query=` | cache | NDJSON stream, never scored, any category |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 
@@ -488,7 +489,32 @@ page swaps straight into the DOM.
 
 ## Streaming search
 
-Both Prowlarr calls are issued **concurrently**:
+`GET /search` takes **exactly one** of `imdb_id` or `query`; giving both or
+neither is a 400.
+
+| | `imdb_id=` | `query=` |
+|---|---|---|
+| Categories | movies only | not scoped — TV, anime, anything |
+| Recommendations | one per permitted action | **never** — always `{}` |
+| Phases | `preferred` then `all`, when a preferred indexer is set | always a single `all` |
+
+A free-text query is a string the user typed, and no quality profile can
+meaningfully rank an arbitrary string's results — so none is consulted, nothing
+is recommended, and there is no second phase to race for. Results are still
+parsed, tagged and full-disc-filtered exactly as for a movie search. Note the
+parser is tuned for movie names: a TV release tags resolution, source and HDR
+correctly, while `base_title` and `release_group` mean less.
+
+`preferred_only=true` restricts either mode to a single call against
+`config.preferred_indexer_id`, yielding one `all` phase. It **defaults to
+false** — all indexers. With no preferred indexer configured it is a no-op
+rather than an error, so a client can send it unconditionally.
+
+**The last line is always `phase: "all"`**, in every mode — that is how a client
+knows the stream is complete. `preferred` is an optional earlier partial.
+
+For an IMDB search with a preferred indexer and `preferred_only=false`, both
+Prowlarr calls are issued **concurrently**:
 
 1. scoped to `config.preferred_indexer_id` — **skipped entirely** when that is
    null, since there is nothing distinct to fetch early;

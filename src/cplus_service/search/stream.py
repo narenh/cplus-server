@@ -1,11 +1,29 @@
-"""Two-phase streamed search.
+"""Streamed search, in one or two phases.
 
-A search is triggered by IMDB-id navigation in the client, so there is no query
+Two modes, and they are shaped differently on purpose.
+
+**IMDB search** is triggered by navigation in the client, so there is no query
 ambiguity to resolve — the only problem is latency. Prowlarr fanning out to
 every configured indexer is slow; the admin's preferred indexer alone is fast.
-So we do both at once and stream the fast answer first.
+So we do both at once and stream the fast answer first, and each action gets a
+recommendation scored against its quality profile.
 
-Both Prowlarr calls are issued concurrently:
+**Free-text search** is a string the user typed. No quality profile can
+meaningfully rank the results of an arbitrary string, so **no recommendation is
+attempted and every profile is ignored** — ``recommendations`` is always ``{}``.
+With no recommendation to race for, there is nothing to gain from splitting the
+fetch, so a text query is a single phase. It is also not category-scoped: TV and
+anything else Prowlarr indexes can come back.
+
+``preferred_only`` collapses either mode to a single call scoped to the admin's
+preferred indexer. If no preferred indexer is configured the flag is a no-op and
+all indexers are searched, rather than an error.
+
+**The last line is always ``phase: "all"``**, in every mode — that is the
+client's signal that the stream is complete. ``preferred`` is an optional
+earlier partial, never the last word.
+
+In the two-phase case, both Prowlarr calls are issued concurrently:
 
 1. scoped to ``config.preferred_indexer_id`` — **skipped entirely** when that is
    null ("All indexers"), because there is nothing distinct to fetch early;
@@ -100,17 +118,66 @@ def _recommendations(
 async def stream_search(
     *,
     prowlarr: ProwlarrClient,
-    imdb_id: str,
     actions: Sequence[ScorableAction],
     preferred_indexer_id: int | None,
+    imdb_id: str | None = None,
+    query: str | None = None,
+    preferred_only: bool = False,
 ) -> AsyncIterator[SearchPhase]:
-    """Yield the search phases in the order they resolve."""
+    """Yield the search phases in the order they resolve.
+
+    Exactly one of ``imdb_id`` or ``query`` must be given. See the module
+    docstring for how each mode is shaped.
+    """
+    if (imdb_id is None) == (query is None):
+        raise ValueError("stream_search needs exactly one of imdb_id or query")
+
+    text_mode = query is not None
+
+    def fetch(indexer_ids: list[int] | None) -> Any:
+        if query is not None:
+            return prowlarr.search_query(query, indexer_ids=indexer_ids)
+        return prowlarr.search_movie(str(imdb_id), indexer_ids=indexer_ids)
+
+    # A free-text query is never scored. No quality profile can meaningfully
+    # rank an arbitrary string's results — the user is browsing, not asking for
+    # the best copy of a known film — so no recommendation is attempted at all
+    # and every profile is ignored.
+    scorable: Sequence[ScorableAction] = () if text_mode else actions
+
+    # The preferred/all split exists to race a recommendation out early. With
+    # nothing to score, and when the caller asked for one indexer only, there is
+    # no second phase worth having.
+    two_phase = not text_mode and not preferred_only and preferred_indexer_id is not None
+
+    if not two_phase:
+        # `preferred_only` with nothing configured is a no-op rather than an
+        # error: the flag asks for the fast path, and searching everything is
+        # the honest answer when there is no preferred indexer to be fast about.
+        scope = [preferred_indexer_id] if preferred_only and preferred_indexer_id else None
+
+        releases: list[ParsedRelease] = []
+        error: str | None = None
+        try:
+            releases = await fetch(scope)
+        except ProwlarrError as exc:
+            logger.warning("search failed: %s", exc)
+            error = str(exc)
+
+        yield SearchPhase(
+            phase=PHASE_ALL,
+            releases=releases,
+            recommendations=_recommendations(
+                preferred_indexer_candidates(releases, preferred_indexer_id), scorable
+            ),
+            error=error,
+        )
+        return
+
     preferred_task: asyncio.Task[list[ParsedRelease]] | None = None
     if preferred_indexer_id is not None:
-        preferred_task = asyncio.create_task(
-            prowlarr.search_movie(imdb_id, indexer_ids=[preferred_indexer_id])
-        )
-    all_task = asyncio.create_task(prowlarr.search_movie(imdb_id))
+        preferred_task = asyncio.create_task(fetch([preferred_indexer_id]))
+    all_task = asyncio.create_task(fetch(None))
 
     preferred_releases: list[ParsedRelease] = []
 
@@ -125,7 +192,7 @@ async def stream_search(
             yield SearchPhase(
                 phase=PHASE_PREFERRED,
                 releases=preferred_releases,
-                recommendations=_recommendations(preferred_releases, actions),
+                recommendations=_recommendations(preferred_releases, scorable),
             )
 
     error: str | None = None
@@ -148,7 +215,7 @@ async def stream_search(
     yield SearchPhase(
         phase=PHASE_ALL,
         releases=fresh,
-        recommendations=_recommendations(effective, actions),
+        recommendations=_recommendations(effective, scorable),
         error=error,
     )
 
