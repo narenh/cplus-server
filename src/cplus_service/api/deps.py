@@ -24,6 +24,7 @@ from ..db.models import Config, User
 from ..db.session import get_config
 from ..prowlarr.client import ProwlarrClient
 from ..seerr.client import SeerrClient
+from ..seerr.models import SeerrAuth
 from .state import AppState
 
 PLEX_TOKEN_HEADER = "X-Plex-Token"
@@ -112,3 +113,21 @@ async def get_cached_user(db: DbDep, plex_token: PlexTokenDep) -> User:
 
 CachedUserDep = Annotated[User, Depends(get_cached_user)]
 
+
+
+def require_request_manager(auth: SeerrAuth) -> None:
+    """Refuse a caller who may not manage requests.
+
+    The gate for the admin app's operations: approving or declining a request,
+    and grabbing a release directly without going through an action. Mirrors
+    Seerr's own guard on those endpoints, ``MANAGE_REQUESTS``, with the owner
+    passing implicitly because Seerr treats ADMIN as implying everything.
+
+    Checked here rather than left to Seerr's 403 so the rule is stated in our
+    code — and because a direct grab never reaches Seerr at all.
+    """
+    if not auth.user.can_manage_requests:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This action is limited to users who can manage requests.",
+        )

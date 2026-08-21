@@ -214,7 +214,7 @@ async def test_a_regular_user_can_never_decide_a_request(
     response = await client.post(f"/seerr/requests/7/{decision}", headers=plex_headers)
 
     assert response.status_code == 403
-    assert "admin action" in response.json()["detail"]
+    assert "manage requests" in response.json()["detail"]
     assert not route.called
 
 

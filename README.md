@@ -129,7 +129,7 @@ so upgrading is pull-and-restart.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 383 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 390 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -439,10 +439,11 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /actions` | live Seerr | The auth checkpoint. Returns `{id, name}` only |
+| `GET /actions` | live Seerr | **tvOS only.** Button labels and ids; also the tvOS auth checkpoint |
 | `GET /search?imdb_id=` | cache | NDJSON stream, scored, movies only |
 | `GET /search?query=` | cache | NDJSON stream, never scored, any category |
-| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /grab` | cache, or live for the admin path | one of `action_id` or `download_client_id`, plus `release_guid, indexer_id, release_title, size_bytes?` |
+| `GET /download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
@@ -454,6 +455,20 @@ download client or quality profile behind an action. It routes on the name:
 `"Request"` posts to `/request`, everything else to `/grab`. That is safe
 because the Request action is a **system action** and cannot be renamed or
 deleted.
+
+**Actions are a tvOS concept.** They exist to give that app a button label and a
+per-action recommendation. The admin app needs neither: it searches by IMDB id
+and gets the flat release list (`recommendations` is `{}` when the caller holds
+no actions), then grabs a chosen release by naming the download client
+directly — `download_client_id` instead of `action_id`, restricted to callers
+who can manage requests and checked against Seerr live. `GET /download-clients`
+exists to populate that picker, since the web UI's copy is session-gated and the
+admin app authenticates with a Plex token.
+
+**Any live Seerr validation refreshes the stored token mapping**, not just
+`/actions`. The admin app never calls `/actions`, so without that its first
+`/seerr/*` call would leave the mapping empty and `/search` would 401 for it
+forever. In practice `GET /seerr/me` at startup is what signs it in.
 
 `POST /grab` echoes back the release fields the client already received in the
 search stream. `indexer_id` is what Prowlarr needs to identify the listing;

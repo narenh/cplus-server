@@ -31,23 +31,45 @@ class ActionsResponse(BaseModel):
 class GrabRequest(BaseModel):
     """``POST /grab``.
 
-    Every release field here comes straight back from the search stream the
-    client was already sent. ``indexer_id`` is what Prowlarr needs to identify
-    the listing; ``release_title`` and ``size_bytes`` are recorded on the
-    ``grabs`` row so the admin UI's history is readable without having to
-    re-query an indexer for a listing that may no longer exist.
+    Exactly one of ``action_id`` or ``download_client_id`` — they select the two
+    ways to grab:
 
-    ``size_bytes`` is optional because not every indexer reports a size — an
-    unknown size is a real state, not a client omission.
+    ``action_id``
+        The tvOS path. The action names the download client, and the caller must
+        have been granted that action. Authenticated from the stored token
+        mapping, no outbound call.
+
+    ``download_client_id``
+        The admin app's path. Actions exist to give tvOS buttons a label and a
+        recommendation, which an admin picking a specific release during an
+        approval does not need — so the client is named directly and no action
+        is involved. Restricted to callers who can manage requests, checked
+        against Seerr live.
+
+    Every release field comes straight back from the search stream the client
+    was already sent. ``indexer_id`` is what Prowlarr needs to identify the
+    listing; ``release_title`` and ``size_bytes`` are recorded on the ``grabs``
+    row so the history is readable without re-querying an indexer for a listing
+    that may no longer exist. ``size_bytes`` is optional because not every
+    indexer reports a size — an unknown size is a real state, not an omission.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    action_id: int
+    action_id: int | None = None
+    download_client_id: int | None = None
     release_guid: str = Field(min_length=1)
     indexer_id: int
     release_title: str = Field(min_length=1)
     size_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _check_target(self) -> GrabRequest:
+        if (self.action_id is None) == (self.download_client_id is None):
+            raise ValueError(
+                "provide exactly one of action_id or download_client_id"
+            )
+        return self
 
 
 class GrabResponse(BaseModel):

@@ -34,8 +34,7 @@ from fastapi.responses import JSONResponse
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ActivityLog, EventType
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
-from ...seerr.models import SeerrAuth
-from ..deps import DbDep, PlexTokenDep, SeerrDep
+from ..deps import DbDep, PlexTokenDep, SeerrDep, require_request_manager
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +85,6 @@ def _upstream_response(exc: SeerrError) -> JSONResponse:
     )
 
 
-def _require_request_manager(auth: SeerrAuth) -> None:
-    """Approving is an admin action. Regular users may never do it."""
-    if not auth.user.can_manage_requests:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Approving and declining requests is an admin action.",
-        )
-
-
 @router.get("/me")
 async def current_user(db: DbDep, seerr: SeerrDep, plex_token: PlexTokenDep) -> Any:
     """The caller's Seerr user, verbatim — the client needs its Seerr user id."""
@@ -143,7 +133,7 @@ async def decide_request(
 ) -> Any:
     """Approve or decline a request. **Admin only.**"""
     user, auth = await _authenticate(db, seerr, plex_token)
-    _require_request_manager(auth)
+    require_request_manager(auth)
 
     try:
         result = await seerr.update_request_status(

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db.models import User
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
+from .plex_cache import remember_token
 
 logger = logging.getLogger(__name__)
 
@@ -54,4 +55,10 @@ async def authenticate_plex_token(
     """
     auth = await seerr.authenticate_plex(plex_token)
     user = await upsert_user(session, auth)
+
+    # Every live validation refreshes the stored mapping, not just ``/actions``.
+    # The admin app never calls ``/actions`` — that endpoint is tvOS-only — so
+    # without this its first ``/seerr/*`` call would leave the mapping empty and
+    # ``/search`` and ``/grab`` would 401 for it forever.
+    await remember_token(session, plex_token, user)
     return user, auth

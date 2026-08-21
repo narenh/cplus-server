@@ -18,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth.identity import authenticate_plex_token
-from ...auth.plex_cache import remember_token
 from ...db.models import Action, Permission, User
 from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import DbDep, PlexTokenDep, SeerrDep
@@ -65,9 +64,9 @@ async def get_actions(
             status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
         ) from exc
 
+    # The token mapping that backs /search and /grab is refreshed by
+    # authenticate_plex_token above, for this and every other live entry point.
     actions = await permitted_actions(db, user)
-
-    await remember_token(db, plex_token, user)
 
     return ActionsResponse(
         actions=[ActionOut(id=action.id, name=action.name) for action in actions]

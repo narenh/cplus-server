@@ -885,3 +885,163 @@ async def test_the_login_page_is_open(client: httpx.AsyncClient) -> None:
 
 async def test_health_is_open(client: httpx.AsyncClient) -> None:
     assert (await client.get("/health")).json() == {"status": "ok"}
+
+
+# --------------------------------------------------------------------------- #
+# The admin app's action-free grab
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_request_manager_can_grab_without_an_action(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Actions are a tvOS concept — a button label and a recommendation. An admin
+    # picking a specific release during an approval names the client directly.
+    mock_seerr_auth(permissions=2)
+    grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+    response = await client.post(
+        "/grab",
+        json={
+            "download_client_id": 9,
+            "release_guid": "guid-uhd",
+            "indexer_id": 1,
+            "release_title": WEB_2160["title"],
+            "size_bytes": 25 * GB,
+        },
+        headers=plex_headers,
+    )
+
+    assert response.status_code == 200
+    assert json.loads(grab_route.calls[0].request.content)["downloadClientId"] == 9
+
+    record = (await db.execute(select(Grab))).scalar_one()
+    assert record.action_id is None  # no action was involved
+    assert record.release_title == WEB_2160["title"]
+
+
+@respx.mock
+async def test_a_regular_user_cannot_grab_without_an_action(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=32)
+    grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+    response = await client.post(
+        "/grab",
+        json={
+            "download_client_id": 9,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
+        headers=plex_headers,
+    )
+
+    assert response.status_code == 403
+    assert not grab_route.called
+    assert (await db.execute(select(Grab))).scalars().first() is None
+
+
+@respx.mock
+async def test_grab_needs_exactly_one_of_action_or_download_client(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    base = {
+        "release_guid": "g",
+        "indexer_id": 1,
+        "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+    }
+    for body in (base, {**base, "action_id": 1, "download_client_id": 9}):
+        response = await client.post("/grab", json=body, headers=plex_headers)
+        assert response.status_code == 422, body
+
+
+@respx.mock
+async def test_the_action_grab_path_still_uses_the_cache_not_seerr(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    seerr = mock_seerr_auth()
+    respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+    await authenticate(client, plex_headers)
+    calls_after_auth = seerr.call_count
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    response = await client.post(
+        "/grab",
+        json={
+            "action_id": action.id,
+            "release_guid": "g",
+            "indexer_id": 1,
+            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
+        },
+        headers=plex_headers,
+    )
+
+    assert response.status_code == 200
+    assert seerr.call_count == calls_after_auth
+
+
+# --------------------------------------------------------------------------- #
+# GET /download-clients
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_request_manager_can_list_download_clients(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+        return_value=httpx.Response(200, json=[{"id": 5, "name": "qBittorrent"}])
+    )
+
+    response = await client.get("/download-clients", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert response.json()["download_clients"][0]["name"] == "qBittorrent"
+
+
+@respx.mock
+async def test_a_regular_user_cannot_list_download_clients(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=32)
+    response = await client.get("/download-clients", headers=plex_headers)
+    assert response.status_code == 403
+
+
+@respx.mock
+async def test_any_live_seerr_call_primes_the_mapping_for_search(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    # The admin app never calls /actions — that endpoint is tvOS-only — so its
+    # first /seerr/* call has to be what makes /search work.
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{SEERR_URL}/api/v1/auth/me").mock(
+        return_value=httpx.Response(200, json={"id": 42})
+    )
+    mock_prowlarr_search([WEB_2160])
+
+    before = await client.get(
+        "/search", params={"imdb_id": "tt1"}, headers=plex_headers
+    )
+    assert before.status_code == 401
+
+    await client.get("/seerr/me", headers=plex_headers)
+
+    after = await client.get("/search", params={"imdb_id": "tt1"}, headers=plex_headers)
+    assert after.status_code == 200
+    # No actions granted, so nothing is recommended — search without an action.
+    assert ndjson(after)[0]["recommendations"] == {}
