@@ -1,8 +1,8 @@
 """FastAPI application factory.
 
-Long-lived resources (the database engine, one shared HTTP client, and the two
-in-memory caches) are created once per process in the lifespan and hung off
-``app.state``. Nothing per-request owns them.
+Long-lived resources (the database engine and the two outbound HTTP clients —
+one for Prowlarr, one kept separate for Seerr) are created once per process in
+the lifespan and hung off ``app.state``. Nothing per-request owns them.
 """
 
 from __future__ import annotations

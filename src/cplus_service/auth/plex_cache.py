@@ -34,7 +34,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import PlexTokenSession, User
@@ -66,26 +66,6 @@ async def resolve_token(session: AsyncSession, plex_token: str) -> User | None:
 
     record.last_seen_at = datetime.now(UTC)
     return await session.get(User, record.user_id)
-
-
-async def forget_token(session: AsyncSession, plex_token: str) -> None:
-    """Drop one token's mapping. Unknown tokens are a no-op."""
-    await session.execute(
-        delete(PlexTokenSession).where(
-            PlexTokenSession.token_fingerprint == token_fingerprint(plex_token)
-        )
-    )
-
-
-async def forget_user_tokens(session: AsyncSession, user_id: int) -> None:
-    """Drop every token belonging to a user.
-
-    Deleting the user cascades to the same rows, so this is only needed when
-    revoking access without removing the account.
-    """
-    await session.execute(
-        delete(PlexTokenSession).where(PlexTokenSession.user_id == user_id)
-    )
 
 
 async def count_tokens(session: AsyncSession) -> int:

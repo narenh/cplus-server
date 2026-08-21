@@ -3,8 +3,6 @@
 from .identity import authenticate_plex_token, upsert_user
 from .plex_cache import (
     count_tokens,
-    forget_token,
-    forget_user_tokens,
     remember_token,
     resolve_token,
     token_fingerprint,
@@ -27,8 +25,6 @@ __all__ = [
     "create_session",
     "destroy_session",
     "destroy_sessions_for_user",
-    "forget_token",
-    "forget_user_tokens",
     "purge_expired_sessions",
     "remember_token",
     "resolve_session",

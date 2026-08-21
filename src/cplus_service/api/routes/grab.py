@@ -11,11 +11,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...auth.identity import authenticate_plex_token
-from ...auth.plex_cache import resolve_token
 from ...db.models import Action, ActivityLog, EventType, Grab, Permission, User
 from ...prowlarr.client import ProwlarrError
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, ProwlarrDep, SeerrDep, require_request_manager
+from ..deps import (
+    DbDep,
+    PlexTokenDep,
+    ProwlarrDep,
+    SeerrDep,
+    get_cached_user,
+    require_request_manager,
+)
 from ..schemas import GrabRequest, GrabResponse
 
 logger = logging.getLogger(__name__)
@@ -73,12 +79,10 @@ async def _resolve_target(
         require_request_manager(auth)
         return user, None, body.download_client_id
 
-    user = await resolve_token(db, plex_token)
-    if user is None:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "Unrecognised Plex token. Call GET /actions to authenticate first.",
-        )
+    # The same cache-only resolution ``/search`` gets from ``CachedUserDep``.
+    # Called directly rather than declared as a dependency because it applies to
+    # only one of this route's two paths.
+    user = await get_cached_user(db, plex_token)
 
     action = await permitted_action(db, user.id, int(body.action_id or 0))
     if action.is_system:
@@ -86,7 +90,11 @@ async def _resolve_target(
             status.HTTP_400_BAD_REQUEST,
             f"'{action.name}' is not a Prowlarr action. Use POST /request instead.",
         )
-    if action.download_client_id is None:
+    if action.download_client_id is None:  # pragma: no cover - see below
+        # Unreachable as the schema stands: ``ck_action_targets_required_unless_system``
+        # lets only a system action omit a download client, and those are turned
+        # away above. Kept as the safety net if that constraint is ever relaxed,
+        # since grabbing with no client would otherwise fail deep inside Prowlarr.
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Action '{action.name}' has no download client configured.",

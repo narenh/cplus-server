@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -187,9 +187,7 @@ async def save_profile(request: Request, db: DbDep, admin: AdminPageDep) -> Resp
 
 
 @router.post("/{profile_id}/delete")
-async def delete_profile(
-    db: DbDep, admin: AdminPageDep, profile_id: int, confirm: str = Form(default="")
-) -> Response:
+async def delete_profile(db: DbDep, admin: AdminPageDep, profile_id: int) -> Response:
     profile = await _load(db, profile_id)
 
     in_use = await db.execute(

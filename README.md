@@ -665,8 +665,8 @@ instead of a broken profile.
   which action is holding it.
 * An empty API-key field means "leave the saved key alone", and the saved key is
   never rendered back into the page.
-* Removing a user is immediate: it drops their browser sessions *and* evicts
-  their cached Plex tokens, which live in memory outside the transaction.
+* Removing a user is immediate: deleting the row cascades to their browser
+  sessions *and* to their stored Plex-token mappings.
   Revoking a single permission is not immediate — see below.
 
 ---

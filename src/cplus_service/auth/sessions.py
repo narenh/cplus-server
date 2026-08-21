@@ -14,7 +14,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Request, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import AdminSession, User
@@ -110,8 +110,3 @@ async def destroy_sessions_for_user(session: AsyncSession, user_id: int) -> None
     rather than at the next expiry.
     """
     await session.execute(delete(AdminSession).where(AdminSession.user_id == user_id))
-
-
-async def count_sessions(session: AsyncSession) -> int:
-    result = await session.execute(select(AdminSession.token))
-    return len(result.scalars().all())
