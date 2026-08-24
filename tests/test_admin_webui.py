@@ -199,6 +199,60 @@ async def test_polling_an_unknown_pin_is_404(client: httpx.AsyncClient) -> None:
     assert (await client.get("/admin/plex/pin/12345")).status_code == 404
 
 
+async def test_a_pending_login_past_its_ttl_reads_as_expired(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    # POST /admin/plex/pin takes no auth, so an abandoned or repeatedly
+    # triggered sign-in must not sit in state.pending_plex_logins forever.
+    from datetime import UTC, datetime, timedelta
+
+    from cplus_service.api.routes.admin.login import PENDING_LOGIN_TTL
+    from cplus_service.api.state import PendingPlexLogin
+
+    state = app.state.cplus
+    state.pending_plex_logins[999] = PendingPlexLogin(
+        seerr_url=SEERR_URL,
+        created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
+    )
+
+    response = await client.get("/admin/plex/pin/999")
+
+    assert response.status_code == 404
+    assert "expired" in response.json()["detail"]
+    # Swept, not merely ignored.
+    assert 999 not in state.pending_plex_logins
+
+
+async def test_starting_a_pin_sweeps_other_expired_pending_logins(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cplus_service.api.routes.admin.login import PENDING_LOGIN_TTL
+    from cplus_service.api.state import PendingPlexLogin
+
+    state = app.state.cplus
+    state.pending_plex_logins[111] = PendingPlexLogin(
+        seerr_url=SEERR_URL,
+        created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
+    )
+    state.pending_plex_logins[222] = PendingPlexLogin(
+        seerr_url=SEERR_URL, created_at=datetime.now(UTC)
+    )
+
+    with respx.mock:
+        respx.post(f"{PLEX_API}/pins").mock(
+            return_value=httpx.Response(201, json={"id": 333, "code": "NEWW"})
+        )
+        response = await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+        assert response.status_code == 200
+
+    # The expired one is gone; the fresh one and the new one are untouched.
+    assert 111 not in state.pending_plex_logins
+    assert 222 in state.pending_plex_logins
+    assert 333 in state.pending_plex_logins
+
+
 async def test_logout_clears_the_cookie(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:

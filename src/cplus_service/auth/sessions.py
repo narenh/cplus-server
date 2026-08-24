@@ -26,7 +26,7 @@ SESSION_TOKEN_BYTES = 32
 #: cookie's own max-age — a cookie lifetime alone is only a request from the
 #: server to the browser, and an expired row would otherwise stay valid forever
 #: to anyone who kept the token.
-SESSION_TTL = timedelta(days=30)
+SESSION_TTL = timedelta(days=7)
 
 
 def set_session_cookie(response: Response, request: Request, token: str) -> None:
