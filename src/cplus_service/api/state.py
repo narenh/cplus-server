@@ -7,9 +7,21 @@ importing the app, which would be circular (app -> routes -> deps -> app).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+
+@dataclass
+class PendingPlexLogin:
+    """One in-flight webui sign-in."""
+
+    seerr_url: str
+    """The Seerr instance this PIN's resulting token will be validated against."""
+
+    created_at: datetime
+    """When the PIN was requested, for :class:`AppState`'s TTL sweep."""
 
 
 @dataclass
@@ -29,7 +41,11 @@ class AppState:
     Seerr session can never be attached to an outbound Prowlarr call.
     """
 
-    pending_plex_logins: dict[int, str] = field(default_factory=dict)
-    """In-flight webui sign-ins: plex.tv PIN id -> the Seerr URL to validate
-    against. Held only for the life of a sign-in; abandoning one leaks a single
-    short string until restart."""
+    pending_plex_logins: dict[int, PendingPlexLogin] = field(default_factory=dict)
+    """In-flight webui sign-ins, keyed by plex.tv PIN id.
+
+    ``POST /admin/plex/pin`` takes no auth — it can't, it's the login flow —
+    so an abandoned or repeatedly-triggered sign-in must not grow this dict
+    without bound. Entries older than
+    :data:`~cplus_service.api.routes.admin.login.PENDING_LOGIN_TTL` are swept
+    on the next sign-in attempt; see that module."""

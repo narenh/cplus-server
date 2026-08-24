@@ -68,26 +68,6 @@ async def resolve_token(session: AsyncSession, plex_token: str) -> User | None:
     return await session.get(User, record.user_id)
 
 
-async def forget_token(session: AsyncSession, plex_token: str) -> None:
-    """Drop one token's mapping. Unknown tokens are a no-op."""
-    await session.execute(
-        delete(PlexTokenSession).where(
-            PlexTokenSession.token_fingerprint == token_fingerprint(plex_token)
-        )
-    )
-
-
-async def forget_user_tokens(session: AsyncSession, user_id: int) -> None:
-    """Drop every token belonging to a user.
-
-    Deleting the user cascades to the same rows, so this is only needed when
-    revoking access without removing the account.
-    """
-    await session.execute(
-        delete(PlexTokenSession).where(PlexTokenSession.user_id == user_id)
-    )
-
-
 async def forget_all_tokens(session: AsyncSession) -> None:
     """Drop every cached Plex-token mapping, for every user.
 

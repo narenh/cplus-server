@@ -2,7 +2,7 @@
 to that action's download client.
 
 Cache-only auth throughout: the caller must already hold a mapping written by
-``GET /actions``, and must have been granted the named action. The admin app's
+``GET /register``, and must have been granted the named action. The admin app's
 action-free grab — naming a download client directly during a request
 approval, checked against Seerr live — is a different caller entirely and
 lives at ``POST /manager/grab`` instead.
@@ -60,7 +60,11 @@ async def grab(
             status.HTTP_400_BAD_REQUEST,
             f"'{action.name}' is not a Prowlarr action. Use POST /request instead.",
         )
-    if action.download_client_id is None:
+    if action.download_client_id is None:  # pragma: no cover - see below
+        # Unreachable as the schema stands: ``ck_action_targets_required_unless_system``
+        # lets only a system action omit a download client, and those are turned
+        # away above. Kept as the safety net if that constraint is ever relaxed,
+        # since grabbing with no client would otherwise fail deep inside Prowlarr.
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Action '{action.name}' has no download client configured.",

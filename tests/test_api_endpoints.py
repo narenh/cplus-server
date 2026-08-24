@@ -746,3 +746,55 @@ async def test_the_action_grab_path_still_uses_the_cache_not_seerr(
 
     assert response.status_code == 200
     assert seerr.call_count == calls_after_auth
+
+
+# --------------------------------------------------------------------------- #
+# Upstream failures on /request
+#
+# /request validates against Seerr on every call rather than reading the token
+# mapping, so it has to keep "Seerr says no" (401) distinct from "Seerr did not
+# answer" (502): a client that treats an outage as a bad token throws away a
+# working Plex token and cannot recover without a fresh sign-in. /manager/grab
+# and /manager/download-clients have the same distinction to make — see
+# test_manager.py.
+# --------------------------------------------------------------------------- #
+
+
+def seerr_rejects_the_token() -> respx.Route:
+    return respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(401, json={"message": "Unauthorised"})
+    )
+
+
+def seerr_is_unreachable() -> respx.Route:
+    return respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+
+@respx.mock
+async def test_request_401s_when_seerr_rejects_the_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_rejects_the_token()
+    create = respx.post(f"{SEERR_URL}/api/v1/request")
+
+    response = await client.post(
+        "/request", json={"tmdb_id": 603, "type": "movie"}, headers=plex_headers
+    )
+
+    assert response.status_code == 401
+    assert not create.called
+
+
+@respx.mock
+async def test_request_502s_when_seerr_is_unreachable(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_is_unreachable()
+
+    response = await client.post(
+        "/request", json={"tmdb_id": 603, "type": "movie"}, headers=plex_headers
+    )
+
+    assert response.status_code == 502

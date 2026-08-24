@@ -37,6 +37,26 @@ def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
     )
 
 
+def seerr_rejects_the_token() -> respx.Route:
+    return respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(401, json={"message": "Unauthorised"})
+    )
+
+
+def seerr_is_unreachable() -> respx.Route:
+    return respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+
+DIRECT_GRAB_BODY = {
+    "download_client_id": 9,
+    "release_guid": "guid-uhd",
+    "indexer_id": 1,
+    "release_title": WEB_2160["title"],
+}
+
+
 # --------------------------------------------------------------------------- #
 # POST /manager/grab
 # --------------------------------------------------------------------------- #
@@ -139,6 +159,50 @@ async def test_manager_grab_rejects_an_action_id(
 
 
 # --------------------------------------------------------------------------- #
+# Upstream failures on the live-validating paths
+#
+# /manager/grab and /manager/download-clients validate against Seerr on every
+# call rather than reading the token mapping, so each has to keep "Seerr says
+# no" (401) distinct from "Seerr did not answer" (502): a client that treats an
+# outage as a bad token throws away a working Plex token and cannot recover
+# without a fresh sign-in.
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_manager_grab_401s_when_seerr_rejects_the_token(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    seerr_rejects_the_token()
+    prowlarr = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
+
+    assert response.status_code == 401
+    assert not prowlarr.called
+    assert (await db.execute(select(Grab))).scalars().first() is None
+
+
+@respx.mock
+async def test_manager_grab_502s_when_seerr_is_unreachable(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Not 401: the token may be perfectly good, and the client must keep it.
+    seerr_is_unreachable()
+    prowlarr = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
+
+    assert response.status_code == 502
+    assert not prowlarr.called
+    assert (await db.execute(select(Grab))).scalars().first() is None
+
+
+# --------------------------------------------------------------------------- #
 # GET /manager/download-clients
 # --------------------------------------------------------------------------- #
 
@@ -165,3 +229,35 @@ async def test_a_regular_user_cannot_list_download_clients(
     mock_seerr_auth(permissions=32)
     response = await client.get("/manager/download-clients", headers=plex_headers)
     assert response.status_code == 403
+
+
+@respx.mock
+async def test_manager_download_clients_401s_when_seerr_rejects_the_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_rejects_the_token()
+    response = await client.get("/manager/download-clients", headers=plex_headers)
+    assert response.status_code == 401
+
+
+@respx.mock
+async def test_manager_download_clients_502s_when_seerr_is_unreachable(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_is_unreachable()
+    response = await client.get("/manager/download-clients", headers=plex_headers)
+    assert response.status_code == 502
+
+
+@respx.mock
+async def test_manager_download_clients_502s_when_prowlarr_fails(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+        return_value=httpx.Response(500, json={"message": "boom"})
+    )
+
+    response = await client.get("/manager/download-clients", headers=plex_headers)
+
+    assert response.status_code == 502

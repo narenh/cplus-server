@@ -5,10 +5,10 @@ identity is owned by Seerr and rows are created lazily by ``GET /actions``, so
 there is nobody to grant access to before that.
 
 Revoking takes effect at the user's next ``/actions`` call rather than
-immediately, because ``/search`` and ``/grab`` authenticate from the in-memory
-Plex-token cache. That is the accepted tradeoff from stage 2, and the page says
-so rather than pretending otherwise. Deleting a user *is* immediate: it drops
-their cached tokens and browser sessions on the spot.
+immediately, because ``/search`` and ``/grab`` authenticate from the stored
+Plex-token mapping. That is the accepted tradeoff from stage 2, and the page
+says so rather than pretending otherwise. Deleting a user *is* immediate: it
+drops their stored tokens and browser sessions on the spot.
 """
 
 from __future__ import annotations
