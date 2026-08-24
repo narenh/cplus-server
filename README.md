@@ -28,7 +28,7 @@ All three build stages are complete.
 | 1 | Prowlarr client wrapper | ✅ done |
 | 1 | Quality profile rule engine | ✅ done |
 | 2 | Seerr client + both auth flows | ✅ done |
-| 2 | `/actions`, `/search`, `/grab`, `/request` | ✅ done |
+| 2 | `/register`, `/titles/{imdb_id}/actions`, `/search`, `/grab`, `/request` | ✅ done |
 | 2 | Built-in Request action | ✅ done |
 | 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
 | 3 | Docker packaging | ✅ done |
@@ -391,13 +391,15 @@ token; a browser does not.
 
 No login step, no session token. The header is `X-Plex-Token`.
 
-1. `GET /actions` on app launch (and on reconnect in settings) validates the
+1. `GET /register` on app launch (and on reconnect in settings) validates the
    token against Seerr's `/api/v1/auth/plex`, upserts the local `users` row, and
-   records the token → user mapping in `plex_token_sessions`.
+   records the token → user mapping in `plex_token_sessions`. The response body
+   carries no action details — actions only make sense in the context of a
+   title, and this endpoint has none — so it is just a status: 200 or 401.
 2. `/titles/{imdb_id}/actions`, `/search` and `/grab` authenticate **against
    that mapping only** — no outbound Plex or Seerr call, which is what keeps
    them fast.
-3. An unknown token is a `401`; the client's recovery is to call `/actions`,
+3. An unknown token is a `401`; the client's recovery is to call `/register`,
    which it does on launch anyway.
 4. `/request` is the exception: it always validates live, because it needs a
    Seerr session to file the request as the user.
@@ -407,12 +409,13 @@ no longer 401s every client until its next launch. Only a SHA-256 fingerprint
 is stored, never the token itself, so the table cannot yield a working Plex
 credential even if the database file leaks.
 
-There is **no expiry**: an entry is valid until that user's next `/actions`
+There is **no expiry**: an entry is valid until that user's next `/register`
 call overwrites it, or until the user is deleted, which cascades. The tradeoff
-is that a Plex token revoked upstream keeps working on `/search` and `/grab`
-until one of those happens — removing the user in the admin UI is the immediate
-lever. Revoking a single *permission* likewise takes effect at their next
-`/actions` call, not at once.
+is that a Plex token revoked upstream keeps working on
+`/titles/{imdb_id}/actions`, `/search` and `/grab` until one of those
+happens — removing the user in the admin UI is the immediate lever. Revoking a
+single *permission* likewise takes effect at their next `/register` call, not
+at once.
 
 ### Webui — Plex OAuth PIN flow + browser session
 
@@ -454,7 +457,7 @@ flushed.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /actions` | live Seerr | **tvOS only.** Button labels and ids; also the tvOS auth checkpoint |
+| `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release |
 | `GET /search?query=` | cache | NDJSON stream, never scored, any category |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
@@ -466,10 +469,11 @@ flushed.
 | `POST /seerr/requests/{id}/approve\|decline` | live Seerr | **admin only** |
 | `DELETE /seerr/requests/{id}` | live Seerr | own request, or any for an admin |
 
-`/actions` returns just an id and a label, with no title context — it is the
-rare, launch-time checkpoint. `GET /titles/{imdb_id}/actions` is the frequent
-one: called when tvOS opens a title's detail page, it returns the same id and
-label for each permitted action, but scoped to that title and carrying a
+`/register` carries no action or title context at all — actions only make
+sense against a specific title, and this is the rare, launch-time checkpoint
+that runs before any title is on screen. `GET /titles/{imdb_id}/actions` is the
+frequent one: called when tvOS opens a title's detail page, it returns an id
+and label for each permitted action, scoped to that title and carrying a
 `kind` (`"grab"` or `"request"`) and — for a `"grab"` action — its recommended
 release, or `null` if nothing survived that action's quality profile. The
 client routes a press on `kind`: `"request"` posts to `/request`, `"grab"`
@@ -487,7 +491,7 @@ web UI's copy is session-gated and the admin app authenticates with a Plex
 token.
 
 **Any live Seerr validation refreshes the stored token mapping**, not just
-`/actions`. The admin app never calls `/actions`, so without that its first
+`/register`. The admin app never calls `/register`, so without that its first
 `/seerr/*` call would leave the mapping empty and `/titles/{imdb_id}/actions`
 would 401 for it forever. In practice `GET /seerr/me` at startup is what signs
 it in.
@@ -728,10 +732,11 @@ page renders it as its own badge. Widening the enum would be cleaner but is a
 schema change nobody asked for.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
-the user's next `/actions` call, because `/search` and `/grab` authenticate from
-the stored token mapping rather than re-checking Seerr. The UI says so rather
-than papering over it. Removing the user entirely *is* immediate — the delete
-cascades to their token mappings and browser sessions.
+the user's next `/register` call, because `/titles/{imdb_id}/actions`,
+`/search` and `/grab` authenticate from the stored token mapping rather than
+re-checking Seerr. The UI says so rather than papering over it. Removing the
+user entirely *is* immediate — the delete cascades to their token mappings and
+browser sessions.
 
 ### Resolved
 

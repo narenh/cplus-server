@@ -18,7 +18,7 @@ from cplus_service.api.app import create_app
 from cplus_service.auth.identity import apply_seerr_url_change
 from cplus_service.auth.plex_cache import count_tokens, resolve_token, token_fingerprint
 from cplus_service.auth.sessions import SESSION_COOKIE_NAME
-from cplus_service.db.models import Action, AdminSession, Config, PlexTokenSession, User
+from cplus_service.db.models import AdminSession, Config, PlexTokenSession, User
 
 from .conftest import (
     PLEX_TOKEN,
@@ -41,17 +41,17 @@ def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
 
 
 # --------------------------------------------------------------------------- #
-# GET /actions — the tvOS checkpoint
+# GET /register — the tvOS checkpoint
 # --------------------------------------------------------------------------- #
 
 
 @respx.mock
-async def test_actions_validates_against_seerr_and_creates_the_user(
+async def test_register_validates_against_seerr_and_creates_the_user(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     route = mock_seerr_auth(user_id=42, username="alice")
 
-    response = await client.get("/actions", headers=plex_headers)
+    response = await client.get("/register", headers=plex_headers)
 
     assert response.status_code == 200
     assert route.called
@@ -63,49 +63,32 @@ async def test_actions_validates_against_seerr_and_creates_the_user(
 
 
 @respx.mock
-async def test_actions_returns_only_id_and_name(
+async def test_register_returns_no_action_details(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
+    # Actions only make sense in the context of a title, so this endpoint's one
+    # job is validating the token and priming the cache — not describing what
+    # the caller can do. GET /titles/{imdb_id}/actions owns that.
     mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     user = (await db.execute(select(User))).scalar_one()
     stream_now = await make_action(db, "Stream Now")
-    await make_action(db, "Add 4K")  # not granted
     await grant(db, user, stream_now)
 
-    response = await client.get("/actions", headers=plex_headers)
+    response = await client.get("/register", headers=plex_headers)
 
-    assert response.json() == {"actions": [{"id": stream_now.id, "name": "Stream Now"}]}
-
-
-@respx.mock
-async def test_actions_includes_the_built_in_request_action_when_granted(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
-
-    user = (await db.execute(select(User))).scalar_one()
-    request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
-    ).scalar_one()
-    await grant(db, user, request_action)
-
-    response = await client.get("/actions", headers=plex_headers)
-
-    # The client routes on this name, which is safe because a system action
-    # cannot be renamed.
-    assert response.json()["actions"] == [{"id": request_action.id, "name": "Request"}]
+    assert response.status_code == 200
+    assert "actions" not in response.json()
 
 
 @respx.mock
-async def test_actions_upserts_rather_than_duplicating_on_every_launch(
+async def test_register_upserts_rather_than_duplicating_on_every_launch(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth(user_id=42, username="alice")
-    await client.get("/actions", headers=plex_headers)
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     users = (await db.execute(select(User))).scalars().all()
     assert len(users) == 1
@@ -116,21 +99,21 @@ async def test_a_renamed_plex_account_refreshes_the_cached_username(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth(user_id=42, username="alice")
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
         return_value=httpx.Response(200, json=seerr_user_payload(user_id=42, username="alicia"))
     )
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     user = (await db.execute(select(User))).scalar_one()
     assert user.plex_username == "alicia"
 
 
-async def test_actions_without_a_plex_token_is_401(
+async def test_register_without_a_plex_token_is_401(
     client: httpx.AsyncClient, configured: Config
 ) -> None:
-    assert (await client.get("/actions")).status_code == 401
+    assert (await client.get("/register")).status_code == 401
 
 
 @respx.mock
@@ -141,7 +124,7 @@ async def test_a_rejected_plex_token_is_401(
         return_value=httpx.Response(403, json={"message": "Unauthorized"})
     )
 
-    response = await client.get("/actions", headers=plex_headers)
+    response = await client.get("/register", headers=plex_headers)
     assert response.status_code == 401
 
 
@@ -154,14 +137,14 @@ async def test_an_unreachable_seerr_is_502_not_401(
         side_effect=httpx.ConnectError("refused")
     )
 
-    response = await client.get("/actions", headers=plex_headers)
+    response = await client.get("/register", headers=plex_headers)
     assert response.status_code == 502
 
 
-async def test_actions_before_seerr_is_configured_is_503(
+async def test_register_before_seerr_is_configured_is_503(
     client: httpx.AsyncClient, plex_headers: dict
 ) -> None:
-    assert (await client.get("/actions", headers=plex_headers)).status_code == 503
+    assert (await client.get("/register", headers=plex_headers)).status_code == 503
 
 
 # --------------------------------------------------------------------------- #
@@ -170,13 +153,13 @@ async def test_actions_before_seerr_is_configured_is_503(
 
 
 @respx.mock
-async def test_actions_stores_the_mapping_that_search_and_grab_rely_on(
+async def test_register_stores_the_mapping_that_titles_search_and_grab_rely_on(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
     assert await count_tokens(db) == 0
 
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     assert await count_tokens(db) == 1
     user = await resolve_token(db, PLEX_TOKEN)
@@ -191,7 +174,7 @@ async def test_the_raw_plex_token_is_never_stored(
     # Only a SHA-256 fingerprint is persisted, so the table cannot yield a
     # working Plex credential even if the database file leaks.
     mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     stored = (await db.execute(select(PlexTokenSession))).scalars().all()
     assert [row.token_fingerprint for row in stored] == [token_fingerprint(PLEX_TOKEN)]
@@ -200,12 +183,12 @@ async def test_the_raw_plex_token_is_never_stored(
 
 
 @respx.mock
-async def test_calling_actions_twice_refreshes_rather_than_duplicates(
+async def test_calling_register_twice_refreshes_rather_than_duplicates(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     assert await count_tokens(db) == 1
 
@@ -219,7 +202,7 @@ async def test_the_mapping_survives_a_restart(
     respx.get(f"{PROWLARR_URL}/api/v1/search").mock(
         return_value=httpx.Response(200, json=[])
     )
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     # Rebuild the whole app over the same database, which is what a restart is
     # as far as anything in memory is concerned.
@@ -241,7 +224,7 @@ async def test_an_unknown_token_is_still_rejected(
         "/titles/tt1/actions", headers={"X-Plex-Token": "never-seen"}
     )
     assert response.status_code == 401
-    assert "GET /actions" in response.json()["detail"]
+    assert "GET /register" in response.json()["detail"]
 
 
 # --------------------------------------------------------------------------- #
@@ -254,7 +237,7 @@ async def test_changing_the_seerr_url_forgets_every_cached_token(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
     assert await count_tokens(db) == 1
 
     await apply_seerr_url_change(db, configured, "http://other-seerr.test:5055")
@@ -428,7 +411,7 @@ async def test_the_tvos_flow_issues_no_session_cookie(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
-    response = await client.get("/actions", headers=plex_headers)
+    response = await client.get("/register", headers=plex_headers)
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
@@ -437,7 +420,7 @@ async def test_a_plex_token_header_does_not_open_the_admin_ui(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
-    await client.get("/actions", headers=plex_headers)
+    await client.get("/register", headers=plex_headers)
 
     response = await client.get(
         "/admin/config", headers=plex_headers, follow_redirects=False

@@ -1,6 +1,6 @@
 """``GET /titles/{imdb_id}/actions`` — the movie-detail-page call.
 
-Triggered when tvOS opens a title's detail page, after ``GET /actions`` has
+Triggered when tvOS opens a title's detail page, after ``GET /register`` has
 already run once at launch to establish the token mapping. For every action
 the caller holds permission for, this reports what pressing that button would
 do:

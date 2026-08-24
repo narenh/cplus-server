@@ -2,9 +2,9 @@
 
 ``get_cached_user`` is the enforcement point for the split described in
 :mod:`cplus_service.auth.plex_cache`: it resolves a caller from the stored
-Plex-token mapping without any outbound call, and backs ``/search`` and
-``/grab``. ``/actions`` and ``/request`` validate against Seerr directly
-instead, so they do not use it.
+Plex-token mapping without any outbound call, and backs
+``/titles/{imdb_id}/actions``, ``/search`` and ``/grab``. ``/register`` and
+``/request`` validate against Seerr directly instead, so they do not use it.
 
 Admin routes are gated by
 :func:`cplus_service.api.routes.admin.deps.require_admin_page`, which redirects
@@ -99,14 +99,14 @@ async def get_cached_user(db: DbDep, plex_token: PlexTokenDep) -> User:
     """Resolve the caller from the stored Plex-token mapping alone.
 
     No outbound call to Plex or Seerr — that is the whole point. A miss means
-    this token has never been through ``/actions``, so the 401 says exactly
+    this token has never been through ``/register``, so the 401 says exactly
     that. The mapping is persisted, so a restart no longer causes one.
     """
     user = await resolve_token(db, plex_token)
     if user is None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            "Unrecognised Plex token. Call GET /actions to authenticate first.",
+            "Unrecognised Plex token. Call GET /register to authenticate first.",
         )
     return user
 

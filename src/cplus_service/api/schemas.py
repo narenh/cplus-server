@@ -10,24 +10,6 @@ MEDIA_TYPE_MOVIE = "movie"
 MEDIA_TYPE_TV = "tv"
 
 
-class ActionOut(BaseModel):
-    """One button in the client's UI.
-
-    Deliberately just an id and a label: the client has no use for the download
-    client or the quality profile behind an action, and they are not its
-    business. The client routes on the name — ``"Request"`` posts to
-    ``/request``, everything else posts to ``/grab`` — which is safe because a
-    system action cannot be renamed.
-    """
-
-    id: int
-    name: str
-
-
-class ActionsResponse(BaseModel):
-    actions: list[ActionOut]
-
-
 class ReleaseFields(BaseModel):
     """The release identity shared by every way of grabbing one.
 

@@ -3,10 +3,10 @@
 tvOS already holds a user-scoped Plex token, so there is no login step and no
 session token for it. Instead:
 
-* ``GET /actions`` validates the Plex token against Seerr for real, upserts the
-  local user, and records the mapping here.
-* ``/search`` and ``/grab`` read this mapping only. They never call out to Plex
-  or Seerr, which is what keeps them fast.
+* ``GET /register`` validates the Plex token against Seerr for real, upserts
+  the local user, and records the mapping here.
+* ``/titles/{imdb_id}/actions``, ``/search`` and ``/grab`` read this mapping
+  only. They never call out to Plex or Seerr, which is what keeps them fast.
 * ``/request`` deliberately bypasses it and always validates live, because it
   acts against Seerr as the user.
 
@@ -20,13 +20,13 @@ table cannot yield a working Plex credential even if the database file leaks.
 
 Deliberately absent:
 
-* No expiry. An entry stays valid until that user's next ``/actions`` call
+* No expiry. An entry stays valid until that user's next ``/register`` call
   overwrites it, or until the user is deleted, which cascades. The tradeoff is
-  that a Plex token revoked upstream keeps working on ``/search`` and ``/grab``
-  until one of those happens — removing the user in the admin UI is the
-  immediate lever.
+  that a Plex token revoked upstream keeps working on ``/titles/{imdb_id}/actions``,
+  ``/search`` and ``/grab`` until one of those happens — removing the user in
+  the admin UI is the immediate lever.
 * No revocation push. Permission changes take effect at the user's next
-  ``/actions`` call; that is an accepted tradeoff, not a bug.
+  ``/register`` call; that is an accepted tradeoff, not a bug.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ async def forget_all_tokens(session: AsyncSession) -> None:
     and the permissions it implies — was resolved against the *old* instance,
     and nothing here records which instance issued it. Wholesale is simpler and
     cheaper than tagging each row with an instance fingerprint; the cost is one
-    extra live ``/actions`` round trip per device on its next call, which is
+    extra live ``/register`` round trip per device on its next call, which is
     exactly the recovery path already built for an unrecognised token.
     """
     await session.execute(delete(PlexTokenSession))

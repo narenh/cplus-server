@@ -57,7 +57,7 @@ def mock_prowlarr_search(results: list[dict]) -> respx.Route:
 
 async def authenticate(client: httpx.AsyncClient, headers: dict) -> None:
     """Run the tvOS checkpoint so the Plex-token cache is populated."""
-    response = await client.get("/actions", headers=headers)
+    response = await client.get("/register", headers=headers)
     assert response.status_code == 200
 
 
@@ -79,7 +79,7 @@ async def test_search_requires_a_cached_token(
         "/search", params={"query": "the office"}, headers=plex_headers
     )
     assert response.status_code == 401
-    assert "GET /actions" in response.json()["detail"]
+    assert "GET /register" in response.json()["detail"]
 
 
 @respx.mock

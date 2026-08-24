@@ -1,7 +1,7 @@
 """Turning a Plex token into a local user.
 
 Seerr owns identity. This module is the only place that maps a Seerr user onto
-a local ``users`` row, so both auth flows — tvOS's ``/actions`` and the webui's
+a local ``users`` row, so both auth flows — tvOS's ``/register`` and the webui's
 ``/auth`` — agree on what "the same person" means.
 """
 
@@ -57,8 +57,8 @@ async def authenticate_plex_token(
     auth = await seerr.authenticate_plex(plex_token)
     user = await upsert_user(session, auth)
 
-    # Every live validation refreshes the stored mapping, not just ``/actions``.
-    # The admin app never calls ``/actions`` — that endpoint is tvOS-only — so
+    # Every live validation refreshes the stored mapping, not just ``/register``.
+    # The admin app never calls ``/register`` — that endpoint is tvOS-only — so
     # without this its first ``/seerr/*`` call would leave the mapping empty and
     # ``/search`` and ``/grab`` would 401 for it forever.
     await remember_token(session, plex_token, user)
@@ -82,7 +82,7 @@ async def apply_seerr_url_change(
     longer applies, for as long as each cache entry stays unrefreshed. So a
     change here flushes both wholesale rather than tagging rows with which
     instance issued them — the cost is one extra live round trip per device
-    (``/actions`` for tvOS, signing in again for the webui), which is already
+    (``/register`` for tvOS, signing in again for the webui), which is already
     the built-in recovery path for a cache miss.
 
     ``keep_session_token`` lets the caller's own already-verified-this-request
