@@ -1,8 +1,8 @@
 """FastAPI application factory.
 
-Long-lived resources (the database engine, one shared HTTP client, and the two
-in-memory caches) are created once per process in the lifespan and hung off
-``app.state``. Nothing per-request owns them.
+Long-lived resources (the database engine and the two outbound HTTP clients —
+one for Prowlarr, one kept separate for Seerr) are created once per process in
+the lifespan and hung off ``app.state``. Nothing per-request owns them.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
 from ..web import STATIC_DIR
-from .routes import actions, admin, grab, request, search, seerr
+from .routes import admin, grab, manager, register, request, search, seerr, titles
 from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,11 @@ def create_app(
         lifespan=lifespan,
     )
 
-    app.include_router(actions.router)
+    app.include_router(register.router)
+    app.include_router(titles.router)
     app.include_router(search.router)
     app.include_router(grab.router)
+    app.include_router(manager.router)
     app.include_router(request.router)
     app.include_router(seerr.router)
     app.include_router(admin.router)

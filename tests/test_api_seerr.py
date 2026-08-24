@@ -335,3 +335,71 @@ async def test_the_user_is_upserted_like_any_other_entry_point(
 
     user = (await db.execute(select(User))).scalar_one()
     assert user.seerr_user_id == 77
+
+
+# --------------------------------------------------------------------------- #
+# Upstream failures on the read endpoints
+#
+# /me and /requests only read, so unlike approve/decline they have no
+# activity_log row to protect and raise rather than return. What still has to
+# hold is that Seerr's own 4xx reaches the client intact — the admin app shows
+# that wording — while anything else becomes a 502.
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_me_surfaces_seerrs_own_rejection(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_auth()
+    respx.get(f"{SEERR_URL}/api/v1/auth/me").mock(
+        return_value=httpx.Response(403, json={"message": "Forbidden"})
+    )
+
+    response = await client.get("/seerr/me", headers=plex_headers)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Forbidden"
+
+
+@respx.mock
+async def test_me_reports_an_upstream_fault_as_502(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_auth()
+    respx.get(f"{SEERR_URL}/api/v1/auth/me").mock(
+        return_value=httpx.Response(500, json={"message": "boom"})
+    )
+
+    response = await client.get("/seerr/me", headers=plex_headers)
+
+    assert response.status_code == 502
+
+
+@respx.mock
+async def test_listing_requests_surfaces_seerrs_own_rejection(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_auth()
+    respx.get(f"{SEERR_URL}/api/v1/request").mock(
+        return_value=httpx.Response(403, json={"message": "Not allowed"})
+    )
+
+    response = await client.get("/seerr/requests", headers=plex_headers)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Not allowed"
+
+
+@respx.mock
+async def test_listing_requests_reports_an_upstream_fault_as_502(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_auth()
+    respx.get(f"{SEERR_URL}/api/v1/request").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+    response = await client.get("/seerr/requests", headers=plex_headers)
+
+    assert response.status_code == 502

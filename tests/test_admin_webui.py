@@ -15,14 +15,17 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cplus_service.auth.plex_cache import remember_token
 from cplus_service.auth.sessions import SESSION_COOKIE_NAME, create_session
 from cplus_service.db.models import (
     Action,
     ActivityLog,
+    AdminSession,
     Config,
     EventType,
     Grab,
     Permission,
+    PlexTokenSession,
     QualityProfile,
     User,
 )
@@ -199,6 +202,60 @@ async def test_polling_an_unknown_pin_is_404(client: httpx.AsyncClient) -> None:
     assert (await client.get("/admin/plex/pin/12345")).status_code == 404
 
 
+async def test_a_pending_login_past_its_ttl_reads_as_expired(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    # POST /admin/plex/pin takes no auth, so an abandoned or repeatedly
+    # triggered sign-in must not sit in state.pending_plex_logins forever.
+    from datetime import UTC, datetime, timedelta
+
+    from cplus_service.api.routes.admin.login import PENDING_LOGIN_TTL
+    from cplus_service.api.state import PendingPlexLogin
+
+    state = app.state.cplus
+    state.pending_plex_logins[999] = PendingPlexLogin(
+        seerr_url=SEERR_URL,
+        created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
+    )
+
+    response = await client.get("/admin/plex/pin/999")
+
+    assert response.status_code == 404
+    assert "expired" in response.json()["detail"]
+    # Swept, not merely ignored.
+    assert 999 not in state.pending_plex_logins
+
+
+async def test_starting_a_pin_sweeps_other_expired_pending_logins(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cplus_service.api.routes.admin.login import PENDING_LOGIN_TTL
+    from cplus_service.api.state import PendingPlexLogin
+
+    state = app.state.cplus
+    state.pending_plex_logins[111] = PendingPlexLogin(
+        seerr_url=SEERR_URL,
+        created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
+    )
+    state.pending_plex_logins[222] = PendingPlexLogin(
+        seerr_url=SEERR_URL, created_at=datetime.now(UTC)
+    )
+
+    with respx.mock:
+        respx.post(f"{PLEX_API}/pins").mock(
+            return_value=httpx.Response(201, json={"id": 333, "code": "NEWW"})
+        )
+        response = await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+        assert response.status_code == 200
+
+    # The expired one is gone; the fresh one and the new one are untouched.
+    assert 111 not in state.pending_plex_logins
+    assert 222 in state.pending_plex_logins
+    assert 333 in state.pending_plex_logins
+
+
 async def test_logout_clears_the_cookie(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
@@ -267,6 +324,62 @@ async def test_the_saved_api_key_is_never_rendered_into_the_page(
     await signed_in(client, db)
     response = await client.get("/admin/config")
     assert "prowlarr-key" not in response.text
+
+
+async def test_changing_the_seerr_url_signs_out_every_other_device(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    admin = await signed_in(client, db)
+
+    other = User(seerr_user_id=99, plex_username="someone-else")
+    db.add(other)
+    await db.flush()
+    other_session_token = await create_session(db, other.id)
+    await remember_token(db, "some-tvos-plex-token", admin)
+    await db.commit()
+
+    response = await client.post(
+        "/admin/config",
+        data={
+            "seerr_url": "http://a-different-seerr.test:5055",
+            "prowlarr_url": PROWLARR_URL,
+            "prowlarr_api_key": "",
+            "preferred_indexer_id": "",
+        },
+    )
+    assert response.status_code == 200
+    assert "signed out" in response.text
+
+    # Every cached Plex-token mapping is gone...
+    assert (await db.execute(select(PlexTokenSession))).scalars().first() is None
+    # ...and so is every other browser session...
+    remaining = (await db.execute(select(AdminSession))).scalars().all()
+    assert [row.token for row in remaining] != [other_session_token]
+    # ...but the admin who just made the change is still signed in.
+    assert (await client.get("/admin/config", follow_redirects=False)).status_code == 200
+
+
+async def test_saving_config_without_changing_the_seerr_url_keeps_sessions(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    admin = await signed_in(client, db)
+    await remember_token(db, "some-tvos-plex-token", admin)
+    await db.commit()
+
+    response = await client.post(
+        "/admin/config",
+        data={
+            "seerr_url": SEERR_URL,  # unchanged
+            "prowlarr_url": PROWLARR_URL,
+            "prowlarr_api_key": "",
+            "preferred_indexer_id": "",
+        },
+    )
+    assert response.status_code == 200
+    assert "signed out" not in response.text
+
+    assert (await db.execute(select(PlexTokenSession))).scalars().first() is not None
+    assert (await db.execute(select(AdminSession))).scalars().first() is not None
 
 
 @respx.mock

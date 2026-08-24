@@ -38,6 +38,14 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
 
+[tool.coverage.run]
+source = ["src/cplus_service"]
+# SQLAlchemy's async layer switches greenlets on every await, which drops
+# coverage's trace function and reports everything after the first await in a
+# coroutine as unreached. Without this, real coverage reads ~11 points low and
+# whole handler bodies look dead when they are exercised.
+concurrency = ["greenlet", "thread"]
+
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]

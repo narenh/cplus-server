@@ -14,6 +14,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from ....auth.identity import apply_seerr_url_change
+from ....auth.sessions import SESSION_COOKIE_NAME
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
 from ....web import templates
@@ -56,7 +58,12 @@ async def save_config(
     preferred_indexer_id: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
-    config.seerr_url = seerr_url.strip().rstrip("/") or None
+    reconnected = await apply_seerr_url_change(
+        db,
+        config,
+        seerr_url.strip().rstrip("/") or None,
+        keep_session_token=request.cookies.get(SESSION_COOKIE_NAME),
+    )
     config.prowlarr_url = prowlarr_url.strip().rstrip("/") or None
 
     # An empty key field means "leave it alone", so the saved key is never
@@ -69,10 +76,14 @@ async def save_config(
         int(preferred_indexer_id) if preferred_indexer_id.strip().isdigit() else None
     )
 
+    message = "Configuration saved."
+    if reconnected:
+        message += " Every device and browser session has been signed out and will reconnect."
+
     return templates.TemplateResponse(
         request,
         "partials/saved.html",
-        {"message": "Configuration saved."},
+        {"message": message},
     )
 
 

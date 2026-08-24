@@ -14,7 +14,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Request, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import AdminSession, User
@@ -26,7 +26,7 @@ SESSION_TOKEN_BYTES = 32
 #: cookie's own max-age — a cookie lifetime alone is only a request from the
 #: server to the browser, and an expired row would otherwise stay valid forever
 #: to anyone who kept the token.
-SESSION_TTL = timedelta(days=30)
+SESSION_TTL = timedelta(days=7)
 
 
 def set_session_cookie(response: Response, request: Request, token: str) -> None:
@@ -112,6 +112,15 @@ async def destroy_sessions_for_user(session: AsyncSession, user_id: int) -> None
     await session.execute(delete(AdminSession).where(AdminSession.user_id == user_id))
 
 
-async def count_sessions(session: AsyncSession) -> int:
-    result = await session.execute(select(AdminSession.token))
-    return len(result.scalars().all())
+async def destroy_other_sessions(session: AsyncSession, *, keep_token: str | None) -> None:
+    """Revoke every browser session except one.
+
+    Used when the configured Seerr instance changes: every session's ADMIN bit
+    and identity were resolved against the old instance. ``keep_token`` lets the
+    admin who is making the change right now — already verified, this request —
+    stay signed in instead of being logged out by their own edit.
+    """
+    stmt = delete(AdminSession)
+    if keep_token is not None:
+        stmt = stmt.where(AdminSession.token != keep_token)
+    await session.execute(stmt)

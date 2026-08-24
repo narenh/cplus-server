@@ -10,66 +10,49 @@ MEDIA_TYPE_MOVIE = "movie"
 MEDIA_TYPE_TV = "tv"
 
 
-class ActionOut(BaseModel):
-    """One button in the client's UI.
+class ReleaseFields(BaseModel):
+    """The release identity shared by every way of grabbing one.
 
-    Deliberately just an id and a label: the client has no use for the download
-    client or the quality profile behind an action, and they are not its
-    business. The client routes on the name — ``"Request"`` posts to
-    ``/request``, everything else posts to ``/grab`` — which is safe because a
-    system action cannot be renamed.
-    """
-
-    id: int
-    name: str
-
-
-class ActionsResponse(BaseModel):
-    actions: list[ActionOut]
-
-
-class GrabRequest(BaseModel):
-    """``POST /grab``.
-
-    Exactly one of ``action_id`` or ``download_client_id`` — they select the two
-    ways to grab:
-
-    ``action_id``
-        The tvOS path. The action names the download client, and the caller must
-        have been granted that action. Authenticated from the stored token
-        mapping, no outbound call.
-
-    ``download_client_id``
-        The admin app's path. Actions exist to give tvOS buttons a label and a
-        recommendation, which an admin picking a specific release during an
-        approval does not need — so the client is named directly and no action
-        is involved. Restricted to callers who can manage requests, checked
-        against Seerr live.
-
-    Every release field comes straight back from the search stream the client
-    was already sent. ``indexer_id`` is what Prowlarr needs to identify the
-    listing; ``release_title`` and ``size_bytes`` are recorded on the ``grabs``
-    row so the history is readable without re-querying an indexer for a listing
-    that may no longer exist. ``size_bytes`` is optional because not every
-    indexer reports a size — an unknown size is a real state, not an omission.
+    Comes straight back from the search stream the client was already sent.
+    ``indexer_id`` is what Prowlarr needs to identify the listing;
+    ``release_title`` and ``size_bytes`` are recorded on the ``grabs`` row so
+    the history is readable without re-querying an indexer for a listing that
+    may no longer exist. ``size_bytes`` is optional because not every indexer
+    reports a size — an unknown size is a real state, not an omission.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    action_id: int | None = None
-    download_client_id: int | None = None
     release_guid: str = Field(min_length=1)
     indexer_id: int
     release_title: str = Field(min_length=1)
     size_bytes: int | None = Field(default=None, ge=0)
 
-    @model_validator(mode="after")
-    def _check_target(self) -> GrabRequest:
-        if (self.action_id is None) == (self.download_client_id is None):
-            raise ValueError(
-                "provide exactly one of action_id or download_client_id"
-            )
-        return self
+
+class GrabRequest(ReleaseFields):
+    """``POST /grab`` — tvOS only.
+
+    ``action_id`` names the download client indirectly: the action carries it,
+    and the caller must have been granted that action. Authenticated from the
+    stored token mapping, no outbound call. The admin app's action-free grab —
+    naming a download client directly during a request approval — is a
+    different caller with different auth and lives at
+    ``POST /manager/grab`` instead; see :class:`ManagerGrabRequest`.
+    """
+
+    action_id: int
+
+
+class ManagerGrabRequest(ReleaseFields):
+    """``POST /manager/grab`` — the admin app's action-free grab.
+
+    Actions exist to give tvOS buttons a label and a recommendation, which an
+    admin picking a specific release during a request approval does not need —
+    so the download client is named directly and no action is involved.
+    Restricted to callers who can manage requests, checked against Seerr live.
+    """
+
+    download_client_id: int
 
 
 class GrabResponse(BaseModel):

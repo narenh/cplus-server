@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from ....auth.identity import upsert_user
+from ....auth.identity import apply_seerr_url_change, upsert_user
 from ....auth.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -35,10 +36,33 @@ from ....plex.client import PlexError, PlexPinClient
 from ....seerr.client import SeerrAuthError, SeerrClient, SeerrError
 from ....web import templates
 from ...deps import DbDep, StateDep
+from ...state import AppState, PendingPlexLogin
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["admin"])
+
+#: How long an unclaimed PIN sign-in is kept before being swept. Bounds the
+#: growth of :attr:`~cplus_service.api.state.AppState.pending_plex_logins` —
+#: ``POST /admin/plex/pin`` takes no auth, so without a sweep an abandoned or
+#: repeatedly-triggered sign-in would sit in memory until restart.
+PENDING_LOGIN_TTL = timedelta(hours=24)
+
+
+def _sweep_expired_logins(state: AppState) -> None:
+    """Drop pending sign-ins older than :data:`PENDING_LOGIN_TTL`.
+
+    Called on every new sign-in attempt rather than on a timer — there is no
+    background task here, and this endpoint is exactly where the dict grows.
+    """
+    now = datetime.now(UTC)
+    expired = [
+        pin_id
+        for pin_id, pending in state.pending_plex_logins.items()
+        if now - pending.created_at > PENDING_LOGIN_TTL
+    ]
+    for pin_id in expired:
+        del state.pending_plex_logins[pin_id]
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -82,6 +106,8 @@ async def start_pin(
             "Enter the URL of your Seerr instance first.",
         )
 
+    _sweep_expired_logins(state)
+
     plex = await _pin_client(state, db)
     try:
         pin_id, code = await plex.create_pin()
@@ -90,9 +116,11 @@ async def start_pin(
             status.HTTP_502_BAD_GATEWAY, f"Could not reach plex.tv: {exc}"
         ) from exc
 
-    # Held in memory only for the life of the flow; nothing to clean up if the
-    # admin abandons it, and a restart just means starting sign-in again.
-    state.pending_plex_logins[pin_id] = target
+    # Timestamped so an abandoned attempt is swept after PENDING_LOGIN_TTL
+    # rather than held until restart.
+    state.pending_plex_logins[pin_id] = PendingPlexLogin(
+        seerr_url=target, created_at=datetime.now(UTC)
+    )
 
     return JSONResponse(
         {"pin_id": pin_id, "code": code, "auth_url": plex.auth_url(code)}
@@ -104,11 +132,13 @@ async def poll_pin(
     request: Request, pin_id: int, state: StateDep, db: DbDep
 ) -> JSONResponse:
     """Poll a PIN; on success, sign the admin in and set the session cookie."""
-    seerr_url = state.pending_plex_logins.get(pin_id)
-    if seerr_url is None:
+    _sweep_expired_logins(state)
+    pending = state.pending_plex_logins.get(pin_id)
+    if pending is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "That sign-in attempt has expired. Start again."
         )
+    seerr_url = pending.seerr_url
 
     plex = await _pin_client(state, db)
     try:
@@ -146,8 +176,9 @@ async def poll_pin(
     user = await upsert_user(db, auth)
 
     config = await get_config(db)
-    if config.seerr_url != seerr_url:
-        config.seerr_url = seerr_url
+    # No keep_session_token: no session exists yet to protect, and the one
+    # about to be created below is for this instance.
+    await apply_seerr_url_change(db, config, seerr_url)
 
     token = await create_session(db, user.id)
     response = JSONResponse({"claimed": True, "redirect": "/admin/config"})
