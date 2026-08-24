@@ -394,8 +394,9 @@ No login step, no session token. The header is `X-Plex-Token`.
 1. `GET /actions` on app launch (and on reconnect in settings) validates the
    token against Seerr's `/api/v1/auth/plex`, upserts the local `users` row, and
    records the token → user mapping in `plex_token_sessions`.
-2. `/search` and `/grab` authenticate **against that mapping only** — no
-   outbound Plex or Seerr call, which is what keeps them fast.
+2. `/titles/{imdb_id}/actions`, `/search` and `/grab` authenticate **against
+   that mapping only** — no outbound Plex or Seerr call, which is what keeps
+   them fast.
 3. An unknown token is a `401`; the client's recovery is to call `/actions`,
    which it does on launch anyway.
 4. `/request` is the exception: it always validates live, because it needs a
@@ -431,6 +432,20 @@ lever. Revoking a single *permission* likewise takes effect at their next
 setting it needs an admin session, and getting a session needs it. It is
 persisted only after it has been proven to work, so a typo cannot brick config.
 
+**Changing `seerr_url` to a different instance flushes every cached identity**
+— both `plex_token_sessions` and `admin_sessions`, wholesale — from both
+`POST /admin/config` and the PIN-flow reconnect path. Every row was resolved
+against whichever instance was configured when it was written (permissions,
+the ADMIN bit, all of it); repointing at a different instance without
+dropping those caches would leave every device, and every signed-in browser,
+trusting authorization decisions made by an instance that no longer applies.
+The admin making the change keeps their own current session — the flush
+excludes it — so saving the new URL does not immediately sign them back out.
+Every other device and browser gets a clean `401`/redirect on its next call
+and re-authenticates, which is already each cache's built-in recovery path.
+A save that does not actually change `seerr_url` is a no-op: nothing is
+flushed.
+
 ---
 
 ## Endpoints
@@ -440,48 +455,55 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /actions` | live Seerr | **tvOS only.** Button labels and ids; also the tvOS auth checkpoint |
-| `GET /search?imdb_id=` | cache | NDJSON stream, scored, movies only |
+| `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release |
 | `GET /search?query=` | cache | NDJSON stream, never scored, any category |
-| `POST /grab` | cache, or live for the admin path | one of `action_id` or `download_client_id`, plus `release_guid, indexer_id, release_title, size_bytes?` |
-| `GET /download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
 | `POST /seerr/requests/{id}/approve\|decline` | live Seerr | **admin only** |
 | `DELETE /seerr/requests/{id}` | live Seerr | own request, or any for an admin |
 
-`/actions` returns just an id and a label — the client has no use for the
-download client or quality profile behind an action. It routes on the name:
-`"Request"` posts to `/request`, everything else to `/grab`. That is safe
-because the Request action is a **system action** and cannot be renamed or
-deleted.
+`/actions` returns just an id and a label, with no title context — it is the
+rare, launch-time checkpoint. `GET /titles/{imdb_id}/actions` is the frequent
+one: called when tvOS opens a title's detail page, it returns the same id and
+label for each permitted action, but scoped to that title and carrying a
+`kind` (`"grab"` or `"request"`) and — for a `"grab"` action — its recommended
+release, or `null` if nothing survived that action's quality profile. The
+client routes a press on `kind`: `"request"` posts to `/request`, `"grab"`
+posts to `/grab`. The full release list rides along in the same response, so
+"view all releases" needs no second call.
 
 **Actions are a tvOS concept.** They exist to give that app a button label and a
 per-action recommendation. The admin app needs neither: it searches by IMDB id
-and gets the flat release list (`recommendations` is `{}` when the caller holds
-no actions), then grabs a chosen release by naming the download client
-directly — `download_client_id` instead of `action_id`, restricted to callers
-who can manage requests and checked against Seerr live. `GET /download-clients`
-exists to populate that picker, since the web UI's copy is session-gated and the
-admin app authenticates with a Plex token.
+using the free-text-shaped machinery under the hood, then grabs a chosen
+release by naming the download client directly — `POST /manager/grab`, with
+`download_client_id` instead of `action_id` — restricted to callers who can
+manage requests and checked against Seerr live, same as
+`GET /manager/download-clients`, which exists to populate that picker since the
+web UI's copy is session-gated and the admin app authenticates with a Plex
+token.
 
 **Any live Seerr validation refreshes the stored token mapping**, not just
 `/actions`. The admin app never calls `/actions`, so without that its first
-`/seerr/*` call would leave the mapping empty and `/search` would 401 for it
-forever. In practice `GET /seerr/me` at startup is what signs it in.
+`/seerr/*` call would leave the mapping empty and `/titles/{imdb_id}/actions`
+would 401 for it forever. In practice `GET /seerr/me` at startup is what signs
+it in.
 
-`POST /grab` echoes back the release fields the client already received in the
-search stream. `indexer_id` is what Prowlarr needs to identify the listing;
-`release_title` and `size_bytes` are stored on the `grabs` row so the admin
-UI's history is readable without re-querying an indexer for a listing that may
-no longer exist. `size_bytes` is optional, because not every indexer reports one
-— an unknown size is a real state rather than a client omission.
-
-The client never supplies `download_client_id`: that comes from the action, and
-the body rejects unknown fields.
+`POST /grab` and `POST /manager/grab` both echo back the release fields the
+client already received in a search/actions stream. `indexer_id` is what
+Prowlarr needs to identify the listing; `release_title` and `size_bytes` are
+stored on the `grabs` row so the admin UI's history is readable without
+re-querying an indexer for a listing that may no longer exist. `size_bytes` is
+optional, because not every indexer reports one — an unknown size is a real
+state rather than a client omission. Both bodies reject unknown fields, so
+`/grab` cannot be handed a `download_client_id` and `/manager/grab` cannot be
+handed an `action_id`.
 
 Because the grab body is self-contained, the server keeps **no state between
-search and grab** — a restart between the two is harmless.
+a search/actions call and a grab** — a restart in between is harmless.
 
 ### Admin
 
@@ -506,33 +528,48 @@ page swaps straight into the DOM.
 
 ---
 
-## Streaming search
+## Streaming search and title actions
 
-`GET /search` takes **exactly one** of `imdb_id` or `query`; giving both or
-neither is a 400.
+Two endpoints, both NDJSON, both built on the same underlying Prowlarr-fetch-
+and-score plumbing (`cplus_service.search.stream`) — but they answer different
+questions and are not interchangeable:
 
-| | `imdb_id=` | `query=` |
+| | `GET /titles/{imdb_id}/actions` | `GET /search?query=` |
 |---|---|---|
+| Question answered | "what can I do with this known title?" | "what does Prowlarr have for this string?" |
 | Categories | movies only | not scoped — TV, anime, anything |
-| Recommendations | one per permitted action | **never** — always `{}` |
+| Recommendations | one per permitted action, plus the Request action | **never** — always no recommendation |
 | Phases | `preferred` then `all`, when a preferred indexer is set | always a single `all` |
 
-A free-text query is a string the user typed, and no quality profile can
-meaningfully rank an arbitrary string's results — so none is consulted, nothing
-is recommended, and there is no second phase to race for. Results are still
-parsed, tagged and full-disc-filtered exactly as for a movie search. Note the
-parser is tuned for movie names: a TV release tags resolution, source and HDR
-correctly, while `base_title` and `release_group` mean less.
+`GET /titles/{imdb_id}/actions` is what tvOS calls when a movie's detail page
+opens. Response lines carry `releases` (the parsed, tagged, full-disc-filtered
+candidates) and `actions` — every action the caller is permitted to use, each
+with its `kind` (`"grab"` or `"request"`) and, for a `"grab"` action, the guid
+of its recommended release or `null` if nothing survived that action's quality
+profile filters. The built-in Request action always appears with
+`recommended_release_guid: null` — it has no quality profile and never touches
+Prowlarr, so there is nothing to recommend, but the action itself is still
+reported so the client always knows which buttons to draw.
 
-`preferred_only=true` restricts either mode to a single call against
+`GET /search?query=` is the free-text, action-agnostic browse: a string the
+user typed, not a title the client already identified. No quality profile can
+meaningfully rank an arbitrary string's results, so none is consulted and
+`actions` is always empty — there is nothing to recommend and, with nothing to
+race a fast partial answer against, always a single phase. Results are still
+parsed, tagged and full-disc-filtered exactly as for a title's actions. Note
+the parser is tuned for movie names: a TV release tags resolution, source and
+HDR correctly, while `base_title` and `release_group` mean less.
+
+`preferred_only=true` restricts either endpoint to a single call against
 `config.preferred_indexer_id`, yielding one `all` phase. It **defaults to
 false** — all indexers. With no preferred indexer configured it is a no-op
 rather than an error, so a client can send it unconditionally.
 
-**The last line is always `phase: "all"`**, in every mode — that is how a client
-knows the stream is complete. `preferred` is an optional earlier partial.
+**The last line is always `phase: "all"`**, from either endpoint — that is how
+a client knows the stream is complete. `preferred` is an optional earlier
+partial, and only `GET /titles/{imdb_id}/actions` ever sends one.
 
-For an IMDB search with a preferred indexer and `preferred_only=false`, both
+For a title's actions with a preferred indexer and `preferred_only=false`, both
 Prowlarr calls are issued **concurrently**:
 
 1. scoped to `config.preferred_indexer_id` — **skipped entirely** when that is
@@ -542,19 +579,21 @@ Prowlarr calls are issued **concurrently**:
 The response is NDJSON, one object per line:
 
 ```
-{"phase":"preferred","releases":[…],"recommendations":{"1":"guid-a","2":null}}
-{"phase":"all","releases":[…],"recommendations":{"1":"guid-a","2":"guid-b"}}
+{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add 4K","kind":"grab","recommended_release_guid":null}]}
+{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add 4K","kind":"grab","recommended_release_guid":"guid-b"},{"id":3,"name":"Request","kind":"request","recommended_release_guid":null}]}
 ```
 
 **Client merge rule: apply the last line you received, wholesale.** Union the
-`releases` arrays by guid.
+`releases` arrays by guid. "View all releases" is a client-side reveal of
+`releases` — every candidate is already in the payload, so it needs no second
+call.
 
 That is the documented choice for the "re-send all vs. only the unresolved
-ones" question: the `all` line always carries a recommendation for **every**
-permitted action, so the client needs no key-level merging and behaves the same
-whether or not phase 1 ran. The re-sent values never contradict phase 1 —
-scoring goes through `preferred_indexer_candidates`, so a non-empty preferred
-subset keeps its answer and an empty one falls back to the full set.
+ones" question: the `all` line always carries every permitted action, so the
+client needs no key-level merging and behaves the same whether or not phase 1
+ran. The re-sent recommendations never contradict phase 1 — scoring goes
+through `preferred_indexer_candidates`, so a non-empty preferred subset keeps
+its answer and an empty one falls back to the full set.
 
 `releases` in the `all` line excludes anything already sent in `preferred`,
 though clients should tolerate duplicates by guid regardless.
@@ -565,9 +604,6 @@ committed to `200` by then, a late failure appears in-band as an `error` field
 rather than as a status code. A failure of the *preferred* call alone degrades
 silently to a single phase, because the unfiltered search covers that indexer
 too.
-
-The built-in Request action is excluded from recommendations: it has no quality
-profile and never touches Prowlarr.
 
 ---
 

@@ -15,9 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.api.app import create_app
+from cplus_service.auth.identity import apply_seerr_url_change
 from cplus_service.auth.plex_cache import count_tokens, resolve_token, token_fingerprint
 from cplus_service.auth.sessions import SESSION_COOKIE_NAME
-from cplus_service.db.models import Action, Config, PlexTokenSession, User
+from cplus_service.db.models import Action, AdminSession, Config, PlexTokenSession, User
 
 from .conftest import (
     PLEX_TOKEN,
@@ -227,7 +228,7 @@ async def test_the_mapping_survives_a_restart(
         transport = httpx.ASGITransport(app=restarted)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as fresh:
             response = await fresh.get(
-                "/search", params={"imdb_id": "tt0111161"}, headers=plex_headers
+                "/titles/tt0111161/actions", headers=plex_headers
             )
 
     assert response.status_code == 200
@@ -237,10 +238,65 @@ async def test_an_unknown_token_is_still_rejected(
     client: httpx.AsyncClient, configured: Config
 ) -> None:
     response = await client.get(
-        "/search", params={"imdb_id": "tt1"}, headers={"X-Plex-Token": "never-seen"}
+        "/titles/tt1/actions", headers={"X-Plex-Token": "never-seen"}
     )
     assert response.status_code == 401
     assert "GET /actions" in response.json()["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# Reconnecting to a different Seerr instance invalidates cached identity
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_changing_the_seerr_url_forgets_every_cached_token(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await client.get("/actions", headers=plex_headers)
+    assert await count_tokens(db) == 1
+
+    await apply_seerr_url_change(db, configured, "http://other-seerr.test:5055")
+    await db.commit()
+
+    assert await count_tokens(db) == 0
+
+
+async def test_an_unchanged_seerr_url_is_a_no_op(
+    db: AsyncSession, configured: Config
+) -> None:
+    admin = User(seerr_user_id=1, plex_username="owner")
+    db.add(admin)
+    await db.flush()
+    db.add(AdminSession(token="keep-me", user_id=admin.id))
+    await db.commit()
+
+    changed = await apply_seerr_url_change(db, configured, configured.seerr_url)
+
+    assert changed is False
+    assert (await db.execute(select(AdminSession))).scalars().first() is not None
+
+
+async def test_changing_the_seerr_url_keeps_only_the_callers_own_session(
+    db: AsyncSession, configured: Config
+) -> None:
+    mine = User(seerr_user_id=1, plex_username="owner")
+    someone_else = User(seerr_user_id=2, plex_username="other-admin")
+    db.add_all([mine, someone_else])
+    await db.flush()
+    db.add(AdminSession(token="mine", user_id=mine.id))
+    db.add(AdminSession(token="someone-elses", user_id=someone_else.id))
+    await db.commit()
+
+    changed = await apply_seerr_url_change(
+        db, configured, "http://other-seerr.test:5055", keep_session_token="mine"
+    )
+    await db.commit()
+
+    assert changed is True
+    tokens = {row.token for row in (await db.execute(select(AdminSession))).scalars().all()}
+    assert tokens == {"mine"}
 
 
 # --------------------------------------------------------------------------- #
@@ -362,8 +418,8 @@ async def test_a_webui_session_does_not_authenticate_the_tvos_endpoints(
 ) -> None:
     await pin_sign_in(client, permissions=ADMIN_PERMISSIONS)
 
-    # The session cookie is set, but /search wants a Plex token header.
-    response = await client.get("/search", params={"imdb_id": "tt0111161"})
+    # The session cookie is set, but tvOS endpoints want a Plex token header.
+    response = await client.get("/titles/tt0111161/actions")
     assert response.status_code == 401
 
 

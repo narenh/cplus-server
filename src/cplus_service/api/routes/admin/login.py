@@ -23,7 +23,7 @@ import uuid
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from ....auth.identity import upsert_user
+from ....auth.identity import apply_seerr_url_change, upsert_user
 from ....auth.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -146,8 +146,9 @@ async def poll_pin(
     user = await upsert_user(db, auth)
 
     config = await get_config(db)
-    if config.seerr_url != seerr_url:
-        config.seerr_url = seerr_url
+    # No keep_session_token: no session exists yet to protect, and the one
+    # about to be created below is for this instance.
+    await apply_seerr_url_change(db, config, seerr_url)
 
     token = await create_session(db, user.id)
     response = JSONResponse({"claimed": True, "redirect": "/admin/config"})

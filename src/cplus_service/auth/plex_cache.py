@@ -88,6 +88,19 @@ async def forget_user_tokens(session: AsyncSession, user_id: int) -> None:
     )
 
 
+async def forget_all_tokens(session: AsyncSession) -> None:
+    """Drop every cached Plex-token mapping, for every user.
+
+    Used when the configured Seerr instance changes: every existing mapping —
+    and the permissions it implies — was resolved against the *old* instance,
+    and nothing here records which instance issued it. Wholesale is simpler and
+    cheaper than tagging each row with an instance fingerprint; the cost is one
+    extra live ``/actions`` round trip per device on its next call, which is
+    exactly the recovery path already built for an unrecognised token.
+    """
+    await session.execute(delete(PlexTokenSession))
+
+
 async def count_tokens(session: AsyncSession) -> int:
     result = await session.execute(select(func.count()).select_from(PlexTokenSession))
     return int(result.scalar_one())

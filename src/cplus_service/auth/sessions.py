@@ -112,6 +112,20 @@ async def destroy_sessions_for_user(session: AsyncSession, user_id: int) -> None
     await session.execute(delete(AdminSession).where(AdminSession.user_id == user_id))
 
 
+async def destroy_other_sessions(session: AsyncSession, *, keep_token: str | None) -> None:
+    """Revoke every browser session except one.
+
+    Used when the configured Seerr instance changes: every session's ADMIN bit
+    and identity were resolved against the old instance. ``keep_token`` lets the
+    admin who is making the change right now — already verified, this request —
+    stay signed in instead of being logged out by their own edit.
+    """
+    stmt = delete(AdminSession)
+    if keep_token is not None:
+        stmt = stmt.where(AdminSession.token != keep_token)
+    await session.execute(stmt)
+
+
 async def count_sessions(session: AsyncSession) -> int:
     result = await session.execute(select(AdminSession.token))
     return len(result.scalars().all())

@@ -3,7 +3,15 @@
 This is the only tvOS-facing route that validates against Seerr for real. It is
 called on app launch and whenever the user reconnects to an instance in
 settings, and its side effect — writing the Plex-token → user mapping into the
-cache — is what makes the cache-only ``/search`` and ``/grab`` possible.
+cache — is what makes the cache-only ``/titles/{imdb_id}/actions``, ``/search``
+and ``/grab`` possible.
+
+The list returned here is title-agnostic: just the buttons this user could
+ever see, by id and name, with no recommendation attached. Getting the
+per-title recommendation behind each button is a separate, much more frequent
+call — see ``GET /titles/{imdb_id}/actions`` in
+:mod:`cplus_service.api.routes.titles` — made on every movie-detail-page view
+rather than only at launch.
 
 There is no ``/auth`` route for tvOS and no session token: either this returns
 an action list or it 401s, and the client's only recovery is to call it again.

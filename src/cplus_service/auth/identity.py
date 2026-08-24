@@ -12,10 +12,11 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import User
+from ..db.models import Config, User
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
-from .plex_cache import remember_token
+from .plex_cache import forget_all_tokens, remember_token
+from .sessions import destroy_other_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +63,39 @@ async def authenticate_plex_token(
     # ``/search`` and ``/grab`` would 401 for it forever.
     await remember_token(session, plex_token, user)
     return user, auth
+
+
+async def apply_seerr_url_change(
+    session: AsyncSession,
+    config: Config,
+    new_seerr_url: str | None,
+    *,
+    keep_session_token: str | None = None,
+) -> bool:
+    """Point this install at a different Seerr instance, invalidating cached identity.
+
+    Every ``PlexTokenSession`` and browser ``AdminSession`` row was resolved
+    against whichever Seerr instance was configured at the time — permissions,
+    the ADMIN bit, all of it. Repointing at a different instance without
+    dropping those caches would leave every device (and every signed-in
+    browser) trusting authorization decisions made by an instance that no
+    longer applies, for as long as each cache entry stays unrefreshed. So a
+    change here flushes both wholesale rather than tagging rows with which
+    instance issued them — the cost is one extra live round trip per device
+    (``/actions`` for tvOS, signing in again for the webui), which is already
+    the built-in recovery path for a cache miss.
+
+    ``keep_session_token`` lets the caller's own already-verified-this-request
+    session survive the flush, so making the change does not immediately sign
+    the admin back out of the page they just used to make it.
+
+    A no-op, including no flush, when the URL is unchanged. Returns whether it
+    changed, so callers can decide whether to mention the reconnect.
+    """
+    if config.seerr_url == new_seerr_url:
+        return False
+
+    config.seerr_url = new_seerr_url
+    await forget_all_tokens(session)
+    await destroy_other_sessions(session, keep_token=keep_session_token)
+    return True
