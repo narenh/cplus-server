@@ -3,30 +3,36 @@
 A different caller from both tvOS and the browser admin webui: it authenticates
 with a Plex token like tvOS does, but — unlike tvOS — always validates live
 against Seerr and gates on the ``MANAGE_REQUESTS`` bit, because these
-operations (grabbing a specific release directly, listing download clients)
-have no action and no permission grant of their own to check against the
-cache. Named ``/manager/*`` after that gate, to keep it visually distinct from
-tvOS's ``/grab`` and from the cookie-authenticated ``/admin/*`` webui.
+operations (grabbing a specific release directly, listing download clients,
+unrestricted search) have no action and no permission grant of their own to
+check against the cache. Named ``/manager/*`` after that gate, to keep it
+visually distinct from tvOS's ``/grab`` and ``/titles/{imdb_id}/actions`` and
+from the cookie-authenticated ``/admin/*`` webui.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...auth.identity import authenticate_plex_token
+from ...db.models import ActivityLog, EventType
 from ...prowlarr.client import ProwlarrError
+from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, ProwlarrDep, SeerrDep, require_request_manager
+from ..deps import ConfigDep, DbDep, PlexTokenDep, ProwlarrDep, SeerrDep, require_request_manager
 from ..grab_core import execute_grab
 from ..schemas import GrabResponse, ManagerGrabRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/manager", tags=["manager"])
+
+NDJSON_MEDIA_TYPE = "application/x-ndjson"
 
 
 @router.post("/grab", response_model=GrabResponse)
@@ -59,6 +65,83 @@ async def grab(
         action=None,
         download_client_id=body.download_client_id,
         body=body,
+    )
+
+
+@router.get("/search")
+async def search(
+    db: DbDep,
+    config: ConfigDep,
+    prowlarr: ProwlarrDep,
+    seerr: SeerrDep,
+    plex_token: PlexTokenDep,
+    imdb_id: str | None = Query(default=None, min_length=1),
+    query: str | None = Query(default=None, min_length=1),
+    preferred_only: bool = Query(default=False),
+) -> StreamingResponse:
+    """Unrestricted Prowlarr search for the admin app: by IMDB id or free text.
+
+    Exactly one of ``imdb_id`` or ``query`` must be given. Never scored — there
+    is no action here to score against, and picking a release to grab directly
+    (``POST /manager/grab``) doesn't need one; every result is returned as-is.
+
+    This is the *only* way to search Prowlarr independent of holding an
+    action — regular tvOS users only ever see Prowlarr results through an
+    action they hold, at ``GET /titles/{imdb_id}/actions``, which is exactly
+    the access control this endpoint would bypass for anyone. Restricted to
+    callers who can manage requests and checked against Seerr live, same gate
+    as every other ``/manager/*`` endpoint.
+    """
+    if (imdb_id is None) == (query is None):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Provide exactly one of imdb_id or query.",
+        )
+
+    try:
+        user, auth = await authenticate_plex_token(db, seerr, plex_token)
+    except SeerrAuthError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+        ) from exc
+    except SeerrError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+        ) from exc
+
+    require_request_manager(auth)
+
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            event_type=EventType.SEARCH,
+            detail={
+                "imdb_id": imdb_id,
+                "query": query,
+                "preferred_only": preferred_only,
+                "preferred_indexer_id": config.preferred_indexer_id,
+            },
+        )
+    )
+
+    preferred_indexer_id = config.preferred_indexer_id
+
+    async def body() -> AsyncIterator[str]:
+        async for phase in stream_search(
+            prowlarr=prowlarr,
+            imdb_id=imdb_id,
+            query=query,
+            preferred_only=preferred_only,
+            actions=[],
+            preferred_indexer_id=preferred_indexer_id,
+        ):
+            yield phase.to_ndjson_line()
+
+    return StreamingResponse(
+        body(),
+        media_type=NDJSON_MEDIA_TYPE,
+        # Proxies love to buffer streamed responses; this asks nginx not to.
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 

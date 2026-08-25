@@ -1,4 +1,4 @@
-"""Endpoint tests for /search, /grab and /request."""
+"""Endpoint tests for /grab and /request."""
 
 from __future__ import annotations
 
@@ -28,19 +28,6 @@ WEB_2160 = {
     "indexer": "Tracker One",
     "size": 25 * GB,
 }
-WEB_1080 = {
-    "title": "Movie.2024.1080p.WEB-DL.DDP5.1-GRP",
-    "guid": "guid-fhd",
-    "indexerId": 2,
-    "indexer": "Tracker Two",
-    "size": 8 * GB,
-}
-FULL_DISC = {
-    "title": "Movie.2024.COMPLETE.UHD.BLURAY-TERMiNAL",
-    "guid": "guid-disc",
-    "indexerId": 1,
-    "size": 80 * GB,
-}
 
 
 def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
@@ -59,119 +46,6 @@ async def authenticate(client: httpx.AsyncClient, headers: dict) -> None:
     """Run the tvOS checkpoint so the Plex-token cache is populated."""
     response = await client.get("/register", headers=headers)
     assert response.status_code == 200
-
-
-def ndjson(response: httpx.Response) -> list[dict]:
-    return [json.loads(line) for line in response.text.splitlines() if line.strip()]
-
-
-# --------------------------------------------------------------------------- #
-# GET /search
-# --------------------------------------------------------------------------- #
-
-
-@respx.mock
-async def test_search_requires_a_cached_token(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    mock_prowlarr_search([WEB_2160])
-    response = await client.get(
-        "/search", params={"query": "the office"}, headers=plex_headers
-    )
-    assert response.status_code == 401
-    assert "GET /register" in response.json()["detail"]
-
-
-@respx.mock
-async def test_search_makes_no_outbound_auth_call(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    seerr = mock_seerr_auth()
-    mock_prowlarr_search([WEB_2160])
-    await authenticate(client, plex_headers)
-    calls_after_auth = seerr.call_count
-
-    await client.get("/search", params={"query": "the office"}, headers=plex_headers)
-
-    # Cache-only: search must not touch Plex or Seerr.
-    assert seerr.call_count == calls_after_auth
-
-
-@respx.mock
-async def test_a_free_text_query_returns_releases_with_no_recommendations(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth()
-    route = mock_prowlarr_search([WEB_2160, WEB_1080])
-    await authenticate(client, plex_headers)
-
-    user = (await db.execute(select(User))).scalar_one()
-    action = await make_action(db, "Stream Now")
-    await grant(db, user, action)
-
-    response = await client.get(
-        "/search", params={"query": "the office"}, headers=plex_headers
-    )
-
-    assert response.status_code == 200
-    lines = ndjson(response)
-    assert [line["phase"] for line in lines] == ["all"]
-    assert [r["guid"] for r in lines[0]["releases"]] == ["guid-uhd", "guid-fhd"]
-    # Every profile is ignored for a text query.
-    assert lines[0]["recommendations"] == {}
-
-    params = route.calls[0].request.url.params
-    assert params["query"] == "the office"
-    assert params["type"] == "search"
-    # Not category-scoped: TV and anything else Prowlarr indexes can come back.
-    assert "categories" not in params
-
-
-@respx.mock
-async def test_a_free_text_query_is_still_parsed_and_full_disc_filtered(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth()
-    mock_prowlarr_search([WEB_2160, FULL_DISC])
-    await authenticate(client, plex_headers)
-
-    response = await client.get("/search", params={"query": "dune"}, headers=plex_headers)
-
-    releases = ndjson(response)[0]["releases"]
-    assert [r["guid"] for r in releases] == ["guid-uhd"]
-    assert releases[0]["has_atmos"] is True
-
-
-@respx.mock
-async def test_a_text_query_is_logged_to_the_activity_log(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth()
-    mock_prowlarr_search([WEB_2160])
-    await authenticate(client, plex_headers)
-
-    await client.get(
-        "/search",
-        params={"query": "dune part two", "preferred_only": "true"},
-        headers=plex_headers,
-    )
-
-    entry = (
-        await db.execute(
-            select(ActivityLog).where(ActivityLog.event_type == EventType.SEARCH)
-        )
-    ).scalar_one()
-    assert entry.detail["query"] == "dune part two"
-    assert entry.detail["preferred_only"] is True
-
-
-async def test_search_before_prowlarr_is_configured_is_503(
-    client: httpx.AsyncClient, plex_headers: dict
-) -> None:
-    response = await client.get(
-        "/search", params={"query": "dune"}, headers=plex_headers
-    )
-    assert response.status_code == 503
 
 
 # --------------------------------------------------------------------------- #

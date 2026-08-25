@@ -15,10 +15,15 @@ The full candidate list rides along in the same response, so pressing
 "view all releases" needs no second call — it is a client-side reveal of
 ``releases``, not a fetch.
 
-Cache-only auth, same as ``GET /search``: no outbound Plex or Seerr call. This
-endpoint used to be ``GET /search?imdb_id=...``; free-text, action-agnostic
-search — a different job, tied to no title and to no action — is what
-``GET /search`` is exclusively for now.
+**Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
+caller with none — whether that's zero actions, or only the built-in Request
+action, which never touches Prowlarr — never triggers a search: the response
+is a single ``releases: []`` line naming whatever they *are* permitted (just
+Request, or nothing). Actions are the only grant of indexer access a regular
+user has; unrestricted search, independent of holding any action, is the admin
+app's job at ``GET /manager/search`` instead.
+
+Cache-only auth: no outbound Plex or Seerr call.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.models import Action, ActivityLog, EventType, Permission, QualityProfile
 from ...quality.models import QualityProfile as ProfileSchema
-from ...search.stream import ScorableAction, stream_search
+from ...search.stream import PHASE_ALL, ScorableAction, stream_search
 from ..deps import CachedUserDep, ConfigDep, DbDep, ProwlarrDep
 
 logger = logging.getLogger(__name__)
@@ -94,15 +99,27 @@ async def title_actions(
 
     One or two phases depending on whether a preferred indexer is configured —
     see :mod:`cplus_service.search.stream` for the full phase semantics, which
-    this reuses unchanged. As with ``GET /search``, the client's merge rule is
-    **apply the last line you received, wholesale**: each line's ``actions``
-    array is complete on its own, not a delta from the previous one.
+    this reuses unchanged. As with ``GET /manager/search``, the client's merge
+    rule is **apply the last line you received, wholesale**: each line's
+    ``actions`` array is complete on its own, not a delta from the previous
+    one.
 
     ``preferred_only`` restricts the search to the admin's preferred indexer;
-    see ``GET /search`` for its exact semantics, which are identical here.
+    see ``GET /manager/search`` for its exact semantics, which are identical
+    here. It has no effect when the caller holds no Prowlarr-backed action,
+    since no search happens at all in that case.
     """
     scorable = await scorable_actions(db, user.id)
     request_action = await permitted_request_action(db, user.id)
+
+    request_offer: dict[str, object] | None = None
+    if request_action is not None:
+        request_offer = {
+            "id": request_action.id,
+            "name": request_action.name,
+            "kind": KIND_REQUEST,
+            "recommended_release_guid": None,
+        }
 
     # Logged up front rather than after the stream drains, so a client that
     # disconnects mid-search still leaves an audit trail.
@@ -123,6 +140,19 @@ async def title_actions(
     preferred_indexer_id = config.preferred_indexer_id
 
     async def body() -> AsyncIterator[str]:
+        if not scorable:
+            # No Prowlarr-backed action held — actions are the only grant of
+            # indexer access a regular user has, so there is nothing to search
+            # for. (The Prowlarr dependency above still validated that it's
+            # configured; it's just never called here.)
+            payload = {
+                "phase": PHASE_ALL,
+                "releases": [],
+                "actions": [request_offer] if request_offer is not None else [],
+            }
+            yield json.dumps(payload, separators=(",", ":")) + "\n"
+            return
+
         async for phase in stream_search(
             prowlarr=prowlarr,
             imdb_id=imdb_id,
@@ -134,15 +164,8 @@ async def title_actions(
             recommendations = payload.pop("recommendations")
 
             actions: list[dict[str, object]] = []
-            if request_action is not None:
-                actions.append(
-                    {
-                        "id": request_action.id,
-                        "name": request_action.name,
-                        "kind": KIND_REQUEST,
-                        "recommended_release_guid": None,
-                    }
-                )
+            if request_offer is not None:
+                actions.append(request_offer)
             for action in scorable:
                 actions.append(
                     {

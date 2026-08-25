@@ -185,6 +185,66 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
     assert actions[grab_action.id]["recommended_release_guid"] == "guid-uhd"
 
 
+# --------------------------------------------------------------------------- #
+# Holding no Prowlarr-backed action grants no Prowlarr access
+#
+# Actions are the only way a regular user is granted access to Prowlarr's
+# indexers. Unrestricted search, independent of holding any action, is the
+# admin app's job at GET /manager/search instead — see test_manager.py.
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_user_with_no_actions_never_triggers_a_prowlarr_search(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    route = mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert not route.called
+    assert ndjson(response) == [{"phase": "all", "releases": [], "actions": []}]
+
+
+@respx.mock
+async def test_a_user_with_only_the_request_action_never_triggers_a_search(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Request never touches Prowlarr — holding only it is not "having an
+    # action", in the sense of Prowlarr access.
+    mock_seerr_auth()
+    route = mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    request_action = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    await grant(db, user, request_action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert not route.called
+    assert ndjson(response) == [
+        {
+            "phase": "all",
+            "releases": [],
+            "actions": [
+                {
+                    "id": request_action.id,
+                    "name": "Request",
+                    "kind": "request",
+                    "recommended_release_guid": None,
+                }
+            ],
+        }
+    ]
+
+
 @respx.mock
 async def test_titles_with_no_results_still_completes_the_stream(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
@@ -205,6 +265,9 @@ async def test_preferred_only_scopes_titles_to_one_indexer(
 ) -> None:
     mock_seerr_auth()
     await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    await grant(db, user, await make_action(db, "Stream Now"))
 
     configured.preferred_indexer_id = 1
     db.add(configured)
@@ -230,6 +293,9 @@ async def test_the_titles_default_is_all_indexers(
     mock_seerr_auth()
     await authenticate(client, plex_headers)
 
+    user = (await db.execute(select(User))).scalar_one()
+    await grant(db, user, await make_action(db, "Stream Now"))
+
     configured.preferred_indexer_id = 1
     db.add(configured)
     await db.commit()
@@ -249,11 +315,14 @@ async def test_the_titles_default_is_all_indexers(
 
 @respx.mock
 async def test_preferred_only_without_a_preferred_indexer_searches_everything(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
     route = mock_prowlarr_search([WEB_2160])
     await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    await grant(db, user, await make_action(db, "Stream Now"))
 
     response = await client.get(
         "/titles/tt0111161/actions",
