@@ -28,7 +28,7 @@ All three build stages are complete.
 | 1 | Prowlarr client wrapper | ✅ done |
 | 1 | Quality profile rule engine | ✅ done |
 | 2 | Seerr client + both auth flows | ✅ done |
-| 2 | `/register`, `/titles/{imdb_id}/actions`, `/search`, `/grab`, `/request` | ✅ done |
+| 2 | `/register`, `/titles/{imdb_id}/actions`, `/manager/search`, `/grab`, `/request` | ✅ done |
 | 2 | Built-in Request action | ✅ done |
 | 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
 | 3 | Docker packaging | ✅ done |
@@ -166,7 +166,7 @@ src/cplus_service/
   search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           actions, search, grab, request, seerr
+  api/routes/           register, titles, grab, manager, request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
@@ -396,9 +396,8 @@ No login step, no session token. The header is `X-Plex-Token`.
    records the token → user mapping in `plex_token_sessions`. The response body
    carries no action details — actions only make sense in the context of a
    title, and this endpoint has none — so it is just a status: 200 or 401.
-2. `/titles/{imdb_id}/actions`, `/search` and `/grab` authenticate **against
-   that mapping only** — no outbound Plex or Seerr call, which is what keeps
-   them fast.
+2. `/titles/{imdb_id}/actions` and `/grab` authenticate **against that mapping
+   only** — no outbound Plex or Seerr call, which is what keeps them fast.
 3. An unknown token is a `401`; the client's recovery is to call `/register`,
    which it does on launch anyway.
 4. `/request` is the exception: it always validates live, because it needs a
@@ -412,10 +411,10 @@ credential even if the database file leaks.
 There is **no expiry**: an entry is valid until that user's next `/register`
 call overwrites it, or until the user is deleted, which cascades. The tradeoff
 is that a Plex token revoked upstream keeps working on
-`/titles/{imdb_id}/actions`, `/search` and `/grab` until one of those
-happens — removing the user in the admin UI is the immediate lever. Revoking a
-single *permission* likewise takes effect at their next `/register` call, not
-at once.
+`/titles/{imdb_id}/actions` and `/grab` until one of those happens — removing
+the user in the admin UI is the immediate lever. Revoking a single
+*permission* likewise takes effect at their next `/register` call, not at
+once.
 
 ### Webui — Plex OAuth PIN flow + browser session
 
@@ -458,9 +457,9 @@ flushed.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
-| `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release |
-| `GET /search?query=` | cache | NDJSON stream, never scored, any category |
+| `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
@@ -480,21 +479,28 @@ client routes a press on `kind`: `"request"` posts to `/request`, `"grab"`
 posts to `/grab`. The full release list rides along in the same response, so
 "view all releases" needs no second call.
 
-**Actions are a tvOS concept.** They exist to give that app a button label and a
-per-action recommendation. The admin app needs neither: it searches by IMDB id
-using the free-text-shaped machinery under the hood, then grabs a chosen
-release by naming the download client directly — `POST /manager/grab`, with
-`download_client_id` instead of `action_id` — restricted to callers who can
-manage requests and checked against Seerr live, same as
-`GET /manager/download-clients`, which exists to populate that picker since the
-web UI's copy is session-gated and the admin app authenticates with a Plex
-token.
+**Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
+caller with none — zero actions, or only the built-in Request action, which
+never touches Prowlarr — never triggers a search on `/titles/{imdb_id}/actions`;
+the response just names whatever they *are* permitted (Request, or nothing),
+with an empty `releases`. Actions are the *only* grant of indexer access a
+regular tvOS user has.
+
+**Unrestricted search is the admin app's job, not tvOS's.** It needs to search
+by IMDB id or free text without holding any action — to hand-pick a release for
+`POST /manager/grab` during a request approval, independent of any user's
+permissions. `GET /manager/search` is exactly `GET /titles/{imdb_id}/actions`'s
+underlying Prowlarr fetch with the action layer stripped out: never scored (no
+action to score against), no permission gate but the `MANAGE_REQUESTS` one, and
+either search mode. Letting a regular user reach it would hand them Prowlarr
+access with no action at all — precisely what `/titles/{imdb_id}/actions`'s
+gate exists to prevent.
 
 **Any live Seerr validation refreshes the stored token mapping**, not just
 `/register`. The admin app never calls `/register`, so without that its first
 `/seerr/*` call would leave the mapping empty and `/titles/{imdb_id}/actions`
-would 401 for it forever. In practice `GET /seerr/me` at startup is what signs
-it in.
+would 401 for it forever. In practice `GET /manager/search` or
+`GET /seerr/me` at startup is what signs it in.
 
 `POST /grab` and `POST /manager/grab` both echo back the release fields the
 client already received in a search/actions stream. `indexer_id` is what
@@ -536,14 +542,16 @@ page swaps straight into the DOM.
 
 Two endpoints, both NDJSON, both built on the same underlying Prowlarr-fetch-
 and-score plumbing (`cplus_service.search.stream`) — but they answer different
-questions and are not interchangeable:
+questions, gate on different things, and are not interchangeable:
 
-| | `GET /titles/{imdb_id}/actions` | `GET /search?query=` |
+| | `GET /titles/{imdb_id}/actions` | `GET /manager/search` |
 |---|---|---|
-| Question answered | "what can I do with this known title?" | "what does Prowlarr have for this string?" |
-| Categories | movies only | not scoped — TV, anime, anything |
+| Question answered | "what can I do with this known title?" | "what does Prowlarr have for this id or string?" |
+| Auth | cache (tvOS) | live Seerr, `MANAGE_REQUESTS` (admin app) |
+| Access requires | holding a Prowlarr-backed action | nothing — that's the point |
+| Categories | movies only | `imdb_id`: movies only. `query`: not scoped — TV, anime, anything |
 | Recommendations | one per permitted action, plus the Request action | **never** — always no recommendation |
-| Phases | `preferred` then `all`, when a preferred indexer is set | always a single `all` |
+| Phases | `preferred` then `all`, when a preferred indexer is set and the caller holds an action | `imdb_id`: same. `query`: always a single `all` |
 
 `GET /titles/{imdb_id}/actions` is what tvOS calls when a movie's detail page
 opens. Response lines carry `releases` (the parsed, tagged, full-disc-filtered
@@ -553,16 +561,24 @@ of its recommended release or `null` if nothing survived that action's quality
 profile filters. The built-in Request action always appears with
 `recommended_release_guid: null` — it has no quality profile and never touches
 Prowlarr, so there is nothing to recommend, but the action itself is still
-reported so the client always knows which buttons to draw.
+reported so the client always knows which buttons to draw. **A caller holding
+no Prowlarr-backed action never triggers a Prowlarr call at all** — actions are
+the only grant of indexer access a regular user has, so the response is a
+single `releases: []` line naming whatever they *are* permitted (Request, or
+nothing).
 
-`GET /search?query=` is the free-text, action-agnostic browse: a string the
-user typed, not a title the client already identified. No quality profile can
-meaningfully rank an arbitrary string's results, so none is consulted and
-`actions` is always empty — there is nothing to recommend and, with nothing to
-race a fast partial answer against, always a single phase. Results are still
-parsed, tagged and full-disc-filtered exactly as for a title's actions. Note
-the parser is tuned for movie names: a TV release tags resolution, source and
-HDR correctly, while `base_title` and `release_group` mean less.
+`GET /manager/search` is the admin app's unrestricted search, independent of
+holding any action: exactly one of `imdb_id` or `query`, giving both or
+neither a 400. No quality profile is ever consulted — there is no action here
+to score against, and picking a release to grab directly
+(`POST /manager/grab`) doesn't need one — so `recommendations` is always empty
+and every result is returned as-is. `imdb_id` mode still races the
+preferred-indexer call the same way `/titles/{imdb_id}/actions` does; `query`
+mode is a single phase regardless, since there is nothing to race a
+recommendation against either way. Results are still parsed, tagged and
+full-disc-filtered exactly as for a title's actions. Note the parser is tuned
+for movie names: a TV release tags resolution, source and HDR correctly, while
+`base_title` and `release_group` mean less.
 
 `preferred_only=true` restricts either endpoint to a single call against
 `config.preferred_indexer_id`, yielding one `all` phase. It **defaults to
@@ -571,10 +587,10 @@ rather than an error, so a client can send it unconditionally.
 
 **The last line is always `phase: "all"`**, from either endpoint — that is how
 a client knows the stream is complete. `preferred` is an optional earlier
-partial, and only `GET /titles/{imdb_id}/actions` ever sends one.
+partial.
 
-For a title's actions with a preferred indexer and `preferred_only=false`, both
-Prowlarr calls are issued **concurrently**:
+For an `imdb_id`-scoped search with a preferred indexer and
+`preferred_only=false`, both Prowlarr calls are issued **concurrently**:
 
 1. scoped to `config.preferred_indexer_id` — **skipped entirely** when that is
    null, since there is nothing distinct to fetch early;
@@ -732,11 +748,11 @@ page renders it as its own badge. Widening the enum would be cleaner but is a
 schema change nobody asked for.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
-the user's next `/register` call, because `/titles/{imdb_id}/actions`,
-`/search` and `/grab` authenticate from the stored token mapping rather than
-re-checking Seerr. The UI says so rather than papering over it. Removing the
-user entirely *is* immediate — the delete cascades to their token mappings and
-browser sessions.
+the user's next `/register` call, because `/titles/{imdb_id}/actions` and
+`/grab` authenticate from the stored token mapping rather than re-checking
+Seerr. The UI says so rather than papering over it. Removing the user entirely
+*is* immediate — the delete cascades to their token mappings and browser
+sessions.
 
 ### Resolved
 
