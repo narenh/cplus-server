@@ -42,46 +42,29 @@ docker compose up -d          # then open http://localhost:8080
 ```
 
 Locally, `docker-compose.override.yml` is merged automatically and is what
-publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken. Coolify never
-applies that file — it invokes compose with an explicit `-f`, which disables
-the automatic override merge.
+publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken.
 
 That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
 quality profiles, actions, permissions — is configured in the web UI, not in
 environment variables or config files.
 
-### Deploying with Coolify
-
-1. **+ New Resource → Docker Compose**, pointed at this repository, branch
-   `master`, compose file `docker-compose.yml`.
-2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS_8080` and
-   handles the proxy and TLS certificate; nothing else needs configuring.
-3. Deploy.
-
-**Do not add a `ports:` mapping to `docker-compose.yml`.** Coolify's proxy
-reaches the container over the Docker network, so `expose: 8080` is all it
-needs. Publishing a host port there binds `0.0.0.0:8080` on the Coolify host,
-which fails the deploy outright if anything already holds that port — and if it
-succeeds, leaves the service reachable bypassing the proxy and its TLS. The
-port lives in the magic variable's *name* (`SERVICE_FQDN_<NAME>_<PORT>`), not
-in its value.
-
 **Check the volume before you rely on it.** All state — config, users, quality
 profiles, actions, permissions, grabs, sessions — is the single SQLite file at
 `/data/cplus.db`. The compose file declares `cplus-data:/data` as a named
-volume so redeploys keep it. If that ever becomes a non-persistent path, every
-redeploy silently resets the service to first-run, and the failure looks like
-"it asked me to sign in again" rather than like data loss. To back the service
-up, copy that one file.
+volume so restarts and redeploys keep it. If that ever becomes a
+non-persistent path, every restart silently resets the service to first-run,
+and the failure looks like "it asked me to sign in again" rather than like
+data loss. To back the service up, copy that one file.
 
-Migrations run on every container start, so upgrading is redeploy-and-done.
-
-The app runs behind Coolify's proxy with `proxy_headers` enabled, so it sees
-the original scheme and marks the admin session cookie `Secure` when you are on
-HTTPS — and leaves it unset for local plain-HTTP development, so both work
-without a flag to set. If you ever expose the container's port directly rather
-than through a proxy, set `CPLUS_FORWARDED_ALLOW_IPS` to the proxy address
-instead of leaving it at the default `*`.
+The app runs with `proxy_headers` support enabled, so it trusts the original
+scheme from a reverse proxy in front of it and marks the admin session cookie
+`Secure` when you are on HTTPS — and leaves it unset for local plain-HTTP
+development, so both work without a flag to set. That trust is scoped by
+`CPLUS_FORWARDED_ALLOW_IPS`, which defaults to `*`; if you're running this on
+a box reachable from the internet, set it to your reverse proxy's actual
+address rather than leaving it at `*`, and don't publish the app's port
+directly alongside the proxy — anyone who can reach the raw port bypasses
+your proxy's TLS.
 
 ### First-run setup
 
@@ -765,3 +748,28 @@ admin-bit check.
 *Dead `deps.get_admin` / `AdminDep`.* Stage 2 wrote it for stage 3 to wire in,
 but a browser needs a redirect rather than 401 JSON. Removed in favour of
 `api/routes/admin/deps.require_admin_page`.
+
+---
+
+<details>
+<summary>Deploying with Coolify</summary>
+
+1. **+ New Resource → Docker Compose**, pointed at this repository, branch
+   `master`, compose file `docker-compose.yml`.
+2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS_8080` and
+   handles the proxy and TLS certificate; nothing else needs configuring.
+3. Deploy.
+
+**Do not add a `ports:` mapping to `docker-compose.yml`.** Coolify's proxy
+reaches the container over the Docker network, so `expose: 8080` is all it
+needs. Publishing a host port there binds `0.0.0.0:8080` on the Coolify host,
+which fails the deploy outright if anything already holds that port — and if it
+succeeds, leaves the service reachable bypassing the proxy and its TLS. The
+port lives in the magic variable's *name* (`SERVICE_FQDN_<NAME>_<PORT>`), not
+in its value.
+
+Coolify never applies `docker-compose.override.yml` — it invokes compose with
+an explicit `-f`, which disables the automatic override merge — so the
+`CPLUS_HOST_PORT` note under "Running it" doesn't apply to a Coolify deploy.
+
+</details>
