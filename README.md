@@ -7,7 +7,7 @@ permissioned subset of Prowlarr search/grab functionality to their Seerr users �
 without those users ever seeing the Prowlarr API key. It is consumed by the
 Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 
-**Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
+**Out of scope, for now:** Sonarr and Radarr. This service talks to Prowlarr
 (search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
 set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
 **movies-only** when driven by IMDB ID. Two things sit outside that: the
@@ -17,71 +17,36 @@ and returns whatever Prowlarr indexes.
 
 ---
 
-## Build status
-
-All three build stages are complete.
-
-| | Component | Status |
-|---|---|---|
-| 1 | Data model + migrations | ✅ done |
-| 1 | Release parser | ✅ done |
-| 1 | Prowlarr client wrapper | ✅ done |
-| 1 | Quality profile rule engine | ✅ done |
-| 2 | Seerr client + both auth flows | ✅ done |
-| 2 | `/register`, `/titles/{imdb_id}/actions`, `/manager/search`, `/grab`, `/request` | ✅ done |
-| 2 | Built-in Request action | ✅ done |
-| 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
-| 3 | Docker packaging | ✅ done |
-
----
-
-## Running it
+## Setup Instructions
 
 ```bash
 docker compose up -d          # then open http://localhost:8080
 ```
 
 Locally, `docker-compose.override.yml` is merged automatically and is what
-publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken. Coolify never
-applies that file — it invokes compose with an explicit `-f`, which disables
-the automatic override merge.
+publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken.
 
 That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
 quality profiles, actions, permissions — is configured in the web UI, not in
 environment variables or config files.
 
-### Deploying with Coolify
-
-1. **+ New Resource → Docker Compose**, pointed at this repository, branch
-   `master`, compose file `docker-compose.yml`.
-2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS_8080` and
-   handles the proxy and TLS certificate; nothing else needs configuring.
-3. Deploy.
-
-**Do not add a `ports:` mapping to `docker-compose.yml`.** Coolify's proxy
-reaches the container over the Docker network, so `expose: 8080` is all it
-needs. Publishing a host port there binds `0.0.0.0:8080` on the Coolify host,
-which fails the deploy outright if anything already holds that port — and if it
-succeeds, leaves the service reachable bypassing the proxy and its TLS. The
-port lives in the magic variable's *name* (`SERVICE_FQDN_<NAME>_<PORT>`), not
-in its value.
-
 **Check the volume before you rely on it.** All state — config, users, quality
 profiles, actions, permissions, grabs, sessions — is the single SQLite file at
 `/data/cplus.db`. The compose file declares `cplus-data:/data` as a named
-volume so redeploys keep it. If that ever becomes a non-persistent path, every
-redeploy silently resets the service to first-run, and the failure looks like
-"it asked me to sign in again" rather than like data loss. To back the service
-up, copy that one file.
+volume so restarts and redeploys keep it. If that ever becomes a
+non-persistent path, every restart silently resets the service to first-run,
+and the failure looks like "it asked me to sign in again" rather than like
+data loss. To back the service up, copy that one file.
 
-Migrations run on every container start, so upgrading is redeploy-and-done.
-
-The app runs behind Coolify's proxy with `proxy_headers` enabled, so it sees
-the original scheme and marks the admin session cookie `Secure` when you are on
-HTTPS — and leaves it unset for local plain-HTTP development, so both work
-without a flag to set. If you ever expose the container's port directly rather
-than through a proxy, set `CPLUS_FORWARDED_ALLOW_IPS` to the proxy address
-instead of leaving it at the default `*`.
+The app runs with `proxy_headers` support enabled, so it trusts the original
+scheme from a reverse proxy in front of it and marks the admin session cookie
+`Secure` when you are on HTTPS — and leaves it unset for local plain-HTTP
+development, so both work without a flag to set. That trust is scoped by
+`CPLUS_FORWARDED_ALLOW_IPS`, which defaults to `*`; if you're running this on
+a box reachable from the internet, set it to your reverse proxy's actual
+address rather than leaving it at `*`, and don't publish the app's port
+directly alongside the proxy — anyone who can reach the raw port bypasses
+your proxy's TLS.
 
 ### First-run setup
 
@@ -122,6 +87,33 @@ is a row delete, and the sessions live on the same volume as everything else.
 State lives entirely in the SQLite file on the `cplus-data` volume. Back that up
 and you have backed up the service. `alembic upgrade head` runs on every start,
 so upgrading is pull-and-restart.
+
+### Securing a self-hosted deployment
+
+The one secret this service can't avoid persisting is the Prowlarr API key
+(`config.prowlarr_api_key`), stored in plaintext in the SQLite file. Nothing
+in the app itself leaks it — it travels only as a request header, is never
+rendered back into a page, and never appears in an error message or log line
+— but the database file it lives in is not encrypted at rest, so two things
+are worth doing deliberately as whoever runs the container:
+
+* **Treat the `cplus-data` volume like a secrets file.** Whatever backs it on
+  the host — a bind mount, a named volume's underlying directory — deserves
+  the same permission discipline you'd give any credentials file: not
+  world-readable, not synced unencrypted to shared or public storage, not
+  bind-mounted into any other container that doesn't need it.
+* **An admin session is worth exactly as much as the key itself.** Anyone
+  holding a valid `cplus_session` cookie can already drive Prowlarr through
+  the admin UI — search, grab, and, by pointing `prowlarr_url` at a server
+  they control and clicking *Verify Prowlarr connection*, recover the literal
+  key value even though the UI never displays it. So protect the Plex
+  account that can sign in as admin the way you'd protect the key directly,
+  and if you ever suspect a session was compromised, don't stop at signing it
+  out — rotate the Prowlarr API key too.
+
+Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
+publishing the app's port directly) is already in place — that's what keeps
+the admin UI itself from being the softer target.
 
 ### Development
 
@@ -765,3 +757,28 @@ admin-bit check.
 *Dead `deps.get_admin` / `AdminDep`.* Stage 2 wrote it for stage 3 to wire in,
 but a browser needs a redirect rather than 401 JSON. Removed in favour of
 `api/routes/admin/deps.require_admin_page`.
+
+---
+
+<details>
+<summary>Deploying with Coolify</summary>
+
+1. **+ New Resource → Docker Compose**, pointed at this repository, branch
+   `master`, compose file `docker-compose.yml`.
+2. Assign a domain. Coolify substitutes it into `SERVICE_FQDN_CPLUS_8080` and
+   handles the proxy and TLS certificate; nothing else needs configuring.
+3. Deploy.
+
+**Do not add a `ports:` mapping to `docker-compose.yml`.** Coolify's proxy
+reaches the container over the Docker network, so `expose: 8080` is all it
+needs. Publishing a host port there binds `0.0.0.0:8080` on the Coolify host,
+which fails the deploy outright if anything already holds that port — and if it
+succeeds, leaves the service reachable bypassing the proxy and its TLS. The
+port lives in the magic variable's *name* (`SERVICE_FQDN_<NAME>_<PORT>`), not
+in its value.
+
+Coolify never applies `docker-compose.override.yml` — it invokes compose with
+an explicit `-f`, which disables the automatic override merge — so the
+`CPLUS_HOST_PORT` note under "Running it" doesn't apply to a Coolify deploy.
+
+</details>

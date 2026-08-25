@@ -45,8 +45,12 @@ router = APIRouter(tags=["admin"])
 #: How long an unclaimed PIN sign-in is kept before being swept. Bounds the
 #: growth of :attr:`~cplus_service.api.state.AppState.pending_plex_logins` —
 #: ``POST /admin/plex/pin`` takes no auth, so without a sweep an abandoned or
-#: repeatedly-triggered sign-in would sit in memory until restart.
-PENDING_LOGIN_TTL = timedelta(hours=24)
+#: repeatedly-triggered sign-in would sit in memory until restart. Deliberately
+#: tighter than plex.tv's own PIN lifetime (a ``strong`` PIN, the kind this app
+#: requests, gets ``expiresIn: 1800`` from plex.tv) — there is no upside to
+#: cplus outliving Plex's own expiry, and a shorter window bounds exposure if
+#: an unclaimed ``pin_id`` were ever guessed.
+PENDING_LOGIN_TTL = timedelta(minutes=15)
 
 
 def _sweep_expired_logins(state: AppState) -> None:
