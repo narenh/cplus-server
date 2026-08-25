@@ -7,7 +7,7 @@ permissioned subset of Prowlarr search/grab functionality to their Seerr users â
 without those users ever seeing the Prowlarr API key. It is consumed by the
 Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 
-**Out of scope, permanently:** Sonarr and Radarr. This service talks to Prowlarr
+**Out of scope, for now:** Sonarr and Radarr. This service talks to Prowlarr
 (search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
 set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
 **movies-only** when driven by IMDB ID. Two things sit outside that: the
