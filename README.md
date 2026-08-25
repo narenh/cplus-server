@@ -106,6 +106,33 @@ State lives entirely in the SQLite file on the `cplus-data` volume. Back that up
 and you have backed up the service. `alembic upgrade head` runs on every start,
 so upgrading is pull-and-restart.
 
+### Securing a self-hosted deployment
+
+The one secret this service can't avoid persisting is the Prowlarr API key
+(`config.prowlarr_api_key`), stored in plaintext in the SQLite file. Nothing
+in the app itself leaks it — it travels only as a request header, is never
+rendered back into a page, and never appears in an error message or log line
+— but the database file it lives in is not encrypted at rest, so two things
+are worth doing deliberately as whoever runs the container:
+
+* **Treat the `cplus-data` volume like a secrets file.** Whatever backs it on
+  the host — a bind mount, a named volume's underlying directory — deserves
+  the same permission discipline you'd give any credentials file: not
+  world-readable, not synced unencrypted to shared or public storage, not
+  bind-mounted into any other container that doesn't need it.
+* **An admin session is worth exactly as much as the key itself.** Anyone
+  holding a valid `cplus_session` cookie can already drive Prowlarr through
+  the admin UI — search, grab, and, by pointing `prowlarr_url` at a server
+  they control and clicking *Verify Prowlarr connection*, recover the literal
+  key value even though the UI never displays it. So protect the Plex
+  account that can sign in as admin the way you'd protect the key directly,
+  and if you ever suspect a session was compromised, don't stop at signing it
+  out — rotate the Prowlarr API key too.
+
+Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
+publishing the app's port directly) is already in place — that's what keeps
+the admin UI itself from being the softer target.
+
 ### Development
 
 ```bash
