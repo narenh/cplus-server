@@ -17,25 +17,7 @@ and returns whatever Prowlarr indexes.
 
 ---
 
-## Build status
-
-All three build stages are complete.
-
-| | Component | Status |
-|---|---|---|
-| 1 | Data model + migrations | ✅ done |
-| 1 | Release parser | ✅ done |
-| 1 | Prowlarr client wrapper | ✅ done |
-| 1 | Quality profile rule engine | ✅ done |
-| 2 | Seerr client + both auth flows | ✅ done |
-| 2 | `/register`, `/titles/{imdb_id}/actions`, `/manager/search`, `/grab`, `/request` | ✅ done |
-| 2 | Built-in Request action | ✅ done |
-| 3 | Admin web UI (Jinja2 + HTMX) | ✅ done |
-| 3 | Docker packaging | ✅ done |
-
----
-
-## Running it
+## Setup Instructions
 
 ```bash
 docker compose up -d          # then open http://localhost:8080
