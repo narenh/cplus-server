@@ -15,6 +15,9 @@
   --err: #b3261e;
   --filter: #8a5a00;
   --preference: #3b6ea5;
+  /* Text laid over a solid --err fill. Light mode's red is dark enough to
+     carry white; dark mode's is a pastel, which needs dark ink instead. */
+  --on-err: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +32,7 @@
     --err: #f08a84;
     --filter: #e0b060;
     --preference: #7aa9dd;
+    --on-err: #14161a;
   }
 }
 
@@ -74,6 +78,7 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .right { text-align: right; }
 .center { text-align: center; }
 .nowrap { white-space: nowrap; }
+.hidden { display: none !important; }
 
 /* Forms ------------------------------------------------------------------- */
 
@@ -98,10 +103,15 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.secondary, .button.secondary {
   background: transparent; color: var(--ink); border-color: var(--line);
 }
+/* Solid red is the committing step of a destructive flow; the outlined variant
+   is what offers it in the first place, so arming a change does not look
+   heavier on the page than confirming it. */
 button.destructive, .button.destructive {
-  background: var(--err); color: #fff;
+  background: var(--err); color: var(--on-err);
 }
-.hidden { display: none !important; }
+button.destructive.secondary, .button.destructive.secondary {
+  background: transparent; color: var(--err); border-color: var(--err);
+}
 button.link {
   background: none; border: none; color: var(--accent); padding: 0 6px; cursor: pointer;
 }

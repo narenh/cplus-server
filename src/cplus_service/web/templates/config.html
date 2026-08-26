@@ -28,6 +28,14 @@
     returned none.
   </p>
 
+  <div class="row">
+    <button type="button" class="secondary"
+            hx-post="/admin/config/verify-prowlarr?format=html"
+            hx-target="#verify-result"
+            hx-swap="innerHTML">Verify Prowlarr connection</button>
+    <span id="verify-result" class="inline-result"></span>
+  </div>
+
   <h2>TMDB</h2>
   <label for="tmdb_bearer_token">Bearer token</label>
   <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off"
@@ -42,13 +50,8 @@
 
   <div class="row">
     <button type="submit">Save</button>
-    <button type="button" class="secondary"
-            hx-post="/admin/config/verify-prowlarr?format=html"
-            hx-target="#verify-result"
-            hx-swap="innerHTML">Verify Prowlarr connection</button>
-    <span id="verify-result" class="inline-result"></span>
+    <span id="save-result" class="inline-result"></span>
   </div>
-  <div id="save-result" class="inline-result"></div>
 </form>
 
 <form class="card" id="seerr-form" hx-post="/admin/config/seerr-url"
@@ -64,36 +67,41 @@
     the time.
   </p>
 
-  <div class="row" id="seerr-idle-row">
-    <button type="button" class="destructive" id="seerr-change-btn">Change Seerr host</button>
+  {# One row, swapped in place: arming the change replaces the button that
+     offered it with the pair that resolves it, so there is never both an
+     invitation to change the host and a live confirm on screen at once. #}
+  <div class="row">
+    <button type="button" class="destructive secondary" id="seerr-change-btn">Change Seerr host</button>
+    <button type="button" class="secondary hidden" id="seerr-cancel-btn">Cancel</button>
+    <button type="submit" class="destructive hidden" id="seerr-confirm-btn">Confirm host change</button>
+    <span id="seerr-result" class="inline-result"></span>
   </div>
-  <div class="row hidden" id="seerr-edit-row">
-    <button type="submit" class="destructive">Confirm host change</button>
-    <button type="button" class="secondary" id="seerr-cancel-btn">Cancel</button>
-  </div>
-  <div id="seerr-result" class="inline-result"></div>
 </form>
 
 <script>
   (function () {
     var input = document.getElementById("seerr_url");
+    var changeBtn = document.getElementById("seerr-change-btn");
+    var cancelBtn = document.getElementById("seerr-cancel-btn");
+    var confirmBtn = document.getElementById("seerr-confirm-btn");
     var original = input.value;
-    var idleRow = document.getElementById("seerr-idle-row");
-    var editRow = document.getElementById("seerr-edit-row");
 
-    document.getElementById("seerr-change-btn").addEventListener("click", function () {
-      input.disabled = false;
+    function arm(armed) {
+      input.disabled = !armed;
+      changeBtn.classList.toggle("hidden", armed);
+      cancelBtn.classList.toggle("hidden", !armed);
+      confirmBtn.classList.toggle("hidden", !armed);
+    }
+
+    changeBtn.addEventListener("click", function () {
+      arm(true);
       input.focus();
       input.select();
-      idleRow.classList.add("hidden");
-      editRow.classList.remove("hidden");
     });
 
-    document.getElementById("seerr-cancel-btn").addEventListener("click", function () {
+    cancelBtn.addEventListener("click", function () {
       input.value = original;
-      input.disabled = true;
-      editRow.classList.add("hidden");
-      idleRow.classList.remove("hidden");
+      arm(false);
     });
 
     // A confirmed change round-trips through htmx rather than a page
@@ -102,9 +110,7 @@
     document.getElementById("seerr-form").addEventListener("htmx:afterRequest", function (evt) {
       if (evt.detail.successful) {
         original = input.value;
-        input.disabled = true;
-        editRow.classList.add("hidden");
-        idleRow.classList.remove("hidden");
+        arm(false);
       }
     });
   })();
