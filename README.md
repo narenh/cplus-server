@@ -20,15 +20,18 @@ and returns whatever Prowlarr indexes.
 ## Setup Instructions
 
 ```bash
-docker compose up -d          # then open http://localhost:8080
+export CPLUS_SEERR_URL=https://seerr.example.com   # required
+docker compose up -d                               # then open http://localhost:8080
 ```
 
 Locally, `docker-compose.override.yml` is merged automatically and is what
 publishes the host port. Set `CPLUS_HOST_PORT` if 8080 is taken.
 
-That is the whole deployment. Everything else — Seerr URL, Prowlarr connection,
-quality profiles, actions, permissions — is configured in the web UI, not in
-environment variables or config files.
+That is the whole deployment. `CPLUS_SEERR_URL` is the one piece of real
+configuration that lives in the environment rather than the web UI — see
+[below](#why-the-seerr-url-is-not-in-the-web-ui) for why. Everything else —
+Prowlarr connection, quality profiles, actions, permissions — is configured in
+the web UI, not in environment variables or config files.
 
 **Check the volume before you rely on it.** All state — config, users, quality
 profiles, actions, permissions, grabs, sessions — is the single SQLite file at
@@ -50,13 +53,15 @@ your proxy's TLS.
 
 ### First-run setup
 
-1. Open `http://localhost:8080`. You land on the sign-in page.
-2. **Enter your Seerr URL** (e.g. `http://seerr.local:5055`) and click
-   *Sign in with Plex*. A Plex window opens; approve access there.
-3. The service asks Seerr who you are and checks Seerr's **ADMIN permission
-   bit**. If your account is not the Seerr admin you are refused — the web UI
-   has no non-admin use case. The Seerr URL is saved only once it has
-   successfully authenticated you, so a typo cannot lock you out.
+1. **Set `CPLUS_SEERR_URL`** to your Seerr instance (e.g.
+   `http://seerr.local:5055`) and start the service. Without it nobody can sign
+   in and no client can register; the startup log says so.
+2. Open `http://localhost:8080`. You land on the sign-in page, which shows the
+   Seerr host it will authenticate you against. Click *Sign in with Plex*; a
+   Plex window opens, approve access there.
+3. The service asks that Seerr who you are and checks Seerr's **ADMIN
+   permission bit**. If your account is not the Seerr admin you are refused —
+   the web UI has no non-admin use case.
 4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
    Optionally pick a preferred indexer; the default, *All indexers*, is fine.
 5. **Create at least one quality profile.** Every Prowlarr-backed action needs
@@ -74,6 +79,7 @@ Only the handful that must exist before the UI does:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `CPLUS_SEERR_URL` | *(none — required)* | Your Seerr base URL. The trust root: Seerr decides who is admin, so this is deliberately not settable through the UI |
 | `CPLUS_PORT` | `8080` | Listen port |
 | `CPLUS_HOST` | `0.0.0.0` | Bind address |
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
@@ -370,7 +376,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier` |
+| `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`. Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
@@ -440,23 +446,48 @@ once.
 5. An admin gets an opaque session token in an httpOnly `cplus_session` cookie,
    backed by the `admin_sessions` table.
 
-`seerr_url` is accepted in the body to make first-run bootstrap possible —
-setting it needs an admin session, and getting a session needs it. It is
-persisted only after it has been proven to work, so a typo cannot brick config.
+### Why the Seerr URL is not in the web UI
 
-**Changing `seerr_url` to a different instance flushes every cached identity**
-— both `plex_token_sessions` and `admin_sessions`, wholesale — from both
-`POST /admin/config/seerr-url` and the PIN-flow reconnect path. Every row was resolved
-against whichever instance was configured when it was written (permissions,
-the ADMIN bit, all of it); repointing at a different instance without
-dropping those caches would leave every device, and every signed-in browser,
-trusting authorization decisions made by an instance that no longer applies.
-The admin making the change keeps their own current session — the flush
-excludes it — so saving the new URL does not immediately sign them back out.
-Every other device and browser gets a clean `401`/redirect on its next call
-and re-authenticates, which is already each cache's built-in recovery path.
-A save that does not actually change `seerr_url` is a no-op: nothing is
-flushed.
+Neither sign-in endpoint takes authentication — they *are* how you
+authenticate. So whatever they use to decide "is this caller an admin?" must
+not be something a caller can supply.
+
+The Seerr URL used to be a field on the login form, filled in on first run and
+remembered, because setting it needed an admin session and getting a session
+needed it. That circularity had a much worse answer than it looked: an
+unauthenticated visitor could point *your* login page at a Seerr instance of
+their own, have it reply `{"permissions": 2}`, and be handed an admin session
+on your install — no knowledge of your Seerr, your Plex account or anything
+else required. Since `config` is a singleton, the same request also repointed
+every tvOS client at the attacker's instance.
+
+So it moved to `CPLUS_SEERR_URL`, and **no request to this service can change
+it**. The login page and the config page display it; neither can set it, and
+`POST /admin/config/seerr-url` no longer exists. Prowlarr stays in the database
+— it holds credentials, but it has no say in identity, so pointing it elsewhere
+cannot make anyone an admin.
+
+**Changing it flushes every cached identity** — both `plex_token_sessions` and
+`admin_sessions`, wholesale. Every row was resolved against whichever instance
+was configured when it was written (permissions, the ADMIN bit, all of it);
+coming up against a different instance without dropping those caches would
+leave every device, and every signed-in browser, trusting authorization
+decisions made by an instance that no longer applies. The flush happens at
+**startup**, since that is the only moment the value can change, and it has no
+carve-out for the admin who made the change — there is no request in flight to
+carve one out of. Everyone signs in again; every device gets a clean `401` on
+its next call and re-registers, which is already each cache's built-in recovery
+path.
+
+The `config` row keeps a SHA-256 `seerr_url_fingerprint` purely so that change
+can be *detected* across restarts. The URL itself is not stored: there is
+exactly one answer to "which Seerr is this install using?", the environment,
+and everything that displays it reads it from there rather than from a copy
+that could drift. A restart that changes nothing flushes nothing.
+
+Note that the first start after upgrading to this scheme *does* flush, because
+the fingerprint begins empty — those rows were resolved against a URL the
+migration deletes, so nothing can prove what they were resolved against.
 
 ---
 
@@ -532,10 +563,9 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 
 | Endpoint | Notes |
 |---|---|
-| `GET /admin/login` | The only ungated admin route |
-| `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow |
-| `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token |
-| `POST /admin/config/seerr-url` | Change Seerr host — its own destructive, confirm-gated flow |
+| `GET /admin/login` | The only ungated admin route. Shows the Seerr host; cannot set it |
+| `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow. Ungated, and so takes no parameters at all |
+| `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |

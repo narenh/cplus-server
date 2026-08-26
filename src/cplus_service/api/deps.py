@@ -6,6 +6,10 @@ Plex-token mapping without any outbound call, and backs
 ``/titles/{imdb_id}/actions``, ``/search`` and ``/grab``. ``/register`` and
 ``/request`` validate against Seerr directly instead, so they do not use it.
 
+Which Seerr they validate against is never a request's to choose:
+:func:`get_seerr` reads it from the environment, so no caller — authenticated or
+not — can name the instance that decides whether they are an admin.
+
 Admin routes are gated by
 :func:`cplus_service.api.routes.admin.deps.require_admin_page`, which redirects
 a signed-out browser rather than answering 401 JSON.
@@ -25,6 +29,7 @@ from ..db.session import get_config
 from ..prowlarr.client import ProwlarrClient
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
+from ..settings import SEERR_URL_ENV, seerr_url
 from .state import AppState
 
 PLEX_TOKEN_HEADER = "X-Plex-Token"
@@ -70,13 +75,21 @@ async def get_prowlarr(state: StateDep, config: ConfigDep) -> ProwlarrClient:
 ProwlarrDep = Annotated[ProwlarrClient, Depends(get_prowlarr)]
 
 
-async def get_seerr(state: StateDep, config: ConfigDep) -> SeerrClient:
-    if not config.seerr_url:
+async def get_seerr(state: StateDep) -> SeerrClient:
+    """A client for the Seerr instance named by the environment.
+
+    Deliberately does not take :data:`ConfigDep`: the URL is not in the database
+    and cannot be set through any request. Seerr decides who is admin, so a
+    request-supplied URL would be a request-supplied answer to "am I admin?".
+    See :mod:`cplus_service.settings`.
+    """
+    url = seerr_url()
+    if not url:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Seerr is not configured yet. Set it in the admin settings.",
+            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
         )
-    return SeerrClient(config.seerr_url, client=state.seerr_http)
+    return SeerrClient(url, client=state.seerr_http)
 
 
 SeerrDep = Annotated[SeerrClient, Depends(get_seerr)]

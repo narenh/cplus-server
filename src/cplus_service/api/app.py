@@ -19,9 +19,17 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from ..auth.identity import sync_seerr_instance
 from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
-from ..db.session import create_all, create_engine, create_session_factory, session_scope
+from ..db.session import (
+    create_all,
+    create_engine,
+    create_session_factory,
+    get_config,
+    session_scope,
+)
+from ..settings import SEERR_URL_ENV, seerr_url
 from ..web import STATIC_DIR
 from .routes import (
     admin,
@@ -79,7 +87,23 @@ def create_app(
 
         async with session_scope(sessionmaker) as session:
             await ensure_request_action(session)
+            # Before anything is served: if the deployment was repointed at a
+            # different Seerr, every cached identity was resolved against an
+            # instance that no longer decides anything here.
+            if await sync_seerr_instance(session, await get_config(session)):
+                logger.warning(
+                    "%s changed since the last start — every device and browser"
+                    " session has been signed out and must reconnect",
+                    SEERR_URL_ENV,
+                )
             await purge_expired_sessions(session)
+
+        if seerr_url() is None:
+            logger.error(
+                "%s is not set: no one can sign in and no client can register."
+                " Set it in the environment and restart.",
+                SEERR_URL_ENV,
+            )
 
         try:
             yield

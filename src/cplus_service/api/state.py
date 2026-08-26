@@ -15,10 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 @dataclass
 class PendingPlexLogin:
-    """One in-flight webui sign-in."""
+    """One in-flight webui sign-in.
 
-    seerr_url: str
-    """The Seerr instance this PIN's resulting token will be validated against."""
+    Carries only a timestamp: the Seerr instance to validate against is not a
+    property of the sign-in attempt, it is a property of the deployment
+    (``CPLUS_SEERR_URL``), so there is nothing here for a caller to have
+    chosen. It used to hold the URL, which is precisely how an unauthenticated
+    visitor could have had their own server vouch for them.
+    """
 
     created_at: datetime
     """When the PIN was requested, for :class:`AppState`'s TTL sweep."""

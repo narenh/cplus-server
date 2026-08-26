@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db.models import Config, User
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
+from ..settings import seerr_url_fingerprint
 from .plex_cache import forget_all_tokens, remember_token
-from .sessions import destroy_other_sessions
+from .sessions import destroy_all_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -65,37 +66,34 @@ async def authenticate_plex_token(
     return user, auth
 
 
-async def apply_seerr_url_change(
-    session: AsyncSession,
-    config: Config,
-    new_seerr_url: str | None,
-    *,
-    keep_session_token: str | None = None,
-) -> bool:
-    """Point this install at a different Seerr instance, invalidating cached identity.
+async def sync_seerr_instance(session: AsyncSession, config: Config) -> bool:
+    """Flush every cached credential if the deployment was repointed at another Seerr.
 
-    Every ``PlexTokenSession`` and browser ``AdminSession`` row was resolved
-    against whichever Seerr instance was configured at the time — permissions,
-    the ADMIN bit, all of it. Repointing at a different instance without
-    dropping those caches would leave every device (and every signed-in
-    browser) trusting authorization decisions made by an instance that no
-    longer applies, for as long as each cache entry stays unrefreshed. So a
-    change here flushes both wholesale rather than tagging rows with which
-    instance issued them — the cost is one extra live round trip per device
-    (``/register`` for tvOS, signing in again for the webui), which is already
-    the built-in recovery path for a cache miss.
+    Called once per startup, before the app serves anything. Every
+    ``PlexTokenSession`` and browser ``AdminSession`` row was resolved against
+    whichever Seerr instance was configured when it was written — permissions,
+    the ADMIN bit, all of it. Coming up against a different instance without
+    dropping those caches would leave every device, and every signed-in
+    browser, trusting authorization decisions made by an instance that no
+    longer applies. So a change flushes both wholesale rather than tagging rows
+    with which instance issued them — the cost is one extra live round trip per
+    device (``/register`` for tvOS, signing in again for the webui), which is
+    already the built-in recovery path for a cache miss.
 
-    ``keep_session_token`` lets the caller's own already-verified-this-request
-    session survive the flush, so making the change does not immediately sign
-    the admin back out of the page they just used to make it.
+    Startup is the only place this can happen now that the URL comes from the
+    environment: it cannot change while the process is running, so there is no
+    request to flush from and no session of the admin's own to spare. That also
+    makes the first boot after this change a flush — the fingerprint starts
+    empty — which is the correct reading of "we cannot prove what these were
+    resolved against".
 
-    A no-op, including no flush, when the URL is unchanged. Returns whether it
-    changed, so callers can decide whether to mention the reconnect.
+    Returns whether it flushed, for the startup log line.
     """
-    if config.seerr_url == new_seerr_url:
+    fingerprint = seerr_url_fingerprint()
+    if config.seerr_url_fingerprint == fingerprint:
         return False
 
-    config.seerr_url = new_seerr_url
+    config.seerr_url_fingerprint = fingerprint
     await forget_all_tokens(session)
-    await destroy_other_sessions(session, keep_token=keep_session_token)
+    await destroy_all_sessions(session)
     return True

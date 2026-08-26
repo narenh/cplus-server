@@ -1,6 +1,6 @@
 """Authentication: the tvOS Plex-token mapping and the webui browser session."""
 
-from .identity import apply_seerr_url_change, authenticate_plex_token, upsert_user
+from .identity import authenticate_plex_token, sync_seerr_instance, upsert_user
 from .plex_cache import (
     count_tokens,
     forget_all_tokens,
@@ -12,7 +12,7 @@ from .sessions import (
     SESSION_COOKIE_NAME,
     SESSION_TTL,
     create_session,
-    destroy_other_sessions,
+    destroy_all_sessions,
     destroy_session,
     destroy_sessions_for_user,
     purge_expired_sessions,
@@ -22,11 +22,10 @@ from .sessions import (
 __all__ = [
     "SESSION_COOKIE_NAME",
     "SESSION_TTL",
-    "apply_seerr_url_change",
     "authenticate_plex_token",
     "count_tokens",
     "create_session",
-    "destroy_other_sessions",
+    "destroy_all_sessions",
     "destroy_session",
     "destroy_sessions_for_user",
     "forget_all_tokens",
@@ -34,6 +33,7 @@ __all__ = [
     "remember_token",
     "resolve_session",
     "resolve_token",
+    "sync_seerr_instance",
     "token_fingerprint",
     "upsert_user",
 ]

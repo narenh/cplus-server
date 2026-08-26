@@ -30,6 +30,7 @@ from cplus_service.db.models import (
     User,
 )
 from cplus_service.quality.models import QualityProfile as ProfileSchema
+from cplus_service.settings import SEERR_URL_ENV
 
 from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, make_action
 
@@ -135,7 +136,7 @@ async def test_the_pin_flow_signs_in_a_seerr_admin(
         )
     )
 
-    start = await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+    start = await client.post("/admin/plex/pin")
     assert start.status_code == 200
     assert start.json()["pin_id"] == 555
     assert "ABCD" in start.json()["auth_url"]
@@ -145,9 +146,9 @@ async def test_the_pin_flow_signs_in_a_seerr_admin(
     assert claimed.json()["claimed"] is True
     assert SESSION_COOKIE_NAME in claimed.cookies
 
-    # The Seerr URL is persisted only now that it has proven it authenticates.
+    # Signing in writes no Seerr URL — there is nowhere to write one — but it
+    # does mint the stable Plex client identifier on first use.
     config = (await db.execute(select(Config))).scalar_one()
-    assert config.seerr_url == SEERR_URL
     assert config.plex_client_identifier
 
 
@@ -160,7 +161,7 @@ async def test_an_unclaimed_pin_is_not_an_error(
     )
     respx.get(f"{PLEX_API}/pins/7").mock(return_value=httpx.Response(200, json={}))
 
-    await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+    await client.post("/admin/plex/pin")
     response = await client.get("/admin/plex/pin/7")
 
     assert response.status_code == 200
@@ -184,7 +185,7 @@ async def test_a_non_admin_cannot_sign_into_the_webui(
         )
     )
 
-    await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+    await client.post("/admin/plex/pin")
     response = await client.get("/admin/plex/pin/9")
 
     assert response.status_code == 403
@@ -192,11 +193,15 @@ async def test_a_non_admin_cannot_sign_into_the_webui(
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
-async def test_starting_a_pin_without_a_seerr_url_is_rejected(
-    client: httpx.AsyncClient,
+async def test_starting_a_pin_without_a_configured_seerr_is_rejected(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    response = await client.post("/admin/plex/pin", data={"seerr_url": ""})
-    assert response.status_code == 400
+    monkeypatch.delenv(SEERR_URL_ENV, raising=False)
+
+    response = await client.post("/admin/plex/pin")
+
+    assert response.status_code == 503
+    assert SEERR_URL_ENV in response.json()["detail"]
 
 
 async def test_polling_an_unknown_pin_is_404(client: httpx.AsyncClient) -> None:
@@ -215,7 +220,6 @@ async def test_a_pending_login_past_its_ttl_reads_as_expired(
 
     state = app.state.cplus
     state.pending_plex_logins[999] = PendingPlexLogin(
-        seerr_url=SEERR_URL,
         created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
     )
 
@@ -237,18 +241,15 @@ async def test_starting_a_pin_sweeps_other_expired_pending_logins(
 
     state = app.state.cplus
     state.pending_plex_logins[111] = PendingPlexLogin(
-        seerr_url=SEERR_URL,
         created_at=datetime.now(UTC) - PENDING_LOGIN_TTL - timedelta(minutes=1),
     )
-    state.pending_plex_logins[222] = PendingPlexLogin(
-        seerr_url=SEERR_URL, created_at=datetime.now(UTC)
-    )
+    state.pending_plex_logins[222] = PendingPlexLogin(created_at=datetime.now(UTC))
 
     with respx.mock:
         respx.post(f"{PLEX_API}/pins").mock(
             return_value=httpx.Response(201, json={"id": 333, "code": "NEWW"})
         )
-        response = await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+        response = await client.post("/admin/plex/pin")
         assert response.status_code == 200
 
     # The expired one is gone; the fresh one and the new one are untouched.
@@ -300,26 +301,6 @@ async def test_saving_config_stores_the_values(
     assert config.tmdb_bearer_token == "the-tmdb-token"
 
 
-async def test_saving_config_does_not_touch_the_seerr_url(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    # Seerr host changes are a separate, destructive flow at its own endpoint
-    # — the ordinary Save button never carries a seerr_url field at all.
-    await signed_in(client, db)
-    await client.post(
-        "/admin/config",
-        data={
-            "prowlarr_url": PROWLARR_URL,
-            "prowlarr_api_key": "",
-            "preferred_indexer_id": "",
-            "tmdb_bearer_token": "",
-        },
-    )
-
-    await db.refresh(configured)
-    assert configured.seerr_url == SEERR_URL
-
-
 async def test_a_blank_api_key_and_token_leave_the_saved_ones_alone(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
@@ -350,26 +331,29 @@ async def test_the_saved_api_key_and_tmdb_token_are_never_rendered_into_the_page
     assert TMDB_BEARER_TOKEN not in response.text
 
 
-async def test_the_seerr_url_field_is_disabled_on_the_config_page(
+async def test_the_config_page_shows_the_seerr_host_read_only(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
+    """Displayed from the environment, with nothing on the page that can set it."""
     await signed_in(client, db)
+
     response = await client.get("/admin/config")
-    assert (
-        f'<input type="url" id="seerr_url" name="seerr_url" value="{SEERR_URL}" disabled>'
-        in response.text
-    )
+
+    assert SEERR_URL in response.text
+    assert SEERR_URL_ENV in response.text
+    # Not even a disabled input: there is no endpoint behind it any more.
+    assert 'name="seerr_url"' not in response.text
 
 
-async def test_changing_the_seerr_url_signs_out_every_other_device(
+async def test_there_is_no_endpoint_that_changes_the_seerr_host(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
-    admin = await signed_in(client, db)
+    """The old ``POST /admin/config/seerr-url`` is gone, not merely gated.
 
-    other = User(seerr_user_id=99, plex_username="someone-else")
-    db.add(other)
-    await db.flush()
-    other_session_token = await create_session(db, other.id)
+    An admin session is the strongest credential this service issues, so the
+    check that matters is that even holding one cannot repoint the install.
+    """
+    admin = await signed_in(client, db)
     await remember_token(db, "some-tvos-plex-token", admin)
     await db.commit()
 
@@ -377,29 +361,19 @@ async def test_changing_the_seerr_url_signs_out_every_other_device(
         "/admin/config/seerr-url",
         data={"seerr_url": "http://a-different-seerr.test:5055"},
     )
-    assert response.status_code == 200
-    assert "signed out" in response.text
 
-    # Every cached Plex-token mapping is gone...
-    assert (await db.execute(select(PlexTokenSession))).scalars().first() is None
-    # ...and so is every other browser session...
-    remaining = (await db.execute(select(AdminSession))).scalars().all()
-    assert [row.token for row in remaining] != [other_session_token]
-    # ...but the admin who just made the change is still signed in.
-    assert (await client.get("/admin/config", follow_redirects=False)).status_code == 200
-
-    await db.refresh(configured)
-    assert configured.seerr_url == "http://a-different-seerr.test:5055"
+    assert response.status_code == 404
+    assert (await db.execute(select(PlexTokenSession))).scalars().first() is not None
 
 
-async def test_saving_config_never_changes_the_seerr_url_even_if_smuggled_in(
+async def test_saving_config_ignores_a_smuggled_seerr_url(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
-    # POST /admin/config has no seerr_url parameter at all, so even a client
-    # that sends one has it silently ignored rather than acted on.
+    """``POST /admin/config`` has no such parameter, so one sent anyway is inert."""
     admin = await signed_in(client, db)
     await remember_token(db, "some-tvos-plex-token", admin)
     await db.commit()
+    fingerprint = configured.seerr_url_fingerprint
 
     response = await client.post(
         "/admin/config",
@@ -412,28 +386,9 @@ async def test_saving_config_never_changes_the_seerr_url_even_if_smuggled_in(
         },
     )
     assert response.status_code == 200
-    assert "signed out" not in response.text
 
     await db.refresh(configured)
-    assert configured.seerr_url == SEERR_URL
-    assert (await db.execute(select(PlexTokenSession))).scalars().first() is not None
-    assert (await db.execute(select(AdminSession))).scalars().first() is not None
-
-
-async def test_saving_the_seerr_url_unchanged_keeps_sessions(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    admin = await signed_in(client, db)
-    await remember_token(db, "some-tvos-plex-token", admin)
-    await db.commit()
-
-    response = await client.post(
-        "/admin/config/seerr-url",
-        data={"seerr_url": SEERR_URL},  # unchanged
-    )
-    assert response.status_code == 200
-    assert "signed out" not in response.text
-
+    assert configured.seerr_url_fingerprint == fingerprint
     assert (await db.execute(select(PlexTokenSession))).scalars().first() is not None
     assert (await db.execute(select(AdminSession))).scalars().first() is not None
 
@@ -1035,7 +990,7 @@ async def test_the_session_cookie_is_not_secure_over_plain_http(
         )
     )
 
-    await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
+    await client.post("/admin/plex/pin")
     response = await client.get("/admin/plex/pin/32")
 
     assert response.status_code == 200

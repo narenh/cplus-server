@@ -15,10 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.api.app import create_app
-from cplus_service.auth.identity import apply_seerr_url_change
+from cplus_service.auth.identity import sync_seerr_instance
 from cplus_service.auth.plex_cache import count_tokens, resolve_token, token_fingerprint
 from cplus_service.auth.sessions import SESSION_COOKIE_NAME
 from cplus_service.db.models import AdminSession, Config, PlexTokenSession, User
+from cplus_service.settings import SEERR_URL_ENV
 
 from .conftest import (
     PLEX_TOKEN,
@@ -142,9 +143,14 @@ async def test_an_unreachable_seerr_is_502_not_401(
 
 
 async def test_register_before_seerr_is_configured_is_503(
-    client: httpx.AsyncClient, plex_headers: dict
+    client: httpx.AsyncClient, plex_headers: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert (await client.get("/register", headers=plex_headers)).status_code == 503
+    monkeypatch.delenv(SEERR_URL_ENV, raising=False)
+
+    response = await client.get("/register", headers=plex_headers)
+
+    assert response.status_code == 503
+    assert SEERR_URL_ENV in response.json()["detail"]
 
 
 # --------------------------------------------------------------------------- #
@@ -228,19 +234,29 @@ async def test_an_unknown_token_is_still_rejected(
 
 
 # --------------------------------------------------------------------------- #
-# Reconnecting to a different Seerr instance invalidates cached identity
+# Repointing the deployment at a different Seerr invalidates cached identity
 # --------------------------------------------------------------------------- #
 
 
 @respx.mock
-async def test_changing_the_seerr_url_forgets_every_cached_token(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+async def test_repointing_at_another_seerr_forgets_every_cached_token(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    plex_headers: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock_seerr_auth()
     await client.get("/register", headers=plex_headers)
     assert await count_tokens(db) == 1
 
-    await apply_seerr_url_change(db, configured, "http://other-seerr.test:5055")
+    # The startup sync has already run once for this install, so the stored
+    # fingerprint matches the environment; moving the environment is what a
+    # redeploy against a different instance looks like.
+    await sync_seerr_instance(db, configured)
+    monkeypatch.setenv(SEERR_URL_ENV, "http://other-seerr.test:5055")
+
+    assert await sync_seerr_instance(db, configured) is True
     await db.commit()
 
     assert await count_tokens(db) == 0
@@ -255,15 +271,28 @@ async def test_an_unchanged_seerr_url_is_a_no_op(
     db.add(AdminSession(token="keep-me", user_id=admin.id))
     await db.commit()
 
-    changed = await apply_seerr_url_change(db, configured, configured.seerr_url)
+    # First call records the fingerprint; the second sees no change at all.
+    await sync_seerr_instance(db, configured)
+    changed = await sync_seerr_instance(db, configured)
 
     assert changed is False
     assert (await db.execute(select(AdminSession))).scalars().first() is not None
 
 
-async def test_changing_the_seerr_url_keeps_only_the_callers_own_session(
-    db: AsyncSession, configured: Config
+async def test_a_url_differing_only_in_trailing_slash_is_not_a_change(
+    db: AsyncSession, configured: Config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    await sync_seerr_instance(db, configured)
+
+    monkeypatch.setenv(SEERR_URL_ENV, f"  {SEERR_URL}/  ")
+
+    assert await sync_seerr_instance(db, configured) is False
+
+
+async def test_repointing_signs_out_every_admin_including_the_last_one(
+    db: AsyncSession, configured: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No carve-out: the flush happens at startup, when nobody holds a request."""
     mine = User(seerr_user_id=1, plex_username="owner")
     someone_else = User(seerr_user_id=2, plex_username="other-admin")
     db.add_all([mine, someone_else])
@@ -272,14 +301,24 @@ async def test_changing_the_seerr_url_keeps_only_the_callers_own_session(
     db.add(AdminSession(token="someone-elses", user_id=someone_else.id))
     await db.commit()
 
-    changed = await apply_seerr_url_change(
-        db, configured, "http://other-seerr.test:5055", keep_session_token="mine"
-    )
+    await sync_seerr_instance(db, configured)
+    monkeypatch.setenv(SEERR_URL_ENV, "http://other-seerr.test:5055")
+
+    assert await sync_seerr_instance(db, configured) is True
     await db.commit()
 
-    assert changed is True
-    tokens = {row.token for row in (await db.execute(select(AdminSession))).scalars().all()}
-    assert tokens == {"mine"}
+    assert (await db.execute(select(AdminSession))).scalars().all() == []
+
+
+async def test_a_fresh_install_settles_after_its_first_start(
+    db: AsyncSession, configured: Config
+) -> None:
+    """Startup records the fingerprint, so a boot that changed nothing flushes nothing.
+
+    Without this the warning — and the sign-out — would fire on every restart.
+    """
+    assert configured.seerr_url_fingerprint is not None
+    assert await sync_seerr_instance(db, configured) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -293,7 +332,6 @@ async def pin_sign_in(
     permissions: int,
     user_id: int = 1,
     pin_id: int = 100,
-    seerr_url: str = SEERR_URL,
 ) -> httpx.Response:
     """Run the whole proxied PIN flow and return the final poll response."""
     respx.post(f"{PLEX_API}/pins").mock(
@@ -304,7 +342,7 @@ async def pin_sign_in(
     )
     mock_seerr_auth(user_id=user_id, permissions=permissions)
 
-    await client.post("/admin/plex/pin", data={"seerr_url": seerr_url})
+    await client.post("/admin/plex/pin")
     return await client.get(f"/admin/plex/pin/{pin_id}")
 
 
@@ -349,45 +387,72 @@ async def test_seerr_user_id_1_is_not_treated_as_admin_without_the_bit(
 
 
 @respx.mock
-async def test_first_run_bootstrap_persists_the_supplied_seerr_url(
-    client: httpx.AsyncClient, db: AsyncSession
+async def test_the_seerr_host_in_a_sign_in_request_is_ignored(
+    client: httpx.AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # No config row at all: the admin cannot set the URL without a session, and
-    # cannot get a session without the URL, so sign-in accepts it inline.
-    response = await pin_sign_in(client, permissions=ADMIN_PERMISSIONS)
+    """The takeover this whole design exists to prevent.
 
-    assert response.status_code == 200
-    config = (await db.execute(select(Config))).scalar_one()
-    assert config.seerr_url == SEERR_URL
+    Both sign-in endpoints are unauthenticated — they have to be, they are how
+    you authenticate. If a caller could name the Seerr instance, anyone could
+    point a sign-in at a server of their own, have it answer "yes, admin", and
+    be handed a session here. So a smuggled ``seerr_url`` must reach nothing:
+    the token is validated against the environment's Seerr, which does not
+    recognise the attacker, and no session is issued.
+    """
+    attacker_seerr = "http://attacker.test:5055"
+    hostile = respx.post(f"{attacker_seerr}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(200, json=seerr_user_payload(permissions=2))
+    )
+    respx.post(f"{PLEX_API}/pins").mock(
+        return_value=httpx.Response(201, json={"id": 7, "code": "CODE"})
+    )
+    respx.get(f"{PLEX_API}/pins/7").mock(
+        return_value=httpx.Response(200, json={"authToken": PLEX_TOKEN})
+    )
+    # The real Seerr does not know this Plex account.
+    respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
+        return_value=httpx.Response(401, json={"message": "Unauthorized"})
+    )
+
+    await client.post("/admin/plex/pin", data={"seerr_url": attacker_seerr})
+    response = await client.get("/admin/plex/pin/7", params={"seerr_url": attacker_seerr})
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert not hostile.called
+    assert (await db.execute(select(AdminSession))).scalars().all() == []
 
 
 @respx.mock
-async def test_a_seerr_url_that_fails_to_authenticate_is_not_persisted(
+async def test_signing_in_never_writes_a_seerr_url_to_the_database(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
-    respx.post(f"{PLEX_API}/pins").mock(
-        return_value=httpx.Response(201, json={"id": 5, "code": "CODE"})
-    )
-    respx.get(f"{PLEX_API}/pins/5").mock(
-        return_value=httpx.Response(200, json={"authToken": PLEX_TOKEN})
-    )
-    respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
-        side_effect=httpx.ConnectError("refused")
-    )
+    """Only a fingerprint is stored, and the URL itself has no column at all."""
+    response = await pin_sign_in(client, permissions=ADMIN_PERMISSIONS)
 
-    await client.post("/admin/plex/pin", data={"seerr_url": SEERR_URL})
-    response = await client.get("/admin/plex/pin/5")
-
-    assert response.status_code == 502
-    config = (await db.execute(select(Config))).scalars().first()
-    assert config is None or config.seerr_url is None
+    assert response.status_code == 200
+    assert not hasattr(Config, "seerr_url")
 
 
-async def test_signing_in_without_any_seerr_url_is_400(
+async def test_signing_in_without_a_configured_seerr_is_503(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(SEERR_URL_ENV, raising=False)
+
+    response = await client.post("/admin/plex/pin")
+
+    assert response.status_code == 503
+    assert SEERR_URL_ENV in response.json()["detail"]
+
+
+async def test_the_login_page_shows_the_configured_host_and_offers_no_field(
     client: httpx.AsyncClient,
 ) -> None:
-    response = await client.post("/admin/plex/pin", data={"seerr_url": ""})
-    assert response.status_code == 400
+    body = (await client.get("/admin/login")).text
+
+    assert SEERR_URL in body
+    # No input for it, and nothing that could post one.
+    assert 'name="seerr_url"' not in body
 
 
 # --------------------------------------------------------------------------- #

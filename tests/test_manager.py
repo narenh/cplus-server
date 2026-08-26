@@ -524,12 +524,8 @@ async def test_a_regular_user_cannot_read_the_tmdb_token(
 async def test_tmdb_token_is_null_when_never_configured(
     client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict
 ) -> None:
-    from cplus_service.db.session import get_config
-
-    config = await get_config(db)
-    config.seerr_url = SEERR_URL
-    await db.commit()
-
+    # No ``configured`` fixture: Seerr comes from the environment, so this
+    # install can authenticate while having no TMDB token saved at all.
     with respx.mock:
         mock_seerr_auth(permissions=2)
         response = await client.get("/manager/tmdb-token", headers=plex_headers)

@@ -1,27 +1,45 @@
 {% extends "base.html" %}
-{% block content %}
-<div class="card narrow">
-  <p class="lede">
-    Sign in with the Plex account that owns your Seerr instance.
-    Seerr decides who the admin is — this page only checks with it.
-  </p>
 
-  <form id="signin">
-    <label for="seerr_url">Seerr URL</label>
-    <input type="url" id="seerr_url" name="seerr_url" value="{{ seerr_url }}"
-           placeholder="http://seerr.local:5055" required>
-    <p class="hint">Saved once it has successfully authenticated you.</p>
-    <button type="submit" id="go">Sign in with Plex</button>
-  </form>
+{% block wrap_class %}signin-wrap{% endblock %}
+
+{% block heading %}
+{# Two files rather than one recoloured by CSS: the logo is raster art, and the
+   wordmark's ink has to flip while the green arc stays put. `picture` picks by
+   the OS preference with no script and no flash of the wrong one. #}
+<picture class="signin-logo">
+  <source srcset="/static/canopy-logo-light.png" media="(prefers-color-scheme: dark)">
+  <img src="/static/canopy-logo-dark.png" alt="Canopy" width="885" height="400">
+</picture>
+{% endblock %}
+
+{% block content %}
+<div class="card narrow signin-card">
+  {% if seerr_url %}
+    <p class="lede">Sign in with the Plex account that owns</p>
+    <p class="signin-host">{{ seerr_url }}</p>
+    <button type="button" id="go" class="plex">Sign in with Plex</button>
+  {% else %}
+    {# Nothing to sign in against. Say so plainly rather than offering a button
+       that can only fail — and name the variable, since fixing it means a
+       redeploy, not a form on this page. #}
+    <p class="lede">This install has no Seerr host configured.</p>
+    <p class="signin-host unset">CPLUS_SEERR_URL is not set</p>
+    <p class="hint center">
+      Set it in the deployment's environment and restart. It is not something
+      this page can change: Seerr decides who the admin is here.
+    </p>
+  {% endif %}
 
   <p id="status" class="status" role="status"></p>
 </div>
+{% endblock %}
 
+{% block scripts %}
+{% if seerr_url %}
 <script>
 // Small enough to be inline, and this is the one page HTMX cannot express:
 // it has to open a popup and poll until Plex hands the token back.
 (function () {
-  const form = document.getElementById("signin");
   const button = document.getElementById("go");
   const status = document.getElementById("status");
   let timer = null;
@@ -57,17 +75,15 @@
     say(message, kind);
   }
 
-  form.addEventListener("submit", async function (event) {
-    event.preventDefault();
+  button.addEventListener("click", async function () {
     button.disabled = true;
     say("Opening Plex…");
 
-    const data = new FormData();
-    data.append("seerr_url", document.getElementById("seerr_url").value);
-
+    // No body: the Seerr instance to validate against comes from the server's
+    // own environment, so there is nothing for this page to send.
     let response;
     try {
-      response = await fetch("/admin/plex/pin", { method: "POST", body: data });
+      response = await fetch("/admin/plex/pin", { method: "POST" });
     } catch (err) {
       return stop("Could not reach the server.", "err");
     }
@@ -82,4 +98,5 @@
   });
 })();
 </script>
+{% endif %}
 {% endblock %}

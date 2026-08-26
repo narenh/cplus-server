@@ -67,7 +67,16 @@ class Config(Base):
     __table_args__ = (CheckConstraint("id = 1", name="ck_config_singleton"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=CONFIG_SINGLETON_ID)
-    seerr_url: Mapped[str | None] = mapped_column(String(512))
+
+    #: SHA-256 of the ``CPLUS_SEERR_URL`` this install was last serving under.
+    #:
+    #: Not the URL — the environment is the only answer to "which Seerr?", and a
+    #: second copy here could disagree with it. This is a change *detector* and
+    #: nothing reads it for display: on startup a mismatch means the deployment
+    #: was repointed, and every credential resolved against the old instance is
+    #: flushed. See :func:`~cplus_service.auth.identity.sync_seerr_instance`.
+    seerr_url_fingerprint: Mapped[str | None] = mapped_column(String(64))
+
     prowlarr_url: Mapped[str | None] = mapped_column(String(512))
     prowlarr_api_key: Mapped[str | None] = mapped_column(String(256))
     preferred_indexer_id: Mapped[int | None] = mapped_column(Integer)

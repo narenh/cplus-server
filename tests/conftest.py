@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.api.app import create_app
 from cplus_service.db.models import Action, ApnsDevice, Config, Permission, QualityProfile, User
-from cplus_service.db.session import create_engine
+from cplus_service.db.session import create_engine, get_config
 from cplus_service.notify.relay import RELAY_URL_ENV, RelaySettings
+from cplus_service.settings import SEERR_URL_ENV
 
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
@@ -69,8 +70,20 @@ def seerr_user_payload(
     }
 
 
+@pytest.fixture(autouse=True)
+def seerr_env(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Point every test's install at the mocked Seerr, the way a deploy would.
+
+    Autouse and function-scoped: the URL is read from the environment on every
+    call, so a test that wants a different instance (or none) just sets the
+    variable itself and nothing has to be rebuilt.
+    """
+    monkeypatch.setenv(SEERR_URL_ENV, SEERR_URL)
+    return SEERR_URL
+
+
 @pytest_asyncio.fixture
-async def app(tmp_path: Path) -> AsyncIterator[FastAPI]:
+async def app(tmp_path: Path, seerr_env: str) -> AsyncIterator[FastAPI]:
     engine = create_engine(tmp_path / "api.db")
     application = create_app(engine=engine, create_schema=True)
     async with LifespanManager(application):
@@ -95,16 +108,18 @@ async def db(app: FastAPI) -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def configured(db: AsyncSession) -> Config:
-    """Config with both upstreams set and no preferred indexer."""
-    config = Config(
-        id=1,
-        seerr_url=SEERR_URL,
-        prowlarr_url=PROWLARR_URL,
-        prowlarr_api_key=PROWLARR_API_KEY,
-        preferred_indexer_id=None,
-        tmdb_bearer_token=TMDB_BEARER_TOKEN,
-    )
-    db.add(config)
+    """Prowlarr set up and no preferred indexer.
+
+    Mutates the singleton rather than inserting one: startup writes the row
+    itself now, to record which Seerr instance the install is running against.
+    Seerr is not set here at all — it comes from the environment, via the
+    autouse ``seerr_env`` fixture.
+    """
+    config = await get_config(db)
+    config.prowlarr_url = PROWLARR_URL
+    config.prowlarr_api_key = PROWLARR_API_KEY
+    config.preferred_indexer_id = None
+    config.tmdb_bearer_token = TMDB_BEARER_TOKEN
     await db.commit()
     return config
 
