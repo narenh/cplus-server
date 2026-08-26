@@ -1,14 +1,44 @@
-{# Everything the master switch governs, in one swappable block.
+{# The Notifications tab, whole.
 
-   Rendered by GET /admin/notifications as part of the page and returned whole
-   by POST /admin/notifications/enabled, so the two cannot drift into showing
-   different things about the same state.
+   Rendered by GET /admin/notifications and returned entire by
+   POST /admin/notifications/enabled, so the switch and everything it governs
+   can never disagree — including when enrolling fails and the switch has to
+   come back off under the admin's cursor. #}
+<div id="notify-panel">
 
-   When notifications are off this is deliberately *empty* rather than
-   disabled-but-visible: a page full of greyed-out controls invites an admin to
-   fill them in and wonder why nothing happens, and none of these settings mean
-   anything until the switch is on. #}
-<div id="notify-settings">
+<section class="card">
+  <h2>Notifications</h2>
+
+  <label class="notify-master">
+    <input type="checkbox" name="enabled"
+           {% if config.notifications_enabled %}checked{% endif %}
+           hx-post="/admin/notifications/enabled"
+           hx-target="#notify-panel"
+           hx-swap="outerHTML">
+    <span>Enable push notifications</span>
+  </label>
+
+  {# Said on the page rather than in the docs, because it is the whole of what
+     the checkbox commits to and nobody reads the docs before ticking a box. #}
+  <p class="hint warn">
+    Notifications are delivered <strong>in plaintext</strong> through
+    <code>{{ relay_host }}</code>, a forwarding service run by the Canopy+
+    maintainers rather than by you. Apple has to be able to read a notification
+    to display it, so there is no arrangement where the relay forwards without
+    seeing the contents.
+  </p>
+  <p class="hint">
+    Each notification carries a media title and a username. The relay stores
+    none of it and keeps no record of which devices belong to which instance —
+    but it does see it in passing. If that is not acceptable for your instance,
+    leave this off; everything else works without it.
+  </p>
+
+  {% if error %}
+    <p class="hint err">{{ error }}</p>
+  {% endif %}
+</section>
+
 {% if not config.notifications_enabled %}
 
   <section class="card">
@@ -21,51 +51,38 @@
 
 {% else %}
 
-  <form class="card" hx-post="/admin/notifications/relay"
-        hx-target="#relay-result" hx-swap="innerHTML">
+  <section class="card">
     <h2>Relay</h2>
-    <p class="hint">
-      {% if relay_configured %}
-        A key is saved. Use “Check the relay” to confirm it still works.
-      {% else %}
-        Nothing is sent until an API key is saved. Ask the relay's operator for
-        one; it identifies this instance and is what your notifications are
-        counted against.
-      {% endif %}
-    </p>
-
-    <label for="relay_url">Relay URL</label>
-    <input type="text" id="relay_url" name="relay_url" autocomplete="off"
-           value="{{ relay_url }}" placeholder="{{ default_relay_url }}">
-    <p class="hint">
-      Leave as the default unless you run your own relay. Blanking this field
-      resets it to <code>{{ default_relay_url }}</code>.
-    </p>
-
-    <label for="relay_api_key">Relay API key</label>
-    <input type="password" id="relay_api_key" name="relay_api_key" autocomplete="off"
-           spellcheck="false"
-           placeholder="{% if config.notification_relay_api_key %}············ (unchanged){% else %}canopy_…{% endif %}">
-    <p class="hint">
-      {% if config.notification_relay_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-      It is never shown again here and is not readable over the API. It is a
-      rate-limit identity, not a password over your users' devices — see the
-      README on why isolation between instances does not depend on it.
-    </p>
+    {% if relay_connected %}
+      <p class="hint">
+        Connected to <code>{{ relay_host }}</code>{% if config.notification_relay_instance_id %}
+        as <code>{{ config.notification_relay_instance_id }}</code>{% endif %}.
+        There is nothing to configure — this instance registered itself when you
+        switched notifications on.
+      </p>
+    {% else %}
+      <p class="hint err">
+        Not connected. Notifications are on but nothing can be sent until this
+        instance has registered with the relay.
+      </p>
+    {% endif %}
 
     <div class="row">
-      <button type="submit">Save</button>
-      <button type="button" class="secondary"
-              hx-post="/admin/notifications/relay/check"
-              hx-target="#relay-result"
-              hx-swap="innerHTML">Check the relay</button>
-      <button type="button" class="secondary"
+      <button type="button"
               hx-post="/admin/notifications/test"
               hx-target="#relay-result"
               hx-swap="innerHTML">Send a test notification</button>
+      {# The recovery path for a key the relay stopped accepting. Nothing can
+         be repaired in place — the relay stores no keys — so registering again
+         is both the fix and the only fix. #}
+      <button type="button" class="secondary"
+              hx-post="/admin/notifications/reconnect"
+              hx-target="#relay-result"
+              hx-swap="innerHTML"
+              hx-confirm="Register with the relay again? Your current relay identity is discarded. Registered devices are not affected.">Reconnect</button>
       <span id="relay-result" class="inline-result"></span>
     </div>
-  </form>
+  </section>
 
   <section class="card">
     <h2>What to notify me about</h2>

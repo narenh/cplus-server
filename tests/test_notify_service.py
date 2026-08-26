@@ -159,10 +159,13 @@ async def test_nothing_is_sent_while_notifications_are_switched_off(
 
 
 @respx.mock
-async def test_nothing_is_sent_when_no_relay_key_is_saved(
+async def test_nothing_is_sent_when_enrollment_never_succeeded(
     app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    """Switched on but half-configured: on, and nowhere to send."""
+    """Switched on with no relay identity: on, and nowhere to send.
+
+    Only reachable now if enrolling failed, since switching on is what enrols.
+    """
     route = respx.post(RELAY_PUSH_URL)
     await enable_notifications(db, configured, api_key=None)
     user = await make_user(db, 1, "someone")
@@ -172,7 +175,7 @@ async def test_nothing_is_sent_when_no_relay_key_is_saved(
 
     assert not route.called
     assert report.skipped_reason is not None
-    assert "relay API key" in report.skipped_reason
+    assert "not connected to the notification relay" in report.skipped_reason
 
 
 @respx.mock

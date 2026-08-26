@@ -97,27 +97,24 @@ class Config(Base):
         Boolean, default=False, server_default="0"
     )
 
-    #: The forwarding service that holds the APNs signing key.  This install
-    #: has no signing key of its own and cannot get one: the key belongs to the
-    #: Apple Developer account that owns the app, and it signs pushes for that
-    #: whole team.
-    #:
-    #: Configurable rather than hardcoded so an operator who runs their own
-    #: relay — or a fork with its own Apple account — is not stuck with
-    #: someone else's.  Defaults to
-    #: :data:`~cplus_service.notify.relay.DEFAULT_RELAY_URL`.
-    notification_relay_url: Mapped[str | None] = mapped_column(String(512))
+    #: The relay identity this install was issued when notifications were
+    #: switched on.  Shown on the Notifications tab so a support conversation
+    #: has something to name; not a secret and not used for anything else.
+    notification_relay_instance_id: Mapped[str | None] = mapped_column(String(64))
 
-    #: The relay API key issued to this install.  Handled like
-    #: ``prowlarr_api_key``: never rendered back into a page, and an empty
-    #: field on save means "leave it alone".
+    #: The relay API key issued alongside it.  Never rendered back into a page
+    #: and never exposed over the API.
     #:
-    #: Worth being clear about what it is *not*: it is a rate-limit identity
-    #: and an abuse handle, not an access-control boundary over devices.
-    #: Isolation between installs comes from token custody — this install only
-    #: ever learns device tokens its own users hand it — so someone else's key
-    #: would buy an attacker this install's rate limit and nothing else.  See
-    #: :mod:`cplus_service.notify.relay`.
+    #: **No admin ever types this.**  It is obtained automatically by
+    #: :func:`cplus_service.notify.relay.enrol` when notifications are switched
+    #: on, which is why there is no form field for it.  It is a rate-limit
+    #: identity and an abuse handle, not an access-control boundary over
+    #: devices — isolation between installs comes from token custody, so a
+    #: credential the admin had to manage would have been protecting nothing
+    #: they chose.  See :mod:`cplus_service.notify.relay`.
+    #:
+    #: Not recoverable: the relay writes nothing down, so a lost key is
+    #: replaced by enrolling again rather than looked up.
     notification_relay_api_key: Mapped[str | None] = mapped_column(String(256))
 
 

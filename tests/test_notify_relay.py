@@ -19,14 +19,23 @@ from cplus_service.db.models import ApnsEnvironment, Config
 from cplus_service.notify.messages import MediaSummary, user_requested
 from cplus_service.notify.relay import (
     DEFAULT_RELAY_URL,
+    EnrollmentError,
     RelayClient,
     RelaySettings,
     SendOutcome,
     build_request,
-    verify,
+    enrol,
+    relay_base_url,
 )
 
-from .conftest import RELAY_API_KEY, RELAY_PUSH_URL, RELAY_URL, RELAY_VERIFY_URL
+from .conftest import (
+    RELAY_API_KEY,
+    RELAY_ENROL_URL,
+    RELAY_INSTANCE_ID,
+    RELAY_PUSH_URL,
+    RELAY_URL,
+    enrolled,
+)
 
 NOTIFICATION = user_requested(
     MediaSummary(title="The End of Oak Street", year=2026), username="Robin Example"
@@ -39,7 +48,7 @@ def config_with(**kwargs) -> Config:
     defaults = {
         "id": 1,
         "notifications_enabled": True,
-        "notification_relay_url": RELAY_URL,
+        "notification_relay_instance_id": RELAY_INSTANCE_ID,
         "notification_relay_api_key": RELAY_API_KEY,
     }
     return Config(**{**defaults, **kwargs})
@@ -64,21 +73,30 @@ def test_the_master_switch_being_off_means_no_settings() -> None:
 
 
 def test_no_api_key_means_no_settings() -> None:
+    """Only reachable when enrolling failed, since enabling is what enrols."""
     assert RelaySettings.from_config(config_with(notification_relay_api_key=None)) is None
 
 
-def test_an_unset_url_falls_back_to_the_default() -> None:
-    """So an install that only ever pasted a key still points somewhere."""
-    settings = RelaySettings.from_config(config_with(notification_relay_url=None))
+def test_the_url_comes_from_the_environment_not_the_config_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nobody runs their own relay, so it stopped being an admin setting.
 
-    assert settings is not None
-    assert settings.url == DEFAULT_RELAY_URL
+    The environment override is for development and for a fork with its own
+    Apple account — the only two cases that were ever real.
+    """
+    monkeypatch.delenv("CPLUS_RELAY_URL", raising=False)
+    assert relay_base_url() == DEFAULT_RELAY_URL
+
+    monkeypatch.setenv("CPLUS_RELAY_URL", "https://elsewhere.test/")
+    assert relay_base_url() == "https://elsewhere.test"
 
 
-def test_a_trailing_slash_does_not_double_up_in_the_path() -> None:
-    settings = RelaySettings.from_config(
-        config_with(notification_relay_url=f"{RELAY_URL}/")
-    )
+def test_a_trailing_slash_does_not_double_up_in_the_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CPLUS_RELAY_URL", f"{RELAY_URL}/")
+    settings = RelaySettings.from_config(config_with())
 
     assert settings is not None
     assert settings.endpoint("/v1/push") == RELAY_PUSH_URL
@@ -259,7 +277,7 @@ async def test_the_notifications_data_is_forwarded_for_the_app_to_route_on(
 
 
 # --------------------------------------------------------------------------- #
-# Verifying a key
+# Enrolling
 # --------------------------------------------------------------------------- #
 
 
@@ -270,66 +288,90 @@ async def http():
 
 
 @respx.mock
-async def test_verify_reports_the_instance_and_topic_on_success(
-    relay_settings: RelaySettings, http: httpx.AsyncClient
-) -> None:
-    respx.get(RELAY_VERIFY_URL).mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "instance": "notcanopy",
-                "bundle_id": "com.example.cplus",
-                "ready": True,
-                "rate_limit_per_minute": 120,
-            },
-        )
+async def test_enrolling_returns_an_identity(http: httpx.AsyncClient) -> None:
+    """The whole of setup: one POST, no admin input, no credential handling."""
+    route = respx.post(RELAY_ENROL_URL).mock(
+        return_value=httpx.Response(201, json=enrolled())
     )
 
-    result = await verify(relay_settings, client=http)
+    result = await enrol(client=http)
 
-    assert result.ok
-    assert "notcanopy" in result.message
-    assert "com.example.cplus" in result.message
-
-
-@respx.mock
-async def test_verify_says_plainly_when_the_key_is_wrong(
-    relay_settings: RelaySettings, http: httpx.AsyncClient
-) -> None:
-    respx.get(RELAY_VERIFY_URL).mock(return_value=httpx.Response(401))
-
-    result = await verify(relay_settings, client=http)
-
-    assert not result.ok
-    assert "does not recognise this API key" in result.message
+    assert result.instance_id == RELAY_INSTANCE_ID
+    assert result.api_key == RELAY_API_KEY
+    assert result.ready is True
+    # Unauthenticated and bodiless: there is nothing we could tell the relay
+    # that it could verify, so it is not asked.
+    assert "authorization" not in route.calls[0].request.headers
 
 
 @respx.mock
-async def test_verify_separates_a_good_key_from_an_unready_relay(
-    relay_settings: RelaySettings, http: httpx.AsyncClient
+async def test_a_200_is_accepted_as_well_as_a_201(http: httpx.AsyncClient) -> None:
+    """Not worth failing setup over which success code the relay chose."""
+    respx.post(RELAY_ENROL_URL).mock(return_value=httpx.Response(200, json=enrolled()))
+
+    assert (await enrol(client=http)).api_key == RELAY_API_KEY
+
+
+@respx.mock
+async def test_an_unready_relay_still_enrols_but_says_so(
+    http: httpx.AsyncClient,
 ) -> None:
-    """Different failure, different owner. An admin re-pasting a key that was
-    already fine is the outcome this distinction exists to prevent."""
-    respx.get(RELAY_VERIFY_URL).mock(
-        return_value=httpx.Response(
-            200, json={"ok": True, "instance": "notcanopy", "ready": False}
-        )
+    """The key is good; the relay simply has nothing behind it yet."""
+    respx.post(RELAY_ENROL_URL).mock(
+        return_value=httpx.Response(201, json=enrolled(ready=False))
     )
 
-    result = await verify(relay_settings, client=http)
+    result = await enrol(client=http)
 
-    assert not result.ok
-    assert "Nothing is wrong on this end" in result.message
+    assert result.api_key == RELAY_API_KEY
+    assert result.ready is False
 
 
 @respx.mock
-async def test_verify_reports_an_unreachable_relay_as_such(
-    relay_settings: RelaySettings, http: httpx.AsyncClient
+async def test_an_unreachable_relay_is_an_actionable_error(
+    http: httpx.AsyncClient,
 ) -> None:
-    respx.get(RELAY_VERIFY_URL).mock(side_effect=httpx.ConnectError("dns"))
+    respx.post(RELAY_ENROL_URL).mock(side_effect=httpx.ConnectError("dns"))
 
-    result = await verify(relay_settings, client=http)
+    with pytest.raises(EnrollmentError, match="Could not reach"):
+        await enrol(client=http)
 
-    assert not result.ok
-    assert "Could not reach the relay" in result.message
+
+@respx.mock
+async def test_enrollment_being_closed_says_it_is_not_ours_to_fix(
+    http: httpx.AsyncClient,
+) -> None:
+    respx.post(RELAY_ENROL_URL).mock(return_value=httpx.Response(403))
+
+    with pytest.raises(EnrollmentError, match="not issuing new keys"):
+        await enrol(client=http)
+
+
+@respx.mock
+async def test_being_rate_limited_says_to_wait(http: httpx.AsyncClient) -> None:
+    respx.post(RELAY_ENROL_URL).mock(return_value=httpx.Response(429))
+
+    with pytest.raises(EnrollmentError, match="rate-limiting"):
+        await enrol(client=http)
+
+
+@respx.mock
+async def test_a_success_we_cannot_use_is_an_error(http: httpx.AsyncClient) -> None:
+    """Worse than a failure, because everything downstream would carry on as
+    though setup had worked."""
+    respx.post(RELAY_ENROL_URL).mock(
+        return_value=httpx.Response(201, json={"instance_id": "x"})
+    )
+
+    with pytest.raises(EnrollmentError, match="did not understand"):
+        await enrol(client=http)
+
+
+@respx.mock
+async def test_an_error_body_is_quoted_back(http: httpx.AsyncClient) -> None:
+    respx.post(RELAY_ENROL_URL).mock(
+        return_value=httpx.Response(500, json={"detail": "the relay is unwell"})
+    )
+
+    with pytest.raises(EnrollmentError, match="the relay is unwell"):
+        await enrol(client=http)
