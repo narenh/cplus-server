@@ -67,6 +67,9 @@ your proxy's TLS.
 7. **Assign permissions.** Users appear on the Permissions page the first time
    their client signs in, so have each user open the app once, then tick the
    actions they may use — including the built-in *Request* action.
+8. *Optional:* **set up notifications** to be told when a user requests
+   something or runs one of your actions. Needs an APNs signing key; see
+   [Notifications](#notifications). Everything above works without it.
 
 ### Environment variables
 
@@ -90,7 +93,7 @@ so upgrading is pull-and-restart.
 
 ### Securing a self-hosted deployment
 
-The one secret this service can't avoid persisting is the Prowlarr API key
+The secret this service can't avoid persisting is the Prowlarr API key
 (`config.prowlarr_api_key`), stored in plaintext in the SQLite file. Nothing
 in the app itself leaks it — it travels only as a request header, is never
 rendered back into a page, and never appears in an error message or log line
@@ -110,6 +113,15 @@ are worth doing deliberately as whoever runs the container:
   account that can sign in as admin the way you'd protect the key directly,
   and if you ever suspect a session was compromised, don't stop at signing it
   out — rotate the Prowlarr API key too.
+
+The **APNs signing key** (`config.apns_private_key`) sits in the same file
+under the same terms, and is the higher-stakes of the two once push is
+configured: it signs notifications for every app on your Apple Developer team,
+not just this one. It is treated accordingly — never rendered back into the
+page, and, unlike the TMDB token below, not readable over the API at any
+permission level. If the volume is ever exposed, revoke the key in the Apple
+Developer portal and issue a new one; unlike the Prowlarr key there is nothing
+in this service that can quietly keep using the old one.
 
 There is one deliberate exception: the **TMDB bearer token**
 (`config.tmdb_bearer_token`) is stored the same way as the Prowlarr key —
@@ -166,11 +178,18 @@ src/cplus_service/
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
   search/stream.py      IMDB and free-text search, NDJSON phases
+  notify/types.py       the catalogue of notification types
+  notify/messages.py    event -> the title/subtitle pair a notification shows
+  notify/prefs.py       the per-type switches; unset means enabled
+  notify/apns.py        provider-token signing + the HTTP/2 push to Apple
+  notify/service.py     who gets told, and cleaning up dead device tokens
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
+  api/notifications.py  the one line a route writes to raise a notification
   api/routes/           register, titles, grab, manager, request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
-                        permissions, activity, login (Plex PIN flow)
+                        permissions, activity, notifications,
+                        login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
   web/                  Jinja2 templates + vendored HTMX and CSS
   db/models.py          SQLAlchemy 2.0 schema
@@ -362,7 +381,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `apns_team_id`, `apns_key_id`, `apns_bundle_id`, `apns_private_key` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
@@ -371,11 +390,19 @@ stage 2; they exist now so the migration history has one starting point.
 | `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
+| `notification_preferences` | `notification_type` (PK) → `enabled`. **A missing row means enabled** |
+| `apns_devices` | `device_token` (PK) → user, `environment`, `device_name`, `last_seen_at` |
 
 `PRAGMA foreign_keys=ON` is set per connection — SQLite defaults it *off*, which
 would silently ignore every `ON DELETE` clause. Deleting a user cascades to
-permissions; deleting an action nulls the reference but keeps the grab history;
-a quality profile in use by an action cannot be deleted.
+permissions and to their registered devices; deleting an action nulls the
+reference but keeps the grab history; a quality profile in use by an action
+cannot be deleted.
+
+`notification_preferences` is empty on a fresh install and stays empty until an
+admin moves a switch, which is what makes "everything on by default" true with
+nothing seeded — and what lets a later release add a type that is live
+immediately, with no backfill.
 
 `cplus_service.db.QualityProfile` (ORM row) and
 `cplus_service.quality.QualityProfile` (pydantic rule schema) share a name.
@@ -460,12 +487,14 @@ flushed.
 |---|---|---|
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
-| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?, media_title?, media_year?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — for testing |
-| `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
+| `POST /manager/push-devices` | live Seerr | **admin only** (ADMIN bit). `{device_token, environment?, device_name?}`. Upsert; call on every launch |
+| `DELETE /manager/push-devices/{token}` | live Seerr | **admin only.** Sign-out. Own device only; removing an unregistered one still succeeds |
+| `POST /request` | live Seerr | `{tmdb_id, type, seasons?, media_title?, media_year?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
 | `POST /seerr/requests/{id}/approve\|decline` | live Seerr | **admin only** |
@@ -515,6 +544,14 @@ state rather than a client omission. Both bodies reject unknown fields, so
 `/grab` cannot be handed a `download_client_id` and `/manager/grab` cannot be
 handed an `action_id`.
 
+`media_title` and `media_year` on `/grab` and `/request` are **display-only,
+and only for notifications**. Nothing is stored or matched on them. The client
+is already showing the real title and year on the detail page the button was
+pressed on, so sending them saves the server either guessing from a scene
+release name or making a TMDB call on a path that has no other reason to wait.
+Omitting them stays supported — see [Notifications](#notifications) for what
+the fallbacks produce.
+
 Because the grab body is self-contained, the server keeps **no state between
 a search/actions call and a grab** — a restart in between is harmless.
 
@@ -535,6 +572,11 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+| `GET /admin/notifications` | Type switches, APNs credentials, registered devices |
+| `POST /admin/notifications/types/{type}` | Toggle one type; 404 on an unknown one |
+| `POST /admin/notifications/apns` | Save credentials; refuses a `.p8` that will not parse |
+| `POST /admin/notifications/test` | Send a sample push to every device, switches ignored |
+| `POST /admin/notifications/devices/delete` | Remove a device (`device_token` in the body) |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
@@ -689,6 +731,115 @@ that discriminator rather than widening the enum.
 
 ---
 
+## Notifications
+
+Push notifications to admins, about things *other people* did. Configured on
+the Notifications tab, delivered over APNs.
+
+### What a notification looks like
+
+Two lines, always. The first says what, the second says who and how:
+
+```
+The End of Oak Street (2026)      <- aps.alert.title
+Requested by Jane Dietrich        <- aps.alert.subtitle
+```
+
+```
+I Love Boosters (2026)            <- aps.alert.title
+Jane Dietrich: Stream Now         <- aps.alert.subtitle
+```
+
+There is deliberately **no `body`**. iOS renders a title/subtitle pair happily
+without one, and there is no third fact worth a third line — padding it out
+with the release name would bury the part that matters. The structured facts
+ride alongside `aps` under a `cplus` key, so the app can deep-link on a tap
+instead of parsing the text back apart.
+
+### Types
+
+| Type | Fires when | Subtitle |
+|---|---|---|
+| `user_requested` | Someone files a request through the built-in Request action | `Requested by {user}` |
+| `user_action` | Someone runs one of your actions on a release | `{user}: {action name}` |
+
+Both are on by default, and **so is any type a later version adds**. The rule
+that buys that: a type with no row in `notification_preferences` is enabled, so
+"on by default" needs nothing seeded and a new type needs no backfill. Adding a
+third is a one-line change in `notify/types.py` plus an emitter at the place the
+thing happens — the switch list, the storage and the defaults all follow.
+
+### Who is not notified
+
+**The person who caused the event never hears about it**, on any device they
+own. An admin who also holds actions and grabs something from tvOS gets
+nothing; a notification that fires on your own tap is the fastest way to get
+push switched off entirely. The admin app's action-free grab
+(`POST /manager/grab`) — an admin picking a release during a request approval —
+raises nothing at all, for anyone.
+
+Whether someone is an admin is decided **at registration**, not at send time:
+a row in `apns_devices` exists only because a caller passed the ADMIN check on
+`POST /manager/push-devices`. Re-validating every device against Seerr on every
+push would put an outbound call back onto a path that exists to avoid one. If
+someone stops being an admin, remove their device on the Notifications tab.
+
+### Delivery
+
+Runs **after the response, as a background task with its own session**. A push
+is never on the critical path: Apple being slow must not make a grab slow, and
+Apple being down must not make one fail. Every failure is logged and swallowed
+— the event already happened and the caller is long gone.
+
+APNs specifics worth knowing:
+
+* **Provider tokens, not certificates.** One `.p8` signing key plus a team id
+  and a key id; each push carries a short-lived ES256 JWT minted from them.
+* **The token is cached.** Apple refuses to mint one more than once every 20
+  minutes and rejects one older than an hour, so it is renewed on a 45-minute
+  timer, keyed by credential so a key swap takes effect on the next push.
+* **HTTP/2 only.** APNs gets its own `httpx` client built with `http2=True`;
+  the Prowlarr and Seerr clients talk to self-hosted services that may be
+  HTTP/1.1 only.
+* **A 410 is a fact, not an error.** It means the app is gone from that device.
+  The row is deleted. `BadDeviceToken` on a 400 is treated the same way — most
+  often a sandbox token sent to the production host.
+* **Sandbox and production are per device.** A token minted by a development
+  build only works against Apple's sandbox host, so `environment` is stored on
+  the device row and the app declares it at registration; it is a property of
+  the token, not a preference.
+* **One retry, not a loop.** Only for a stale provider token (re-mint, retry)
+  and for Apple throttling or faulting. Everything else would fail identically.
+
+### Setting it up
+
+1. In the Apple Developer portal, **Certificates, Identifiers & Profiles →
+   Keys**, create a key with APNs enabled. Download the `.p8` — Apple lets you
+   do that exactly once.
+2. On the Notifications tab, fill in the team id, the key id (also in the
+   filename, `AuthKey_ABC123DEFG.p8`), the app's bundle id, and paste the `.p8`
+   contents including the BEGIN and END lines.
+3. Sign in on the app once with an admin account. It registers itself; there is
+   nothing to enter by hand.
+4. Press **Send a test notification**. It goes to every device *including your
+   own* — the opposite of the emitting rule, and the point, since that is the
+   phone in your hand — and ignores the type switches, because the question it
+   asks is whether delivery works at all.
+
+The key is handled like the Prowlarr API key: never rendered back into the
+page, and an empty field on save means "leave it alone". Unlike the TMDB token
+it is **not readable over the API at all** — it signs pushes for the whole team
+and is not casually rotatable. A `.p8` that will not parse is refused at save
+time rather than at the first push; finding out later, as notifications having
+quietly stopped, is the worst possible way to learn about it.
+
+**Until all four fields are set, push is off and delivery stops there,
+quietly.** Everything else on the tab works regardless — the switches store
+either way — so an install with no signing key is a supported state, not a
+broken one.
+
+---
+
 ## Admin web UI
 
 Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
@@ -724,10 +875,14 @@ instead of a broken profile.
 * A quality profile still used by an action cannot be deleted; the page says
   which action is holding it.
 * An empty API-key field means "leave the saved key alone", and the saved key is
-  never rendered back into the page.
+  never rendered back into the page. The APNs `.p8` follows the same rule, and
+  is additionally validated at save time rather than at the first push.
 * Removing a user is immediate: deleting the row cascades to their browser
-  sessions *and* to their stored Plex-token mappings.
+  sessions, their stored Plex-token mappings *and* their registered devices.
   Revoking a single permission is not immediate — see below.
+* Removing a device on the Notifications tab is not permanent on its own: the
+  app re-registers on its next launch. Signing out of the app is what stops it
+  for good. The page says so rather than implying otherwise.
 
 ---
 
