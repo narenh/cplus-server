@@ -63,6 +63,7 @@ async def signed_in(client: httpx.AsyncClient, db: AsyncSession) -> User:
         "/admin/users",
         "/admin/grabs",
         "/admin/activity-log",
+        "/admin/notifications",
         "/admin/prowlarr/indexers",
         "/admin/prowlarr/download-clients",
     ],
