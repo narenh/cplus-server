@@ -7,7 +7,8 @@ who should hear about it:
 * notifications have to be switched on at all — this is the master toggle, off
   by default, and until an admin turns it on this is where everything stops;
 * the type has to be switched on (:mod:`cplus_service.notify.prefs`);
-* a relay API key has to be configured;
+* enrollment with the relay has to have succeeded, which normally happened
+  when the switch was turned on;
 * **the person who caused the event never hears about it.**  An admin grabbing
   a release does not need their phone to tell them they just grabbed a
   release, and a notification that fires on your own tap is the fastest way to
@@ -53,8 +54,9 @@ DISABLED_REASON = (
 )
 
 UNCONFIGURED_REASON = (
-    "No relay API key is set. Notifications are on, but there is nowhere to "
-    "send them until a key is saved."
+    "This instance is not connected to the notification relay. Notifications "
+    "are on, but enrolling did not succeed — press “Reconnect” on the "
+    "Notifications tab."
 )
 
 
@@ -77,6 +79,14 @@ class DispatchReport:
     skipped_reason: str | None = None
     """Set when no push was attempted at all: notifications are off, the type
     is off, no relay key is set, or there are no devices."""
+
+    failure_reason: str | None = None
+    """Why the failures failed, when they all failed the same way.
+
+    Exists for the admin UI's test button. "1 failed — check the log" is a
+    useless thing to read when the answer is "the relay does not recognise this
+    key", and that answer is right there in the result. Left ``None`` when
+    failures disagreed, since one of several reasons would be a guess."""
 
     @property
     def attempted(self) -> bool:
@@ -115,6 +125,7 @@ async def send_to_devices(
     client = RelayClient(settings, client=http)
 
     delivered = failed = unregistered = 0
+    reasons: set[str] = set()
     for device in devices:
         result = await client.send(
             notification,
@@ -134,9 +145,16 @@ async def send_to_devices(
             await session.delete(device)
         else:
             failed += 1
+            if result.reason:
+                reasons.add(result.reason)
 
     await session.flush()
-    return DispatchReport(delivered=delivered, failed=failed, unregistered=unregistered)
+    return DispatchReport(
+        delivered=delivered,
+        failed=failed,
+        unregistered=unregistered,
+        failure_reason=reasons.pop() if len(reasons) == 1 else None,
+    )
 
 
 async def deliver(

@@ -84,6 +84,7 @@ Only the handful that must exist before the UI does:
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
+| `CPLUS_RELAY_URL` | `https://apns.canopysf.com` | The notification relay. Only for development or a fork with its own Apple Developer account — see [Notifications](#notifications) |
 
 There is no secret key to set. Admin sessions are opaque random tokens stored in
 the database, so there is nothing to sign, rotate or leak — revoking a session
@@ -117,13 +118,16 @@ are worth doing deliberately as whoever runs the container:
   out — rotate the Prowlarr API key too.
 
 The **relay API key** (`config.notification_relay_api_key`) sits in the same
-file under the same terms, and is worth notably less than the Prowlarr key:
-it identifies this instance to the notification relay for rate-limiting and
-abuse handling, and that is all it can do. It is *not* an access-control
-boundary over anyone's devices — see [Notifications](#notifications) for why
-isolation between instances does not depend on it — so someone who steals it
-can spend your notification budget and nothing else. Ask whoever issued it to
-revoke it.
+file under the same terms, and is worth notably less than the Prowlarr key: it
+identifies this instance to the notification relay for rate-limiting and abuse
+handling, and that is all it can do. It is *not* an access-control boundary
+over anyone's devices — see [Notifications](#notifications) for why isolation
+between instances does not depend on it — so someone who steals it can spend
+your notification budget and nothing else.
+
+You never see or type it: it is obtained automatically when you switch
+notifications on. If one is ever leaked, press **Reconnect** on the
+Notifications tab, which discards it and registers again.
 
 There is no APNs signing key in this file, and there is no way to put one
 there. That key belongs to the Apple Developer account that owns the app and
@@ -389,7 +393,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_url`, `notification_relay_api_key` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
@@ -582,10 +586,9 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
 | `GET /admin/notifications` | The master switch, and everything it governs |
-| `POST /admin/notifications/enabled` | The master switch; returns the settings block it reveals or hides |
+| `POST /admin/notifications/enabled` | The master switch. Registers with the relay the first time it goes on; returns the whole panel |
 | `POST /admin/notifications/types/{type}` | Toggle one type; 404 on an unknown one |
-| `POST /admin/notifications/relay` | Save the relay URL and API key |
-| `POST /admin/notifications/relay/check` | Ask the relay whether this instance's key works |
+| `POST /admin/notifications/reconnect` | Discard this instance's relay identity and register again |
 | `POST /admin/notifications/test` | Send a sample push to every device, type switches ignored |
 | `POST /admin/notifications/devices/delete` | Remove a device (`device_token` in the body) |
 
@@ -797,7 +800,9 @@ Two things follow, both worth being explicit about:
 * **The relay API key is a rate-limit identity and an abuse handle, not an
   access-control boundary over devices.** Someone who steals yours can spend
   your notification budget. They cannot reach your users, because the key does
-  not carry their tokens.
+  not carry their tokens. That is exactly why you never handle one: a
+  credential protecting nothing you chose is friction, so this instance obtains
+  it automatically when you switch notifications on.
 * **The relay sees notification text in plaintext.** APNs requires that —
   Apple has to read an alert to display it — so there is no arrangement where
   the relay forwards without seeing. For the duration of one request it holds a
@@ -942,28 +947,43 @@ Specifics worth knowing:
 
 ### Setting it up
 
-1. **Ask the relay's operator for an API key.** It looks like
-   `canopy_yourinstance_…`. It identifies your instance for rate-limiting;
-   see above for what it is and is not.
-2. On the Notifications tab, tick **Enable push notifications**, having read
-   the sentence next to it. Everything else on the page appears once you do.
-3. Paste the API key and press **Save**. Leave the relay URL at its default
-   unless you run your own relay.
-4. Press **Check the relay**. This confirms the credential alone, before any
-   device is involved — and separates "your key is wrong" from "the relay has
-   no signing key of its own yet", which are different problems with different
-   owners.
-5. Open the app on a device signed in as an admin. It registers itself; there
-   is nothing to enter by hand.
-6. Press **Send a test notification**. It goes to every device *including your
-   own* — the opposite of the emitting rule, and the point, since that is the
-   phone in your hand — and ignores the per-type switches, because the question
-   it asks is whether delivery works at all. It does *not* ignore the master
-   switch: that one is consent to use the relay, not a preference.
+**Tick one box.** That is the whole of it:
 
-The relay key is handled like the Prowlarr API key: never rendered back into
-the page, never readable over the API, and an empty field on save means "leave
-it alone".
+1. Notifications tab → **Enable push notifications**, having read the sentence
+   next to it.
+2. Open the app on a device signed in as an admin. It registers itself.
+3. Press **Send a test notification**.
+
+There is no relay URL to enter and no API key to obtain. Switching the box on
+registers this instance with the relay and stores the credential it hands back;
+turning it off and on again reuses that credential rather than burning a new
+one.
+
+**If registering fails, the box comes back off** and the page says why. That is
+deliberate: an instance left switched on with no relay identity would report
+itself capable through `GET /capabilities`, accept device registrations, and
+then silently send nothing — which was exactly what the old settings form was
+good at producing.
+
+**Reconnect** discards this instance's relay identity and registers again. It
+is the recovery path for the one failure you cannot otherwise get out of: a key
+the relay no longer accepts, because it was revoked or because the relay's
+signing secret was rotated. Nothing can be repaired in place — the relay stores
+no keys, so there is nothing to look up — which makes registering again both the
+fix and the only fix. Registered devices are untouched.
+
+#### Why there is no relay setting
+
+Running a relay means holding an Apple Developer account's signing key, so in
+practice no self-hoster will ever run one. A URL box was therefore a field with
+exactly one possible value, sitting next to a credential that protects nothing
+the admin chose — isolation between instances comes from token custody, not from
+the key. Together they made a piece of plumbing look like a decision, and put a
+credential in front of someone whose actual intent was "I would like
+notifications".
+
+For development, or a fork with its own Apple Developer account — the only two
+cases that were ever real — set `CPLUS_RELAY_URL`.
 
 **Turning the switch back off does not delete registered devices.** They go
 inert — nothing is sent, nothing new may register, `/capabilities` reports

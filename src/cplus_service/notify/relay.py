@@ -15,12 +15,16 @@ device-to-install mapping at all.  Two things follow that are worth having in
 mind while reading this module:
 
 * the relay API key is a rate-limit identity and an abuse handle, **not** an
-  access-control boundary over devices;
+  access-control boundary over devices.  That is precisely why no admin is
+  asked to handle one: :func:`enrol` obtains it automatically the moment
+  notifications are switched on.  A credential that protects nothing the admin
+  chose is friction, not security, and putting it in a settings form only made
+  it look like it mattered;
 * the relay sees notification text in plaintext.  APNs requires that — Apple
   has to read the alert to display it — so there is no arrangement in which the
   relay forwards without seeing.  That is why enabling this is an explicit,
-  default-off decision on the Notifications tab rather than something that
-  happens once a key is pasted in.
+  default-off decision on the Notifications tab: the consent that matters is
+  about the plaintext, not about a key.
 
 What the relay gives back that matters here is
 :attr:`SendOutcome.UNREGISTERED`: the relay stores no device tokens, so only
@@ -33,6 +37,7 @@ Nothing in this module reads configuration or touches the database.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -44,18 +49,33 @@ from .messages import Notification
 
 logger = logging.getLogger(__name__)
 
-#: Where an install points unless its admin says otherwise.  Not baked into the
-#: code paths — it is a default for the settings field, so an operator running
-#: their own relay, or a fork with its own Apple Developer account, only has to
-#: change one text box.
+#: The relay every install talks to.
+#:
+#: Deliberately **not** an admin-facing setting.  Running a relay means holding
+#: an Apple Developer account's signing key, so in practice nobody self-hosting
+#: this service will ever run their own — a text box for it was a field that
+#: only ever held one value, sitting next to a credential nobody wanted, in a
+#: form that made both look like decisions.
+#:
+#: The environment variable exists for development and for a fork with its own
+#: Apple account, which are the only two cases that were ever real.  It is read
+#: per call rather than cached so a test can point it somewhere else without
+#: rebuilding the app.
 DEFAULT_RELAY_URL = "https://apns.canopysf.com"
+
+RELAY_URL_ENV = "CPLUS_RELAY_URL"
 
 #: The relay answers 200 whenever Apple answered — including a rejection —
 #: because forwarding a push that Apple refused is still a successful forward.
 #: Anything else is the relay's own problem, not a verdict on the device token,
 #: and must never be read as one.
 _PUSH_PATH = "/v1/push"
-_VERIFY_PATH = "/v1/verify"
+_ENROL_PATH = "/v1/instances"
+
+
+def relay_base_url() -> str:
+    """Where to reach the relay, with no trailing slash."""
+    return (os.environ.get(RELAY_URL_ENV) or DEFAULT_RELAY_URL).strip().rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -74,21 +94,24 @@ class RelaySettings:
     def from_config(cls, config: Config) -> RelaySettings | None:
         """The relay to send through, or ``None`` if this install is not set up.
 
-        Three ways to get ``None``, and they are deliberately indistinguishable
-        to callers: the master switch is off, no API key has been entered, or
-        the URL has been blanked. All three mean the same thing to the sending
-        path — there is nowhere to send — and the Notifications tab is where an
-        admin finds out which one they are in.
+        Two ways to get ``None``, and they are deliberately indistinguishable
+        to callers: the master switch is off, or enrollment has not produced a
+        key yet. Both mean the same thing to the sending path — there is
+        nowhere to send — and the Notifications tab is where an admin finds out
+        which one they are in.
+
+        A missing key is now a *transient* state rather than an unfinished
+        setup step: switching notifications on enrols, so the only way to be
+        enabled without a key is for that call to have failed.
         """
         if not config.notifications_enabled:
             return None
 
         api_key = (config.notification_relay_api_key or "").strip()
-        url = (config.notification_relay_url or DEFAULT_RELAY_URL).strip()
-        if not api_key or not url:
+        if not api_key:
             return None
 
-        return cls(url=url.rstrip("/"), api_key=api_key)
+        return cls(url=relay_base_url(), api_key=api_key)
 
     def endpoint(self, path: str) -> str:
         return f"{self.url}{path}"
@@ -130,13 +153,27 @@ class SendResult:
 
 
 @dataclass(frozen=True)
-class VerifyResult:
-    """What ``GET /v1/verify`` said, flattened into something a page can show."""
+class Enrollment:
+    """A relay identity this install now holds.
 
-    ok: bool
-    message: str
-    instance: str | None = None
+    ``ready`` is the relay reporting on *itself*: the key is good either way,
+    but until the relay operator has installed a signing key there is nothing
+    behind it. Worth surfacing, because an admin who has done everything right
+    and still sees no notifications deserves to be told it is not their end.
+    """
+
+    instance_id: str
+    api_key: str
     bundle_id: str | None = None
+    ready: bool = True
+
+
+class EnrollmentError(Exception):
+    """Enrolling with the relay did not work.
+
+    Carries a sentence written for an admin looking at the Notifications tab,
+    since that is the only place it is ever shown.
+    """ 
 
 
 def build_request(
@@ -226,62 +263,62 @@ class RelayClient:
         return _result_of(response)
 
 
-async def verify(
-    settings: RelaySettings, *, client: httpx.AsyncClient
-) -> VerifyResult:
-    """Ask the relay whether this install's key works, for the settings page.
+async def enrol(*, client: httpx.AsyncClient) -> Enrollment:
+    """Obtain a fresh relay identity for this install.
 
-    Reports the three states separately because they have three different
-    owners: the key is wrong (this admin fixes it), the relay is up but has no
-    signing key of its own (the relay operator fixes it), or the relay cannot
-    be reached at all (nobody knows yet). Collapsing them into "it didn't work"
-    is how an admin spends an afternoon re-pasting a key that was already fine.
+    Called when an admin switches notifications on. This is the whole of the
+    setup that used to be a URL, an API key, a Save button and a Check button:
+    a single unauthenticated POST that hands back an identity.
+
+    Raises :class:`EnrollmentError` with something an admin can act on. The
+    caller is expected to leave notifications *off* when this fails — an
+    install that is switched on with no key would sit there silently sending
+    nothing, which is the exact failure the old settings form was so good at
+    producing.
     """
+    url = f"{relay_base_url()}{_ENROL_PATH}"
+
     try:
-        response = await client.get(
-            settings.endpoint(_VERIFY_PATH),
-            headers={"authorization": f"Bearer {settings.api_key}"},
-        )
+        response = await client.post(url)
     except httpx.HTTPError as exc:
-        return VerifyResult(
-            ok=False, message=f"Could not reach the relay at {settings.url}: {exc}"
+        raise EnrollmentError(
+            f"Could not reach the notification relay at {relay_base_url()}. "
+            f"Check this server's outbound connectivity and try again. ({exc})"
+        ) from exc
+
+    if response.status_code == 403:
+        raise EnrollmentError(
+            "The notification relay is not issuing new keys at the moment. "
+            "This is not something you can fix from here — try again later."
         )
 
-    if response.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            message=(
-                "The relay does not recognise this API key. Check it was pasted "
-                "in full, and ask whoever issued it whether it is still valid."
-            ),
+    if response.status_code == 429:
+        raise EnrollmentError(
+            "The notification relay is rate-limiting requests from this "
+            "address. Wait a minute and try again."
         )
 
-    if response.status_code != 200:
+    if response.status_code not in (200, 201):
         detail = _detail_of(response) or f"it answered {response.status_code}"
-        return VerifyResult(ok=False, message=f"The relay refused the check: {detail}")
+        raise EnrollmentError(f"The notification relay refused to enrol us: {detail}")
 
     body = _json_of(response)
-    instance = _str_or_none(body.get("instance"))
-    bundle_id = _str_or_none(body.get("bundle_id"))
+    instance_id = _str_or_none(body.get("instance_id"))
+    api_key = _str_or_none(body.get("api_key"))
 
-    if not body.get("ready", True):
-        return VerifyResult(
-            ok=False,
-            instance=instance,
-            message=(
-                "This key works, but the relay has no APNs signing key of its "
-                "own yet, so nothing can be delivered. Nothing is wrong on this "
-                "end — the relay's operator has to finish setting it up."
-            ),
+    if not instance_id or not api_key:
+        # A 2xx we cannot use is worse than an error, because everything
+        # downstream would behave as though setup had succeeded.
+        raise EnrollmentError(
+            "The notification relay returned a response we did not understand. "
+            "It may be running a newer version than this server expects."
         )
 
-    suffix = f" as “{instance}”" if instance else ""
-    topic = f" Pushes go to {bundle_id}." if bundle_id else ""
-    return VerifyResult(
-        ok=True,
-        instance=instance,
-        bundle_id=bundle_id,
-        message=f"The relay accepted this key{suffix}.{topic}",
+    return Enrollment(
+        instance_id=instance_id,
+        api_key=api_key,
+        bundle_id=_str_or_none(body.get("bundle_id")),
+        ready=bool(body.get("ready", True)),
     )
 
 
@@ -331,11 +368,14 @@ def _result_of(response: httpx.Response) -> SendResult:
 
 __all__ = [
     "DEFAULT_RELAY_URL",
+    "RELAY_URL_ENV",
+    "Enrollment",
+    "EnrollmentError",
     "RelayClient",
     "RelaySettings",
     "SendOutcome",
     "SendResult",
-    "VerifyResult",
     "build_request",
-    "verify",
+    "enrol",
+    "relay_base_url",
 ]

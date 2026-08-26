@@ -15,15 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.db.models import ApnsDevice, Config, NotificationPreference, User
 from cplus_service.notify import prefs
-from cplus_service.notify.relay import DEFAULT_RELAY_URL
 from cplus_service.notify.types import NotificationType
 
 from .conftest import (
     RELAY_API_KEY,
+    RELAY_ENROL_URL,
+    RELAY_INSTANCE_ID,
     RELAY_PUSH_URL,
-    RELAY_URL,
-    RELAY_VERIFY_URL,
     enable_notifications,
+    enrolled,
     register_device,
 )
 from .test_admin_webui import signed_in
@@ -33,6 +33,12 @@ DEVICE_TOKEN = "ab" * 32
 
 def relayed(**body) -> httpx.Response:
     return httpx.Response(200, json={"result": "delivered", **body})
+
+
+def mock_enrol(**overrides) -> respx.Route:
+    return respx.post(RELAY_ENROL_URL).mock(
+        return_value=httpx.Response(201, json=enrolled(**overrides))
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -71,7 +77,28 @@ async def test_the_page_says_what_enabling_commits_to(
     body = (await client.get("/admin/notifications")).text
 
     assert "plaintext" in body
-    assert DEFAULT_RELAY_URL.removeprefix("https://") in body
+    assert "relay.test" in body
+
+
+async def test_the_page_offers_no_way_to_configure_a_relay(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """The fiasco this change removes.
+
+    Nobody self-hosting will ever run their own relay, so a URL box was a field
+    with one possible value, and the API key next to it was a credential that
+    protects nothing the admin chose — isolation comes from token custody. Both
+    are gone; enabling is the whole of setup.
+    """
+    await signed_in(client, db)
+    await enable_notifications(db, configured)
+
+    body = (await client.get("/admin/notifications")).text
+
+    assert "Relay URL" not in body
+    assert "Relay API key" not in body
+    assert 'name="relay_url"' not in body
+    assert 'name="relay_api_key"' not in body
 
 
 async def test_everything_else_is_hidden_while_notifications_are_off(
@@ -82,14 +109,17 @@ async def test_everything_else_is_hidden_while_notifications_are_off(
 
     body = (await client.get("/admin/notifications")).text
 
-    assert "Relay API key" not in body
+    assert "Send a test notification" not in body
     assert "A user requested something" not in body
     assert "Notifications are off" in body
 
 
-async def test_turning_it_on_reveals_the_settings_it_governs(
+@respx.mock
+async def test_turning_it_on_enrols_and_reveals_what_it_governs(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
+    """Ticking one box is the entire setup. No key is ever typed."""
+    route = mock_enrol()
     await signed_in(client, db)
 
     response = await client.post(
@@ -97,8 +127,66 @@ async def test_turning_it_on_reveals_the_settings_it_governs(
     )
 
     assert response.status_code == 200
-    assert "Relay API key" in response.text
+    assert route.called
     assert "A user requested something" in response.text
+
+    await db.refresh(configured)
+    assert configured.notifications_enabled is True
+    assert configured.notification_relay_api_key == RELAY_API_KEY
+    assert configured.notification_relay_instance_id == RELAY_INSTANCE_ID
+
+
+@respx.mock
+async def test_a_failed_enrollment_leaves_the_switch_off_and_says_why(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Switching on anyway would produce an install that reports itself
+    capable, accepts device registrations, and silently sends nothing."""
+    respx.post(RELAY_ENROL_URL).mock(side_effect=httpx.ConnectError("no route"))
+    await signed_in(client, db)
+
+    response = await client.post(
+        "/admin/notifications/enabled", data={"enabled": "on"}
+    )
+
+    assert response.status_code == 200
+    assert "Could not reach" in response.text
+    # The checkbox comes back unticked, because the server is the authority.
+    assert "checked" not in response.text
+
+    await db.refresh(configured)
+    assert configured.notifications_enabled is False
+    assert configured.notification_relay_api_key is None
+
+
+@respx.mock
+async def test_enrolling_happens_once_not_on_every_toggle(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Toggling while looking at something else must not burn a fresh identity."""
+    route = mock_enrol()
+    await signed_in(client, db)
+
+    await client.post("/admin/notifications/enabled", data={"enabled": "on"})
+    await client.post("/admin/notifications/enabled", data={"enabled": ""})
+    await client.post("/admin/notifications/enabled", data={"enabled": "on"})
+
+    assert route.call_count == 1
+
+
+@respx.mock
+async def test_an_unready_relay_enables_but_warns(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """An admin who did everything right deserves to know it is not their end."""
+    mock_enrol(ready=False)
+    await signed_in(client, db)
+
+    response = await client.post(
+        "/admin/notifications/enabled", data={"enabled": "on"}
+    )
+
+    assert "no Apple signing key" in response.text
     await db.refresh(configured)
     assert configured.notifications_enabled is True
 
@@ -111,7 +199,7 @@ async def test_turning_it_off_hides_them_again(
 
     response = await client.post("/admin/notifications/enabled", data={"enabled": ""})
 
-    assert "Relay API key" not in response.text
+    assert "Send a test notification" not in response.text
     await db.refresh(configured)
     assert configured.notifications_enabled is False
 
@@ -148,30 +236,41 @@ async def test_the_page_renders_a_switch_and_a_preview_for_every_type(
     assert "Robin Example: Stream Now" in body
 
 
-async def test_the_page_says_nothing_is_sent_before_a_key_is_saved(
+async def test_the_page_shows_who_this_instance_is_to_the_relay(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Display only, so a support conversation has something to name."""
+    await signed_in(client, db)
+    await enable_notifications(db, configured)
+
+    body = (await client.get("/admin/notifications")).text
+
+    assert "Connected to" in body
+    assert RELAY_INSTANCE_ID in body
+
+
+async def test_the_page_says_so_when_enrollment_never_took(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
     await signed_in(client, db)
     await enable_notifications(db, configured, api_key=None)
 
-    response = await client.get("/admin/notifications")
+    body = (await client.get("/admin/notifications")).text
 
-    assert "Nothing is sent until an API key is saved" in response.text
+    assert "Not connected" in body
 
 
-async def test_a_saved_relay_key_is_never_rendered_back_into_the_page(
+async def test_the_relay_key_is_never_rendered_into_the_page(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
-    """Same discipline as the Prowlarr API key."""
+    """Same discipline as the Prowlarr API key — and now nothing shows a field
+    for it either, so there is nowhere it could leak from."""
     await signed_in(client, db)
     await enable_notifications(db, configured)
 
-    response = await client.get("/admin/notifications")
+    body = (await client.get("/admin/notifications")).text
 
-    assert RELAY_API_KEY not in response.text
-    assert "(unchanged)" in response.text
-    # The non-secret half is shown, so an admin can check where it is pointed.
-    assert RELAY_URL in response.text
+    assert RELAY_API_KEY not in body
 
 
 # --------------------------------------------------------------------------- #
@@ -226,140 +325,61 @@ async def test_an_unknown_type_is_a_404_rather_than_a_new_row(
 
 
 # --------------------------------------------------------------------------- #
-# The relay form
-# --------------------------------------------------------------------------- #
-
-
-async def test_saving_a_url_and_key_configures_the_relay(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    await signed_in(client, db)
-    await enable_notifications(db, configured, api_key=None)
-
-    response = await client.post(
-        "/admin/notifications/relay",
-        data={"relay_url": RELAY_URL, "relay_api_key": RELAY_API_KEY},
-    )
-
-    assert response.status_code == 200
-    assert "Check the relay" in response.text
-
-    await db.refresh(configured)
-    assert configured.notification_relay_url == RELAY_URL
-    assert configured.notification_relay_api_key == RELAY_API_KEY
-
-
-async def test_saving_without_a_key_says_nothing_will_be_sent(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    await signed_in(client, db)
-    await enable_notifications(db, configured, api_key=None)
-
-    response = await client.post(
-        "/admin/notifications/relay", data={"relay_url": RELAY_URL, "relay_api_key": ""}
-    )
-
-    assert "Nothing will be sent until an API key is set" in response.text
-
-
-async def test_a_blank_key_field_keeps_the_stored_one(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    """So editing the URL cannot blank the key by accident."""
-    await signed_in(client, db)
-    await enable_notifications(db, configured)
-
-    await client.post(
-        "/admin/notifications/relay",
-        data={"relay_url": "https://other.relay.test", "relay_api_key": ""},
-    )
-
-    await db.refresh(configured)
-    assert configured.notification_relay_url == "https://other.relay.test"
-    assert configured.notification_relay_api_key == RELAY_API_KEY
-
-
-async def test_a_blank_url_resets_to_the_default_rather_than_nothing(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    """A key with nowhere to send it is not a state anyone means to be in."""
-    await signed_in(client, db)
-    await enable_notifications(db, configured)
-
-    await client.post(
-        "/admin/notifications/relay", data={"relay_url": "", "relay_api_key": ""}
-    )
-
-    await db.refresh(configured)
-    assert configured.notification_relay_url == DEFAULT_RELAY_URL
-
-
-# --------------------------------------------------------------------------- #
-# Checking the relay
+# Reconnecting
 # --------------------------------------------------------------------------- #
 
 
 @respx.mock
-async def test_the_check_button_reports_a_working_key(
+async def test_reconnect_replaces_the_relay_identity(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
-    respx.get(RELAY_VERIFY_URL).mock(
+    """The recovery path for a key the relay stopped accepting.
+
+    Nothing can be repaired in place — the relay stores no keys, so there is
+    nothing to look up — which makes re-enrolling both the fix and the only fix.
+    """
+    respx.post(RELAY_ENROL_URL).mock(
         return_value=httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "instance": "notcanopy",
-                "bundle_id": "com.example.cplus",
-                "ready": True,
-            },
+            201, json=enrolled(instance_id="freshid", api_key="canopy_freshid_abc")
         )
     )
     await signed_in(client, db)
     await enable_notifications(db, configured)
 
-    response = await client.post("/admin/notifications/relay/check")
+    response = await client.post("/admin/notifications/reconnect")
 
-    assert "notcanopy" in response.text
-
-
-@respx.mock
-async def test_the_check_button_reports_a_rejected_key(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    respx.get(RELAY_VERIFY_URL).mock(return_value=httpx.Response(401))
-    await signed_in(client, db)
-    await enable_notifications(db, configured)
-
-    response = await client.post("/admin/notifications/relay/check")
-
-    assert "does not recognise this API key" in response.text
+    assert "Reconnected as freshid" in response.text
+    await db.refresh(configured)
+    assert configured.notification_relay_instance_id == "freshid"
+    assert configured.notification_relay_api_key == "canopy_freshid_abc"
 
 
 @respx.mock
-async def test_the_check_button_says_when_the_relay_is_the_one_not_ready(
+async def test_reconnect_leaves_devices_alone(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
-    """The failure an admin would otherwise spend an afternoon re-pasting a good key over."""
-    respx.get(RELAY_VERIFY_URL).mock(
-        return_value=httpx.Response(200, json={"ok": True, "instance": "x", "ready": False})
-    )
+    """A new identity is only a new name in a rate-limit bucket."""
+    respx.post(RELAY_ENROL_URL).mock(return_value=httpx.Response(201, json=enrolled()))
+    admin = await signed_in(client, db)
+    await enable_notifications(db, configured)
+    await register_device(db, admin, device_token=DEVICE_TOKEN)
+
+    await client.post("/admin/notifications/reconnect")
+
+    assert (await db.execute(select(ApnsDevice))).scalars().first() is not None
+
+
+@respx.mock
+async def test_reconnect_reports_a_relay_that_will_not_have_us(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    respx.post(RELAY_ENROL_URL).mock(return_value=httpx.Response(403))
     await signed_in(client, db)
     await enable_notifications(db, configured)
 
-    response = await client.post("/admin/notifications/relay/check")
+    response = await client.post("/admin/notifications/reconnect")
 
-    assert "Nothing is wrong on this end" in response.text
-
-
-async def test_the_check_button_explains_a_missing_key(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
-) -> None:
-    await signed_in(client, db)
-    await enable_notifications(db, configured, api_key=None)
-
-    response = await client.post("/admin/notifications/relay/check")
-
-    assert "No relay API key is set" in response.text
+    assert "not issuing new keys" in response.text
 
 
 # --------------------------------------------------------------------------- #

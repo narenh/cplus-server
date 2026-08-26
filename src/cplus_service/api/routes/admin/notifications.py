@@ -33,10 +33,9 @@ from ....db.models import ApnsDevice, Config, User
 from ....db.session import get_config
 from ....notify import prefs
 from ....notify.messages import MediaSummary, user_requested
-from ....notify.relay import DEFAULT_RELAY_URL, RelaySettings, verify
+from ....notify.relay import EnrollmentError, RelaySettings, enrol, relay_base_url
 from ....notify.service import (
     DISABLED_REASON,
-    UNCONFIGURED_REASON,
     DispatchReport,
     eligible_devices,
     send_to_devices,
@@ -74,20 +73,26 @@ async def _devices_with_owners(
     return [(device, user) for device, user in rows.all()]
 
 
-async def _page_context(db: AsyncSession, config: Config) -> dict[str, object]:
-    """Everything the settings block renders from.
+async def _page_context(
+    db: AsyncSession, config: Config, *, error: str | None = None
+) -> dict[str, object]:
+    """Everything the panel renders from.
 
     Shared by the full page and the partial the master switch swaps in, so the
     two cannot drift into showing different things about the same state.
+
+    ``error`` is how a failed enrollment reaches the page. It is passed rather
+    than raised because the swap has to render *something*, and the something
+    has to include the checkbox in its true (still off) position.
     """
     return {
         "types": NOTIFICATION_TYPES,
         "enabled": await prefs.current(db),
         "config": config,
-        "relay_url": config.notification_relay_url or DEFAULT_RELAY_URL,
-        "default_relay_url": DEFAULT_RELAY_URL,
-        "relay_configured": RelaySettings.from_config(config) is not None,
+        "relay_host": relay_base_url().removeprefix("https://").removeprefix("http://"),
+        "relay_connected": RelaySettings.from_config(config) is not None,
         "devices": await _devices_with_owners(db),
+        "error": error,
     }
 
 
@@ -110,28 +115,60 @@ async def notifications_page(
 
 @router.post("/enabled", response_class=HTMLResponse)
 async def toggle_enabled(
-    request: Request, db: DbDep, admin: AdminPageDep, enabled: str = Form(default="")
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    enabled: str = Form(default=""),
 ) -> Response:
-    """Flip the master switch, and re-render everything it governs.
+    """Flip the master switch, enrolling with the relay the first time it goes on.
 
-    The response is the settings block, not the whole page: the checkbox itself
-    lives outside the swapped region, so it keeps the state the admin just put
-    it in rather than being replaced underneath their cursor.
+    **This is the entire setup.** No URL, no API key, no Save, no Check — an
+    admin who wants notifications ticks one box and is done. The credential
+    exists, but it is the relay's business and this server's, not theirs: it
+    identifies this install for rate-limiting and cannot reach anyone's devices,
+    so asking a human to carry it was friction dressed up as security.
 
-    Turning it off deliberately **does not** delete registered devices. They are
-    inert while it is off — nothing is sent and nothing new may register — and
-    keeping them means an admin who toggles this while investigating something
-    does not silently cost every admin their registration, with no way to get it
-    back but asking each of them to relaunch the app.
+    Enrollment happens once. A second enable reuses the stored key rather than
+    burning a fresh identity every time someone toggles the switch while
+    looking at something else.
+
+    **A failed enrollment leaves the switch off**, and says why. Turning it on
+    anyway would produce an install that reports itself capable, accepts device
+    registrations, and silently sends nothing — which is precisely the failure
+    the old settings form was so good at producing.
     """
     config = await get_config(db)
-    config.notifications_enabled = enabled == "on"
+    wants_on = enabled == "on"
+    error: str | None = None
+
+    if wants_on and not (config.notification_relay_api_key or "").strip():
+        try:
+            enrollment = await enrol(client=state.relay_http)
+        except EnrollmentError as exc:
+            logger.warning("could not enrol with the notification relay: %s", exc)
+            error = str(exc)
+            wants_on = False
+        else:
+            config.notification_relay_instance_id = enrollment.instance_id
+            config.notification_relay_api_key = enrollment.api_key
+            logger.info(
+                "enrolled with the notification relay as %s", enrollment.instance_id
+            )
+            if not enrollment.ready:
+                error = (
+                    "Connected, but the relay has no Apple signing key installed "
+                    "yet, so nothing can be delivered. Nothing is wrong on this "
+                    "end — the relay's operator has to finish setting it up."
+                )
+
+    config.notifications_enabled = wants_on
     await db.flush()
 
     return templates.TemplateResponse(
         request,
-        "partials/notification_settings.html",
-        await _page_context(db, config),
+        "partials/notification_panel.html",
+        await _page_context(db, config, error=error),
     )
 
 
@@ -165,73 +202,47 @@ def _info_for(notification_type: NotificationType) -> NotificationTypeInfo:
     return NOTIFICATION_TYPES_BY_VALUE[notification_type.value]
 
 
-@router.post("/relay", response_class=HTMLResponse)
-async def save_relay(
-    request: Request,
-    db: DbDep,
-    admin: AdminPageDep,
-    relay_url: str = Form(default=""),
-    relay_api_key: str = Form(default=""),
-) -> Response:
-    """Store the relay URL and API key.
-
-    The key follows the same rule as the Prowlarr API key: an empty field means
-    "leave it alone", so the stored key is never rendered back into the page and
-    cannot be blanked by someone saving a change to the URL.
-
-    A blank URL resets to the default rather than storing nothing. An install
-    with a key and no relay to send it to is not a state anyone means to be in,
-    and the default is what almost everyone wants.
-    """
-    config = await get_config(db)
-    config.notification_relay_url = relay_url.strip() or DEFAULT_RELAY_URL
-
-    if relay_api_key.strip():
-        config.notification_relay_api_key = relay_api_key.strip()
-
-    await db.flush()
-
-    if RelaySettings.from_config(config) is None:
-        message = "Saved. Nothing will be sent until an API key is set."
-    else:
-        message = "Saved. Use “Check the relay” to confirm the key works."
-
-    return templates.TemplateResponse(
-        request, "partials/verify.html", {"ok": True, "message": message}
-    )
-
-
-@router.post("/relay/check", response_class=HTMLResponse)
-async def check_relay(
+@router.post("/reconnect", response_class=HTMLResponse)
+async def reconnect(
     request: Request, db: DbDep, state: StateDep, admin: AdminPageDep
 ) -> Response:
-    """Ask the relay whether this install's key works.
+    """Discard this install's relay identity and enrol again.
 
-    Separate from "send a test notification" because they answer different
-    questions and fail for different reasons: this one needs no registered
-    device and tells an admin whether the *credential* is good, which is the
-    thing they just typed in and the thing they can act on immediately.
+    The recovery path for the one failure an admin cannot otherwise get out of:
+    a key the relay no longer accepts, because it was revoked or because the
+    relay's signing secret was rotated. Nothing can be repaired in place — the
+    relay stores no keys, so there is nothing to look up — and re-enrolling is
+    both the fix and the only fix.
+
+    Cheap enough to offer as a button: a new identity costs an enrollment and
+    loses nothing, since the old one was only ever a name in a rate-limit
+    bucket. Registered devices are untouched.
     """
     config = await get_config(db)
-    settings = RelaySettings.from_config(config)
-    if settings is None:
+
+    try:
+        enrollment = await enrol(client=state.relay_http)
+    except EnrollmentError as exc:
         return templates.TemplateResponse(
-            request,
-            "partials/verify.html",
-            {"ok": False, "message": _unconfigured_message(config)},
+            request, "partials/verify.html", {"ok": False, "message": str(exc)}
         )
 
-    result = await verify(settings, client=state.relay_http)
+    config.notification_relay_instance_id = enrollment.instance_id
+    config.notification_relay_api_key = enrollment.api_key
+    await db.flush()
+
+    logger.info("re-enrolled with the notification relay as %s", enrollment.instance_id)
+
+    message = f"Reconnected as {enrollment.instance_id}."
+    if not enrollment.ready:
+        message += (
+            " The relay still has no Apple signing key of its own, so nothing "
+            "can be delivered yet."
+        )
+
     return templates.TemplateResponse(
-        request, "partials/verify.html", {"ok": result.ok, "message": result.message}
+        request, "partials/verify.html", {"ok": enrollment.ready, "message": message}
     )
-
-
-def _unconfigured_message(config: Config) -> str:
-    """Which of the two "not set up" states this install is in."""
-    if not config.notifications_enabled:
-        return DISABLED_REASON
-    return UNCONFIGURED_REASON
 
 
 @router.post("/test", response_class=HTMLResponse)
@@ -253,10 +264,15 @@ async def send_test(
     config = await get_config(db)
     settings = RelaySettings.from_config(config)
     if settings is None:
+        # Two states left, and they need different instructions: switched off,
+        # or switched on with an enrollment that did not stick.
+        message = (
+            DISABLED_REASON
+            if not config.notifications_enabled
+            else "Not connected to the relay. Press “Reconnect” and try again."
+        )
         return templates.TemplateResponse(
-            request,
-            "partials/verify.html",
-            {"ok": False, "message": _unconfigured_message(config)},
+            request, "partials/verify.html", {"ok": False, "message": message}
         )
 
     devices = await eligible_devices(db)
@@ -299,7 +315,12 @@ def _test_result(report: DispatchReport) -> dict[str, object]:
             f"Removed {report.unregistered} device{plural} Apple no longer recognises."
         )
     if report.failed:
-        parts.append(f"{report.failed} failed — the server log has the reason.")
+        reason = report.failure_reason
+        parts.append(
+            f"{report.failed} failed: {reason}."
+            if reason
+            else f"{report.failed} failed — the server log has the reason."
+        )
 
     return {
         "ok": report.delivered > 0 and not report.failed,

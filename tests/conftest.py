@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cplus_service.api.app import create_app
 from cplus_service.db.models import Action, ApnsDevice, Config, Permission, QualityProfile, User
 from cplus_service.db.session import create_engine
-from cplus_service.notify.relay import RelaySettings
+from cplus_service.notify.relay import RELAY_URL_ENV, RelaySettings
 
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
@@ -29,9 +29,32 @@ TMDB_BEARER_TOKEN = "tmdb-bearer-token"
 PLEX_TOKEN = "plex-token-abc"
 
 RELAY_URL = "https://relay.test"
+RELAY_INSTANCE_ID = "testinstance"
 RELAY_API_KEY = "canopy_testinstance_k3jd7q2mfhx4zt8bwv6nra5cyp"
 RELAY_PUSH_URL = f"{RELAY_URL}/v1/push"
-RELAY_VERIFY_URL = f"{RELAY_URL}/v1/verify"
+RELAY_ENROL_URL = f"{RELAY_URL}/v1/instances"
+
+
+@pytest.fixture(autouse=True)
+def _relay_points_at_the_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point every test at the mocked relay rather than the real one.
+
+    Autouse and unconditional: the relay URL is no longer a stored setting, so
+    without this a test that forgets to mock would reach for the production
+    host. Better that every test is pointed somewhere respx controls.
+    """
+    monkeypatch.setenv(RELAY_URL_ENV, RELAY_URL)
+
+
+def enrolled(**overrides) -> dict:
+    """A relay enrollment response body."""
+    return {
+        "instance_id": RELAY_INSTANCE_ID,
+        "api_key": RELAY_API_KEY,
+        "bundle_id": "com.example.cplus",
+        "ready": True,
+        **overrides,
+    }
 
 
 def seerr_user_payload(
@@ -127,13 +150,17 @@ def relay_settings() -> RelaySettings:
 async def enable_notifications(
     db: AsyncSession, config: Config, *, api_key: str | None = RELAY_API_KEY
 ) -> Config:
-    """Turn notifications on and point them at the mocked relay.
+    """Turn notifications on with a relay identity already in hand.
 
-    ``api_key=None`` is the half-configured state — switched on, nowhere to
-    send — which several tests need to tell apart from switched off.
+    Writes the row directly rather than going through the enable endpoint, so
+    a test that is about something else does not have to mock enrollment.
+
+    ``api_key=None`` is the state an install lands in when enrolling failed —
+    switched on, nowhere to send — which several tests need to tell apart from
+    switched off.
     """
     config.notifications_enabled = True
-    config.notification_relay_url = RELAY_URL
+    config.notification_relay_instance_id = RELAY_INSTANCE_ID if api_key else None
     config.notification_relay_api_key = api_key
     db.add(config)
     await db.commit()

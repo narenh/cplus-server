@@ -1,37 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 
-{# The master switch sits outside the block it swaps, so it keeps the state the
-   admin just put it in rather than being replaced underneath their cursor. #}
-<section class="card">
-  <h2>Notifications</h2>
+{# The whole page is one swappable panel.
 
-  <label class="notify-master">
-    <input type="checkbox" name="enabled"
-           {% if config.notifications_enabled %}checked{% endif %}
-           hx-post="/admin/notifications/enabled"
-           hx-target="#notify-settings"
-           hx-swap="outerHTML">
-    <span>Enable push notifications</span>
-  </label>
-
-  {# Said on the page rather than in the docs, because it is the whole of what
-     the checkbox commits to and nobody reads the docs before ticking a box. #}
-  <p class="hint warn">
-    Notifications are delivered <strong>in plaintext</strong> through
-    <code>{{ default_relay_url|replace("https://", "") }}</code>, a forwarding
-    service run by the Canopy+ maintainers rather than by you. Apple has to be
-    able to read a notification to display it, so there is no arrangement where
-    the relay forwards without seeing the contents.
-  </p>
-  <p class="hint">
-    Each notification carries a media title and a username. The relay stores
-    none of it and keeps no record of which devices belong to which instance —
-    but it does see it in passing. If that is not acceptable for your instance,
-    leave this off; everything else works without it.
-  </p>
-</section>
-
-{% include "partials/notification_settings.html" %}
+   It used to be only the settings below the switch, with the checkbox left
+   outside so it kept the state the admin had just clicked. That stopped being
+   right once enabling could *fail*: enrolling with the relay is a network call,
+   and when it does not work the switch has to come back off. A checkbox the
+   server cannot correct is a checkbox that lies. #}
+{% include "partials/notification_panel.html" %}
 
 {% endblock %}
