@@ -120,9 +120,11 @@
           </td>
           <td class="nowrap">{{ device.last_seen_at.strftime("%Y-%m-%d %H:%M") }}</td>
           <td class="right">
-            <form method="post"
-                  action="/admin/notifications/devices/{{ device.device_token }}/delete"
+            {# The token goes in the body, not the URL: it is a 64-character
+               device address and has no business in an access log. #}
+            <form method="post" action="/admin/notifications/devices/delete"
                   onsubmit="return confirm('Stop sending notifications to this device?')">
+              <input type="hidden" name="device_token" value="{{ device.device_token }}">
               <button type="submit" class="link danger">Remove</button>
             </form>
           </td>

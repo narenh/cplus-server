@@ -233,14 +233,22 @@ def _test_result(report: DispatchReport) -> dict[str, object]:
     }
 
 
-@router.post("/devices/{device_token}/delete")
-async def delete_device(db: DbDep, admin: AdminPageDep, device_token: str) -> Response:
+@router.post("/devices/delete")
+async def delete_device(
+    db: DbDep, admin: AdminPageDep, device_token: str = Form(...)
+) -> Response:
     """Remove a device from the admin console.
 
     Unlike the app's own sign-out at ``DELETE /manager/push-devices/{token}``,
     this is not restricted to the caller's own devices: taking away a lost or
     handed-on device belonging to someone else is exactly what an admin console
     is for.
+
+    The token travels in the form body rather than the path, which keeps a
+    64-character device address out of the browser history and out of every
+    reverse proxy's access log. The app's own endpoint keeps it in the path —
+    that caller is sending back a token it already holds, over an API where the
+    resource shape is worth more than the log hygiene.
     """
     device = await db.get(ApnsDevice, device_token)
     if device is not None:
