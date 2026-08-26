@@ -766,8 +766,8 @@ So the key lives on one machine its owner runs, and every install hands that
 machine a device token and two lines of text:
 
 ```
-   your instance                 notifications.canopysf.com              Apple
-   ─────────────                 ──────────────────────────              ─────
+   your instance                 apns.canopysf.com              Apple
+   ─────────────                 ──────────────────              ─────
    holds: your users'   ──────▶  holds: the .p8              ──────▶     APNs
           device tokens          holds: nothing else
 ```

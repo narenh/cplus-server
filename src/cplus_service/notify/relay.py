@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 #: code paths — it is a default for the settings field, so an operator running
 #: their own relay, or a fork with its own Apple Developer account, only has to
 #: change one text box.
-DEFAULT_RELAY_URL = "https://notifications.canopysf.com"
+DEFAULT_RELAY_URL = "https://apns.canopysf.com"
 
 #: The relay answers 200 whenever Apple answered — including a rejection —
 #: because forwarding a push that Apple refused is still a successful forward.
