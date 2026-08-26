@@ -114,12 +114,12 @@ are worth doing deliberately as whoever runs the container:
 There is one deliberate exception: the **TMDB bearer token**
 (`config.tmdb_bearer_token`) is stored the same way as the Prowlarr key —
 plaintext, never rendered into the admin page — but *is* handed back verbatim
-to any Seerr admin who asks, over `GET /manager/tmdb-token`. That is not an
-oversight; it exists so an admin's own tooling can pull the token for testing
-without reading it out of the database file directly. It is accepted only
-because the key is low-impact (a TMDB read token, unrelated to this service's
-own data) and trivially rotated from TMDB's side. Don't reuse this pattern for
-anything higher-stakes than that.
+to any caller who can manage requests, over `GET /manager/tmdb-token`. That is
+not an oversight; the admin app needs TMDB to turn a request's TMDB id into
+the IMDB id it searches on, so the alternative is every client shipping its own
+copy of the same key. It is accepted only because the key is low-impact (a TMDB
+read token, unrelated to this service's own data) and trivially rotated from
+TMDB's side. Don't reuse this pattern for anything higher-stakes than that.
 
 Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
 publishing the app's port directly) is already in place — that's what keeps
@@ -464,7 +464,7 @@ flushed.
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
-| `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — for testing |
+| `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |

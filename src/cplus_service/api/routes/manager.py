@@ -9,9 +9,9 @@ after that live check, to keep it visually distinct from tvOS's ``/grab`` and
 ``/titles/{imdb_id}/actions`` and from the cookie-authenticated ``/admin/*``
 webui.
 
-Most of these gate on the ``MANAGE_REQUESTS`` bit; ``/tmdb-token`` is the
-exception and gates on ``ADMIN`` instead, since it has nothing to do with
-managing requests.
+Every endpoint here gates on the ``MANAGE_REQUESTS`` bit, ``/tmdb-token``
+included: the admin app needs TMDB to turn a request into the IMDB id it
+searches on, so anyone who may manage requests needs it too.
 """
 
 from __future__ import annotations
@@ -34,7 +34,6 @@ from ..deps import (
     PlexTokenDep,
     ProwlarrDep,
     SeerrDep,
-    require_admin,
     require_request_manager,
 )
 from ..grab_core import execute_grab
@@ -200,16 +199,20 @@ async def list_download_clients(
 async def tmdb_token(
     db: DbDep, config: ConfigDep, seerr: SeerrDep, plex_token: PlexTokenDep
 ) -> Any:
-    """The saved TMDB bearer token, verbatim. **Admin only.**
+    """The saved TMDB bearer token, verbatim. **Request managers and up.**
 
     This is a deliberate exception to how every other secret in this service
     is handled: the Prowlarr key never leaves the server, and the Seerr admin
     key is never even stored (see ``/seerr/*``). Handing this one back over
     the API trades that same discipline for convenience — it's a low-impact,
-    easily rotated key with no access to this service's own data, wanted here
-    purely so an admin's own tooling can use it for testing. Gated on the
-    ADMIN bit, not ``MANAGE_REQUESTS``, since it has nothing to do with
-    managing requests.
+    easily rotated key with no access to this service's own data.
+
+    Gated on ``MANAGE_REQUESTS``, the same bit as every other ``/manager/*``
+    endpoint, because that is who needs it: the admin app resolves a request's
+    TMDB id to an IMDB id before it can search for releases, so withholding
+    the token from a request manager takes away the search they are entitled
+    to run — a real loss of function to protect a key that is already handed
+    to the admin standing next to them.
     """
     try:
         _, auth = await authenticate_plex_token(db, seerr, plex_token)
@@ -222,6 +225,6 @@ async def tmdb_token(
             status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
         ) from exc
 
-    require_admin(auth)
+    require_request_manager(auth)
 
     return {"tmdb_bearer_token": config.tmdb_bearer_token}

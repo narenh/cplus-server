@@ -476,9 +476,9 @@ async def test_manager_search_502s_when_seerr_is_unreachable(
 # --------------------------------------------------------------------------- #
 # GET /manager/tmdb-token
 #
-# The one endpoint here gated on ADMIN rather than MANAGE_REQUESTS — it has
-# nothing to do with managing requests, only with letting an admin's own
-# tooling read back a low-impact key for testing.
+# Gated on MANAGE_REQUESTS like the rest of /manager/*: the admin app resolves
+# a request's TMDB id to an IMDB id before it can search, so a request manager
+# needs the key as much as an admin does. Still refused to everyone else.
 # --------------------------------------------------------------------------- #
 
 MANAGE_REQUESTS_ONLY = 16
@@ -497,15 +497,17 @@ async def test_an_admin_can_read_the_tmdb_token(
 
 
 @respx.mock
-async def test_a_manager_who_is_not_an_admin_cannot_read_the_tmdb_token(
+async def test_a_manager_who_is_not_an_admin_can_read_the_tmdb_token(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
-    # MANAGE_REQUESTS is not ADMIN — this endpoint checks the stricter bit.
+    # MANAGE_REQUESTS is enough: without the key this caller cannot turn a
+    # request into the IMDB id that /manager/search takes.
     mock_seerr_auth(permissions=MANAGE_REQUESTS_ONLY)
 
     response = await client.get("/manager/tmdb-token", headers=plex_headers)
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json() == {"tmdb_bearer_token": TMDB_BEARER_TOKEN}
 
 
 @respx.mock
