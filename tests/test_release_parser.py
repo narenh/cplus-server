@@ -214,6 +214,10 @@ def test_hdr10plus_long_form_is_not_clipped_to_the_short_one() -> None:
         ("Movie.2024.2160p.BluRay.DV.HDR.x265-GRP", 8),
         ("Movie.2024.2160p.WEB-DL.DV.HDR.HEVC-GRP", 8),
         ("Movie.2024.2160p.WEB-DL.DV.DDP5.1-GRP", 5),
+        # "Hybrid" on a REMUX means a converted single-layer profile 8 track...
+        ("Movie.2024.2160p.UHD.BluRay.REMUX.DV.Hybrid.HEVC.TrueHD-GRP", 8),
+        # ...unless HDR10+ is also present, which keeps it a profile 7 FEL track.
+        ("Movie.2024.2160p.UHD.BluRay.REMUX.DV.Hybrid.HDR10+.HEVC.TrueHD-GRP", 7),
         # No DV at all.
         ("Movie.2024.2160p.WEB-DL.HDR.HEVC-GRP", 0),
     ],

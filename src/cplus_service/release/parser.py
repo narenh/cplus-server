@@ -86,6 +86,7 @@ _DV_EXPLICIT_PROFILE = re.compile(
 )
 _DVHE_PROFILE = re.compile(r"dvhe[\s-]*(\d{1,2})(?![0-9])")
 _DV_DUAL_LAYER = _tok(r"(?:fel|mel)")
+_DV_HYBRID = _tok(r"hybrid")
 
 # `hdr10p` is the most common spelling in the wild; `hdr10plus`/`hdrplus` are the
 # older long forms.  Longer alternatives come first so `hdr10plus` cannot be
@@ -216,7 +217,9 @@ def _parse_source(norm: str) -> tuple[Source, bool]:
     return Source.UNKNOWN, False
 
 
-def _parse_dv_profile(norm: str, *, source: Source, is_encode: bool, is_hdr: bool) -> int:
+def _parse_dv_profile(
+    norm: str, *, source: Source, is_encode: bool, is_hdr: bool, is_hdr10plus: bool
+) -> int:
     """Best-effort Dolby Vision profile; ``0`` when the release has no DV.
 
     Explicit markers in the title always win — some groups spell the profile
@@ -236,6 +239,12 @@ def _parse_dv_profile(norm: str, *, source: Source, is_encode: bool, is_hdr: boo
         return 7
 
     if source is Source.REMUX:
+        # A REMUX defaults to the dual-layer profile 7, but "hybrid" marks a
+        # release built from a single-layer profile 8 track instead — unless
+        # it is also tagged HDR10+, since that hybrid track is a profile 7
+        # FEL/HDR10+ combination and stays profile 7.
+        if _DV_HYBRID.search(norm) and not is_hdr10plus:
+            return 8
         return 7
     if is_encode:
         return 8
@@ -349,6 +358,7 @@ def parse_title(title: str) -> ParsedTitle:
         source=source,
         is_encode=is_encode,
         is_hdr=has_hdr_token or is_hdr10plus,
+        is_hdr10plus=is_hdr10plus,
     )
     is_repack_or_proper, repack_version = _parse_repack(body)
 
