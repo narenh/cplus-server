@@ -12,6 +12,8 @@ from datetime import datetime
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from ..notify.apns import ProviderTokenCache
+
 
 @dataclass
 class PendingPlexLogin:
@@ -40,6 +42,15 @@ class AppState:
     client's jar sends them. Keeping Seerr on its own client means a user's
     Seerr session can never be attached to an outbound Prowlarr call.
     """
+
+    apns_http: httpx.AsyncClient
+    """Third client, and the one with the hard requirement behind it: APNs
+    speaks HTTP/2 only, so this one is built with ``http2=True``. The other two
+    talk to self-hosted services that may well be HTTP/1.1 only."""
+
+    apns_tokens: ProviderTokenCache = field(default_factory=ProviderTokenCache)
+    """Cached APNs provider tokens. Process-wide because Apple rate-limits how
+    often a new one may be minted; see :class:`ProviderTokenCache`."""
 
     pending_plex_logins: dict[int, PendingPlexLogin] = field(default_factory=dict)
     """In-flight webui sign-ins, keyed by plex.tv PIN id.
