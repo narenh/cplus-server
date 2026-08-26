@@ -10,7 +10,7 @@ Route layout:
 
 from fastapi import APIRouter
 
-from . import actions, activity, config, login, permissions, profiles
+from . import actions, activity, config, login, notifications, permissions, profiles
 
 router = APIRouter(prefix="/admin")
 
@@ -20,5 +20,6 @@ router.include_router(profiles.router)
 router.include_router(actions.router)
 router.include_router(permissions.router)
 router.include_router(activity.router)
+router.include_router(notifications.router)
 
 __all__ = ["router"]

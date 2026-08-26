@@ -167,6 +167,16 @@ def _load_key(pem: str) -> ec.EllipticCurvePrivateKey:
     return key
 
 
+def validate_private_key(pem: str) -> None:
+    """Raise :class:`ApnsConfigError` unless ``pem`` is a usable ES256 key.
+
+    For the settings form, so a mis-pasted file is refused while the admin is
+    looking at the page rather than discovered later as notifications quietly
+    not arriving.
+    """
+    _load_key(pem)
+
+
 def sign_provider_token(settings: ApnsSettings, *, issued_at: int | None = None) -> str:
     """Mint one ES256 provider token (a JWT) for ``settings``.
 
@@ -393,4 +403,5 @@ __all__ = [
     "SendResult",
     "build_payload",
     "sign_provider_token",
+    "validate_private_key",
 ]
