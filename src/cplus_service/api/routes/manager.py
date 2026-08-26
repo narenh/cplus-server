@@ -9,22 +9,24 @@ after that live check, to keep it visually distinct from tvOS's ``/grab`` and
 ``/titles/{imdb_id}/actions`` and from the cookie-authenticated ``/admin/*``
 webui.
 
-Most of these gate on the ``MANAGE_REQUESTS`` bit; ``/tmdb-token`` is the
-exception and gates on ``ADMIN`` instead, since it has nothing to do with
-managing requests.
+Most of these gate on the ``MANAGE_REQUESTS`` bit. ``/tmdb-token`` and
+``/push-devices`` are the exceptions and gate on ``ADMIN`` instead, since
+neither has anything to do with managing requests — one hands back a stored
+credential, the other decides whose phone gets woken up.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...auth.identity import authenticate_plex_token
-from ...db.models import ActivityLog, EventType
+from ...db.models import ActivityLog, ApnsDevice, EventType
 from ...prowlarr.client import ProwlarrError
 from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
@@ -34,11 +36,17 @@ from ..deps import (
     PlexTokenDep,
     ProwlarrDep,
     SeerrDep,
+    StateDep,
     require_admin,
     require_request_manager,
 )
 from ..grab_core import execute_grab
-from ..schemas import GrabResponse, ManagerGrabRequest
+from ..schemas import (
+    GrabResponse,
+    ManagerGrabRequest,
+    PushDeviceRegistration,
+    PushDeviceResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +58,19 @@ NDJSON_MEDIA_TYPE = "application/x-ndjson"
 @router.post("/grab", response_model=GrabResponse)
 async def grab(
     db: DbDep,
+    state: StateDep,
     prowlarr: ProwlarrDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    background: BackgroundTasks,
     body: ManagerGrabRequest,
 ) -> GrabResponse | JSONResponse:
-    """Grab a release straight to a chosen download client, no action involved."""
+    """Grab a release straight to a chosen download client, no action involved.
+
+    Raises no notification: this is an admin doing their own work, and nobody
+    wants their phone to tell them what they just did. See
+    :func:`~cplus_service.api.grab_core.execute_grab`.
+    """
     try:
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
@@ -77,6 +92,8 @@ async def grab(
         action=None,
         download_client_id=body.download_client_id,
         body=body,
+        state=state,
+        background=background,
     )
 
 
@@ -194,6 +211,86 @@ async def list_download_clients(
             for c in clients
         ]
     }
+
+
+@router.post("/push-devices", response_model=PushDeviceResponse)
+async def register_push_device(
+    db: DbDep, seerr: SeerrDep, plex_token: PlexTokenDep, body: PushDeviceRegistration
+) -> PushDeviceResponse:
+    """Register this device to receive admin notifications. **Admin only.**
+
+    Gated on ADMIN rather than ``MANAGE_REQUESTS``, and that gate is the whole
+    of the access control on notifications: there is no per-device permission
+    check at send time, because re-validating every device against Seerr on
+    every push would put an outbound call back onto the path that exists to
+    avoid one. Passing this endpoint is what makes a device eligible; the
+    Notifications tab is where one is taken away again.
+
+    An upsert, since the app calls this on every launch. A token that comes
+    back under a different user — someone signed out and an admin signed in on
+    the same device — moves to the new owner rather than accumulating a second
+    row, which is also what stops the previous owner from being notified
+    through hardware they no longer have.
+    """
+    try:
+        user, auth = await authenticate_plex_token(db, seerr, plex_token)
+    except SeerrAuthError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+        ) from exc
+    except SeerrError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+        ) from exc
+
+    require_admin(auth)
+
+    device = await db.get(ApnsDevice, body.device_token)
+    if device is None:
+        device = ApnsDevice(device_token=body.device_token, user_id=user.id)
+        db.add(device)
+
+    device.user_id = user.id
+    device.environment = body.environment
+    device.device_name = body.device_name
+    device.last_seen_at = datetime.now(UTC)
+    await db.flush()
+
+    return PushDeviceResponse(success=True)
+
+
+@router.delete("/push-devices/{device_token}", response_model=PushDeviceResponse)
+async def unregister_push_device(
+    db: DbDep, seerr: SeerrDep, plex_token: PlexTokenDep, device_token: str
+) -> PushDeviceResponse:
+    """Stop sending notifications to this device. **Admin only.**
+
+    For an app signing out. Removing a token that is not registered succeeds:
+    the caller asked for it to be gone and it is gone, and reporting 404 would
+    only tell them something they cannot act on.
+
+    A caller may only remove their own device. Anything else would let one
+    admin silence another's phone from an endpoint that exists for sign-out.
+    """
+    try:
+        user, auth = await authenticate_plex_token(db, seerr, plex_token)
+    except SeerrAuthError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+        ) from exc
+    except SeerrError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+        ) from exc
+
+    require_admin(auth)
+
+    device = await db.get(ApnsDevice, device_token)
+    if device is not None and device.user_id == user.id:
+        await db.delete(device)
+        await db.flush()
+
+    return PushDeviceResponse(success=True)
 
 
 @router.get("/tmdb-token")

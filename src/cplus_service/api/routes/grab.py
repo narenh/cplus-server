@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.models import Action, Permission
-from ..deps import CachedUserDep, DbDep, ProwlarrDep
+from ..deps import CachedUserDep, DbDep, ProwlarrDep, StateDep
 from ..grab_core import execute_grab
 from ..schemas import GrabRequest, GrabResponse
 
@@ -49,8 +49,10 @@ async def permitted_action(session: AsyncSession, user_id: int, action_id: int) 
 @router.post("/grab", response_model=GrabResponse)
 async def grab(
     db: DbDep,
+    state: StateDep,
     prowlarr: ProwlarrDep,
     user: CachedUserDep,
+    background: BackgroundTasks,
     body: GrabRequest,
 ) -> GrabResponse | JSONResponse:
     """Grab a release through Prowlarr, on behalf of one of the caller's actions."""
@@ -77,4 +79,6 @@ async def grab(
         action=action,
         download_client_id=action.download_client_id,
         body=body,
+        state=state,
+        background=background,
     )
