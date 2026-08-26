@@ -85,11 +85,16 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
 label.check { font-weight: 400; display: flex; align-items: center; gap: 8px; }
 
-input[type=text], input[type=url], input[type=password], input[type=number], select {
+input[type=text], input[type=url], input[type=password], input[type=number], select,
+textarea {
   width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font: inherit;
 }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* A pasted .p8 is one long unbroken base64 run; monospace and no wrapping keeps
+   it from reflowing into something that looks like a different key. */
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  resize: vertical; white-space: pre; overflow-x: auto; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 input:disabled, select:disabled {
   color: var(--muted); background: var(--line); cursor: not-allowed;
 }
@@ -147,6 +152,30 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
   display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
   background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
 }
+
+/* Notifications ----------------------------------------------------------- */
+
+.notify-types { list-style: none; padding: 0; margin: 0; }
+.notify-types li {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px 0; border-bottom: 1px solid var(--line);
+}
+.notify-types li:last-child { border-bottom: none; }
+.notify-types li:first-child { padding-top: 0; }
+.notify-switch { padding-top: 2px; }
+.notify-copy { flex: 1; min-width: 0; }
+.notify-copy .hint { margin: 3px 0 8px; }
+
+/* A rough stand-in for a lock-screen alert: the two lines, in the order and
+   weighting iOS gives them, so the switch above is describing something the
+   admin can picture. */
+.notify-preview {
+  display: inline-flex; flex-direction: column; gap: 1px;
+  padding: 8px 12px; border-radius: 10px; max-width: 100%;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.preview-title { font-size: 13px; font-weight: 600; }
+.preview-subtitle { font-size: 13px; color: var(--muted); }
 
 /* Rule builder ------------------------------------------------------------ */
 

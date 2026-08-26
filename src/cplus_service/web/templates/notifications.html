@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+  <h2>What to notify me about</h2>
+  <p class="hint">
+    Everything is on until you turn it off, including any type added by a later
+    version. You are never notified about your own requests or grabs.
+  </p>
+
+  <ul class="notify-types">
+    {% for info in types %}
+      <li>
+        <div class="notify-switch">
+          {% with is_enabled = enabled[info.type] %}
+            {% include "partials/notification_toggle.html" %}
+          {% endwith %}
+        </div>
+        <div class="notify-copy">
+          <strong>{{ info.label }}</strong>
+          <p class="hint">{{ info.description }}</p>
+          {# The only place an admin sees the shape of a notification before one
+             arrives. The two types differ only in this second line. #}
+          <div class="notify-preview" aria-hidden="true">
+            <span class="preview-title">The End of Oak Street (2026)</span>
+            <span class="preview-subtitle">{{ info.example_subtitle }}</span>
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<form class="card" hx-post="/admin/notifications/apns"
+      hx-target="#apns-result" hx-swap="innerHTML">
+  <h2>Apple Push Notification service</h2>
+  <p class="hint">
+    {% if apns_configured %}
+      Push is configured. Notifications are being sent.
+    {% else %}
+      Push is off until all four fields are set. Everything else on this page
+      works meanwhile — the switches are stored either way.
+    {% endif %}
+  </p>
+
+  <label for="apns_team_id">Team ID</label>
+  <input type="text" id="apns_team_id" name="apns_team_id" autocomplete="off"
+         value="{{ config.apns_team_id or '' }}" placeholder="A1B2C3D4E5">
+  <p class="hint">Ten characters, from the top right of the Apple Developer portal.</p>
+
+  <label for="apns_key_id">Key ID</label>
+  <input type="text" id="apns_key_id" name="apns_key_id" autocomplete="off"
+         value="{{ config.apns_key_id or '' }}" placeholder="ABC123DEFG">
+  <p class="hint">
+    Shown next to the key in Certificates, Identifiers &amp; Profiles → Keys. It
+    is also in the downloaded filename: <code>AuthKey_ABC123DEFG.p8</code>.
+  </p>
+
+  <label for="apns_bundle_id">Bundle ID</label>
+  <input type="text" id="apns_bundle_id" name="apns_bundle_id" autocomplete="off"
+         value="{{ config.apns_bundle_id or '' }}" placeholder="com.example.cplus">
+  <p class="hint">
+    The app's bundle identifier, sent as the push topic. Apple rejects a
+    notification whose topic does not match the app the device token came from.
+  </p>
+
+  <label for="apns_private_key">Signing key (.p8)</label>
+  <textarea id="apns_private_key" name="apns_private_key" rows="6" autocomplete="off"
+            spellcheck="false"
+            placeholder="{% if config.apns_private_key %}············ (unchanged){% else %}-----BEGIN PRIVATE KEY-----{% endif %}"></textarea>
+  <p class="hint">
+    {% if config.apns_private_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
+    Paste the contents of the <code>.p8</code> file, including the BEGIN and END
+    lines. Apple lets you download it exactly once. It is never shown again here
+    and, unlike the TMDB token, is not readable over the API.
+  </p>
+
+  <div class="row">
+    <button type="submit">Save</button>
+    <button type="button" class="secondary"
+            hx-post="/admin/notifications/test"
+            hx-target="#apns-result"
+            hx-swap="innerHTML">Send a test notification</button>
+    <span id="apns-result" class="inline-result"></span>
+  </div>
+</form>
+
+<section class="card">
+  <h2>Devices</h2>
+  {% if not devices %}
+    <p class="empty">
+      No devices registered. The app registers itself the first time an admin
+      signs in on it — there is nothing to enter here by hand.
+    </p>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Registered to</th>
+          <th>Build</th>
+          <th>Last seen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for device, owner in devices %}
+        <tr>
+          <td>
+            {{ device.device_name or "Unnamed device" }}
+            <span class="muted nowrap">{{ device.device_token[:8] }}…</span>
+          </td>
+          <td>{{ owner.plex_username if owner else "unknown" }}</td>
+          <td>
+            {% if device.environment == "sandbox" %}
+              <span class="badge">sandbox</span>
+            {% else %}
+              production
+            {% endif %}
+          </td>
+          <td class="nowrap">{{ device.last_seen_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="right">
+            <form method="post"
+                  action="/admin/notifications/devices/{{ device.device_token }}/delete"
+                  onsubmit="return confirm('Stop sending notifications to this device?')">
+              <button type="submit" class="link danger">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">
+      A device removed here comes back the next time that app launches and
+      registers again. To stop one for good, sign out of the app on it.
+      Devices Apple reports as gone are removed on their own.
+    </p>
+  {% endif %}
+</section>
+
+{% endblock %}

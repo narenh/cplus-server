@@ -1,0 +1,8 @@
+{# Swapped in place after each toggle, so the switch reflects what was stored
+   rather than what was clicked. Same pattern as partials/permission_cell.html. #}
+<input type="checkbox" name="enabled"
+       {% if is_enabled %}checked{% endif %}
+       hx-post="/admin/notifications/types/{{ info.type.value }}"
+       hx-target="closest .notify-switch"
+       hx-swap="innerHTML"
+       aria-label="{{ info.label }}">
