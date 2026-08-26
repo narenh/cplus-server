@@ -497,6 +497,7 @@ migration deletes, so nothing can prove what they were resolved against.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
+| `GET /capabilities` | none | What this instance has switched on, before anyone signs in. Today just `{"notifications": bool}` |
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
@@ -504,6 +505,8 @@ migration deletes, so nothing can prove what they were resolved against.
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
+| `POST /manager/push-devices` | live Seerr | **admin only.** `{device_token, environment?, device_name?}` — the app offering its APNs token. 409 while notifications are off |
+| `DELETE /manager/push-devices/{token}` | live Seerr | **admin only.** The app handing its own token back on sign-out. Never gated on notifications being on |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |

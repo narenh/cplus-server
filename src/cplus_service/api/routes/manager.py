@@ -20,7 +20,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...auth.identity import authenticate_plex_token
@@ -34,6 +34,7 @@ from ..deps import (
     PlexTokenDep,
     ProwlarrDep,
     SeerrDep,
+    StateDep,
     require_request_manager,
 )
 from ..grab_core import execute_grab
@@ -49,9 +50,11 @@ NDJSON_MEDIA_TYPE = "application/x-ndjson"
 @router.post("/grab", response_model=GrabResponse)
 async def grab(
     db: DbDep,
+    state: StateDep,
     prowlarr: ProwlarrDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    background: BackgroundTasks,
     body: ManagerGrabRequest,
 ) -> GrabResponse | JSONResponse:
     """Grab a release straight to a chosen download client, no action involved."""
@@ -76,6 +79,8 @@ async def grab(
         action=None,
         download_client_id=body.download_client_id,
         body=body,
+        state=state,
+        background=background,
     )
 
 
