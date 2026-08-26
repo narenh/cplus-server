@@ -9,10 +9,11 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "greenlet>=3.1",
-    # APNs speaks HTTP/2 only, hence the extra; `cryptography` signs the ES256
-    # provider token. Both are here for push and nothing else.
-    "httpx[http2]>=0.28",
-    "cryptography>=42",
+    # Plain httpx. Push goes through a relay that holds the APNs signing key,
+    # so nothing here speaks to Apple: no HTTP/2 requirement, and no
+    # `cryptography` to sign a provider token with. Both were dependencies of
+    # this service until the relay took the key.
+    "httpx>=0.28",
     "jinja2>=3.1",
     "python-multipart>=0.0.20",
     "pydantic>=2.10",

@@ -2,11 +2,13 @@
 
 The policy tests. Each one names a rule from
 :mod:`cplus_service.notify.service` that a well-meaning refactor could quietly
-drop: the switches, the unconfigured no-op, the actor exclusion, and cleaning
-up after Apple.
+drop: the master switch, the per-type switches, the unconfigured no-op, the
+actor exclusion, and cleaning up after a token the relay says is dead.
 """
 
 from __future__ import annotations
+
+import json
 
 import httpx
 import pytest
@@ -17,12 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.db.models import ApnsDevice, Config, NotificationPreference, User
 from cplus_service.notify import prefs
-from cplus_service.notify.apns import ProviderTokenCache
 from cplus_service.notify.messages import MediaSummary, user_requested
 from cplus_service.notify.service import deliver, eligible_devices
 from cplus_service.notify.types import NotificationType
 
-from .conftest import APNS_PRODUCTION, APNS_SANDBOX, configure_apns, register_device
+from .conftest import (
+    RELAY_API_KEY,
+    RELAY_PUSH_URL,
+    enable_notifications,
+    register_device,
+)
 
 NOTIFICATION = user_requested(
     MediaSummary(title="The End of Oak Street", year=2026), username="Robin Example"
@@ -41,8 +47,7 @@ async def dispatch(app: FastAPI, **kwargs):
     state = app.state.cplus
     return await deliver(
         sessionmaker=state.sessionmaker,
-        http=state.apns_http,
-        tokens=ProviderTokenCache(),
+        http=state.relay_http,
         notification=NOTIFICATION,
         **kwargs,
     )
@@ -128,12 +133,21 @@ async def test_with_no_actor_named_every_device_is_eligible(db: AsyncSession) ->
 # --------------------------------------------------------------------------- #
 
 
+def relayed(**body) -> httpx.Response:
+    """A 200 from the relay. It answers 200 whenever Apple answered at all."""
+    return httpx.Response(200, json={"result": "delivered", **body})
+
+
 @respx.mock
-async def test_nothing_is_sent_while_push_is_unconfigured(
+async def test_nothing_is_sent_while_notifications_are_switched_off(
     app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    """The state this ships in until the signing key arrives."""
-    route = respx.post(url__startswith=APNS_PRODUCTION)
+    """The state every install ships in, and stays in until an admin opts in.
+
+    Checked before the per-type switches on purpose: an install with the master
+    switch off should read as off, not as "that type is off".
+    """
+    route = respx.post(RELAY_PUSH_URL)
     user = await make_user(db, 1, "someone")
     await register_device(db, user)
 
@@ -141,15 +155,32 @@ async def test_nothing_is_sent_while_push_is_unconfigured(
 
     assert not route.called
     assert report.skipped_reason is not None
-    assert "not configured" in report.skipped_reason
+    assert "switched off for this instance" in report.skipped_reason
+
+
+@respx.mock
+async def test_nothing_is_sent_when_no_relay_key_is_saved(
+    app: FastAPI, db: AsyncSession, configured: Config
+) -> None:
+    """Switched on but half-configured: on, and nowhere to send."""
+    route = respx.post(RELAY_PUSH_URL)
+    await enable_notifications(db, configured, api_key=None)
+    user = await make_user(db, 1, "someone")
+    await register_device(db, user)
+
+    report = await dispatch(app)
+
+    assert not route.called
+    assert report.skipped_reason is not None
+    assert "relay API key" in report.skipped_reason
 
 
 @respx.mock
 async def test_nothing_is_sent_when_the_type_is_switched_off(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    route = respx.post(url__startswith=APNS_PRODUCTION)
-    await configure_apns(db, configured, apns_key_pem)
+    route = respx.post(RELAY_PUSH_URL)
+    await enable_notifications(db, configured)
     user = await make_user(db, 1, "someone")
     await register_device(db, user)
 
@@ -165,10 +196,10 @@ async def test_nothing_is_sent_when_the_type_is_switched_off(
 
 @respx.mock
 async def test_nothing_is_sent_when_no_device_is_registered(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    route = respx.post(url__startswith=APNS_PRODUCTION)
-    await configure_apns(db, configured, apns_key_pem)
+    route = respx.post(RELAY_PUSH_URL)
+    await enable_notifications(db, configured)
 
     report = await dispatch(app)
 
@@ -178,13 +209,10 @@ async def test_nothing_is_sent_when_no_device_is_registered(
 
 @respx.mock
 async def test_a_configured_install_pushes_to_each_device(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    respx.post(url__startswith=APNS_PRODUCTION).mock(
-        return_value=httpx.Response(200)
-    )
-    respx.post(url__startswith=APNS_SANDBOX).mock(return_value=httpx.Response(200))
-    await configure_apns(db, configured, apns_key_pem)
+    route = respx.post(RELAY_PUSH_URL).mock(return_value=relayed())
+    await enable_notifications(db, configured)
 
     user = await make_user(db, 1, "someone")
     await register_device(db, user, device_token="aa" * 16)
@@ -194,17 +222,49 @@ async def test_a_configured_install_pushes_to_each_device(
 
     assert report.delivered == 2
     assert report.failed == 0
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_the_relay_is_sent_text_and_the_device_token_only(
+    app: FastAPI, db: AsyncSession, configured: Config
+) -> None:
+    """Not an APNs payload — the relay builds `aps` itself and refuses ours.
+
+    Also the shape of what the relay operator can see, which is what the
+    Notifications tab promises an admin.
+    """
+    route = respx.post(RELAY_PUSH_URL).mock(return_value=relayed())
+    await enable_notifications(db, configured)
+    user = await make_user(db, 1, "someone")
+    await register_device(db, user, device_token="aa" * 16, environment="sandbox")
+
+    await dispatch(app)
+
+    request = route.calls[0].request
+    assert request.headers["authorization"] == f"Bearer {RELAY_API_KEY}"
+    assert json.loads(request.read()) == {
+        "device_token": "aa" * 16,
+        "environment": "sandbox",
+        "title": "The End of Oak Street (2026)",
+        "subtitle": "Requested by Robin Example",
+        # Opaque to the relay, which forwards it under a `canopy` key for the
+        # app to route on when someone taps the notification.
+        "data": {"type": "user_requested"},
+    }
 
 
 @respx.mock
 async def test_a_device_apple_no_longer_knows_is_deleted(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    """The only correct response to a 410 — the token will never work again."""
-    respx.post(url__startswith=APNS_PRODUCTION).mock(
-        return_value=httpx.Response(410, json={"reason": "Unregistered"})
+    """The relay stores no tokens, so if this side ignores it nothing cleans up."""
+    respx.post(RELAY_PUSH_URL).mock(
+        return_value=httpx.Response(
+            200, json={"result": "unregistered", "reason": "Unregistered"}
+        )
     )
-    await configure_apns(db, configured, apns_key_pem)
+    await enable_notifications(db, configured)
     user = await make_user(db, 1, "someone")
     await register_device(db, user)
 
@@ -216,15 +276,15 @@ async def test_a_device_apple_no_longer_knows_is_deleted(
 
 @respx.mock
 async def test_a_failing_device_does_not_stop_the_others(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    respx.post(url__startswith=f"{APNS_PRODUCTION}/3/device/{'aa' * 16}").mock(
-        return_value=httpx.Response(400, json={"reason": "BadTopic"})
+    respx.post(RELAY_PUSH_URL, json__device_token="aa" * 16).mock(
+        return_value=httpx.Response(200, json={"result": "failed", "reason": "BadTopic"})
     )
-    respx.post(url__startswith=f"{APNS_PRODUCTION}/3/device/{'bb' * 16}").mock(
-        return_value=httpx.Response(200)
+    respx.post(RELAY_PUSH_URL, json__device_token="bb" * 16).mock(
+        return_value=relayed()
     )
-    await configure_apns(db, configured, apns_key_pem)
+    await enable_notifications(db, configured)
     user = await make_user(db, 1, "someone")
     await register_device(db, user, device_token="aa" * 16)
     await register_device(db, user, device_token="bb" * 16)
@@ -236,34 +296,65 @@ async def test_a_failing_device_does_not_stop_the_others(
 
 
 @respx.mock
-async def test_an_unusable_key_is_reported_rather_than_raised(
+async def test_a_relay_that_rejects_our_key_is_a_failure_not_a_deletion(
     app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    """Delivery runs after the response; there is no caller left to catch anything."""
-    configured.apns_private_key = "-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----"
-    configured.apns_team_id = "TEAM123456"
-    configured.apns_key_id = "KEY1234567"
-    configured.apns_bundle_id = "com.example.cplus"
-    db.add(configured)
-    await db.commit()
-
+    """A 401 says nothing about the device token, and must never be read as if it did."""
+    respx.post(RELAY_PUSH_URL).mock(
+        return_value=httpx.Response(401, json={"detail": "This relay API key is not valid."})
+    )
+    await enable_notifications(db, configured)
     user = await make_user(db, 1, "someone")
     await register_device(db, user)
 
     report = await dispatch(app)
 
+    assert report.failed == 1
+    assert report.unregistered == 0
+    assert (await db.execute(select(ApnsDevice))).scalars().first() is not None
+
+
+@respx.mock
+async def test_an_unreachable_relay_is_reported_rather_than_raised(
+    app: FastAPI, db: AsyncSession, configured: Config
+) -> None:
+    """Delivery runs after the response; there is no caller left to catch anything."""
+    respx.post(RELAY_PUSH_URL).mock(side_effect=httpx.ConnectError("no route"))
+    await enable_notifications(db, configured)
+    user = await make_user(db, 1, "someone")
+    await register_device(db, user)
+
+    report = await dispatch(app)
+
+    assert report.failed == 1
     assert report.delivered == 0
-    assert report.skipped_reason is not None
+
+
+@respx.mock
+async def test_an_unrecognised_result_is_not_treated_as_delivered(
+    app: FastAPI, db: AsyncSession, configured: Config
+) -> None:
+    """Guessing 'probably fine' from a relay speaking a dialect we do not know
+    is how a dead device token stays in the table forever."""
+    respx.post(RELAY_PUSH_URL).mock(
+        return_value=httpx.Response(200, json={"result": "sideways"})
+    )
+    await enable_notifications(db, configured)
+    user = await make_user(db, 1, "someone")
+    await register_device(db, user)
+
+    report = await dispatch(app)
+
+    assert report.failed == 1
+    assert (await db.execute(select(ApnsDevice))).scalars().first() is not None
 
 
 @respx.mock
 async def test_the_actor_is_excluded_end_to_end(
-    app: FastAPI, db: AsyncSession, configured: Config, apns_key_pem: str
+    app: FastAPI, db: AsyncSession, configured: Config
 ) -> None:
-    route = respx.post(url__startswith=APNS_PRODUCTION).mock(
-        return_value=httpx.Response(200)
-    )
-    await configure_apns(db, configured, apns_key_pem)
+    route = respx.post(RELAY_PUSH_URL).mock(return_value=relayed())
+    await enable_notifications(db, configured)
     actor = await make_user(db, 1, "actor")
     await register_device(db, actor)
 
@@ -275,20 +366,19 @@ async def test_the_actor_is_excluded_end_to_end(
 
 @pytest.mark.parametrize("environment", ["sandbox", "production"])
 @respx.mock
-async def test_each_environment_reaches_its_own_apple_host(
+async def test_the_devices_environment_is_passed_through_untouched(
     app: FastAPI,
     db: AsyncSession,
     configured: Config,
-    apns_key_pem: str,
     environment: str,
 ) -> None:
-    host = APNS_SANDBOX if environment == "sandbox" else APNS_PRODUCTION
-    route = respx.post(url__startswith=host).mock(return_value=httpx.Response(200))
-    await configure_apns(db, configured, apns_key_pem)
+    """The relay picks Apple's host from this; only this side knows which build."""
+    route = respx.post(RELAY_PUSH_URL).mock(return_value=relayed())
+    await enable_notifications(db, configured)
     user = await make_user(db, 1, "someone")
     await register_device(db, user, environment=environment)
 
     report = await dispatch(app)
 
     assert report.delivered == 1
-    assert route.called
+    assert json.loads(route.calls[0].request.read())["environment"] == environment

@@ -24,7 +24,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -85,23 +84,41 @@ class Config(Base):
     #: registers a fresh device on the admin's Plex account.
     plex_client_identifier: Mapped[str | None] = mapped_column(String(64))
 
-    #: Apple Developer team that owns the push key, and the key's own id.  Both
-    #: are printed on the key in the developer portal; neither is secret on its
-    #: own.
-    apns_team_id: Mapped[str | None] = mapped_column(String(32))
-    apns_key_id: Mapped[str | None] = mapped_column(String(32))
+    #: The master switch for push notifications, and the only setting on the
+    #: Notifications tab that is **off by default**.
+    #:
+    #: Off by default because turning it on routes notification text through a
+    #: third party — a relay this install's admin does not run — in plaintext.
+    #: That is a decision an admin has to make deliberately, so nothing about
+    #: notifications happens until they make it: no device registers, no
+    #: capability is advertised, no push is attempted.  Every other setting on
+    #: that page is inert while this is false, which is why the page hides them.
+    notifications_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
 
-    #: The app's bundle id, sent as the APNs ``apns-topic`` header.  Apple
-    #: rejects a push whose topic does not match the token's app, so this is
-    #: not optional once push is switched on.
-    apns_bundle_id: Mapped[str | None] = mapped_column(String(256))
+    #: The forwarding service that holds the APNs signing key.  This install
+    #: has no signing key of its own and cannot get one: the key belongs to the
+    #: Apple Developer account that owns the app, and it signs pushes for that
+    #: whole team.
+    #:
+    #: Configurable rather than hardcoded so an operator who runs their own
+    #: relay — or a fork with its own Apple account — is not stuck with
+    #: someone else's.  Defaults to
+    #: :data:`~cplus_service.notify.relay.DEFAULT_RELAY_URL`.
+    notification_relay_url: Mapped[str | None] = mapped_column(String(512))
 
-    #: The ``.p8`` signing key, PEM text exactly as downloaded.  Handled like
-    #: ``prowlarr_api_key`` — write-only from the admin UI's point of view,
-    #: never rendered back into a page, and never exposed over the API.  Unlike
-    #: the TMDB token there is no read endpoint for it at all: this one signs
-    #: every push for the whole team and is not casually rotatable.
-    apns_private_key: Mapped[str | None] = mapped_column(Text)
+    #: The relay API key issued to this install.  Handled like
+    #: ``prowlarr_api_key``: never rendered back into a page, and an empty
+    #: field on save means "leave it alone".
+    #:
+    #: Worth being clear about what it is *not*: it is a rate-limit identity
+    #: and an abuse handle, not an access-control boundary over devices.
+    #: Isolation between installs comes from token custody — this install only
+    #: ever learns device tokens its own users hand it — so someone else's key
+    #: would buy an attacker this install's rate limit and nothing else.  See
+    #: :mod:`cplus_service.notify.relay`.
+    notification_relay_api_key: Mapped[str | None] = mapped_column(String(256))
 
 
 class User(Base):

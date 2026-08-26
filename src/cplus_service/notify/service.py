@@ -4,9 +4,10 @@ The rules live here rather than at each emitter, so that adding a fourth place
 that raises a notification cannot accidentally ship with a different idea of
 who should hear about it:
 
+* notifications have to be switched on at all — this is the master toggle, off
+  by default, and until an admin turns it on this is where everything stops;
 * the type has to be switched on (:mod:`cplus_service.notify.prefs`);
-* push has to be configured — until the signing key is in place this is where
-  everything stops, quietly and by design;
+* a relay API key has to be configured;
 * **the person who caused the event never hears about it.**  An admin grabbing
   a release does not need their phone to tell them they just grabbed a
   release, and a notification that fires on your own tap is the fastest way to
@@ -14,9 +15,10 @@ who should hear about it:
 
 Delivery runs after the response, as a background task, and owns its own
 database session.  A push is never on the critical path of the user's request:
-Apple being slow must not make a grab slow, and Apple being down must not make
-a grab fail.  For the same reason every failure here is logged and swallowed —
-the event already happened, and there is nothing the caller could do about it.
+the relay being slow must not make a grab slow, and the relay being down must
+not make a grab fail.  For the same reason every failure here is logged and
+swallowed — the event already happened, and there is nothing the caller could
+do about it.
 
 Who counts as an admin is decided at registration, not here: a device row only
 exists because someone passed the ADMIN check at
@@ -36,17 +38,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.models import ApnsDevice
 from ..db.session import get_config
-from .apns import (
-    ApnsClient,
-    ApnsConfigError,
-    ApnsSettings,
-    ProviderTokenCache,
-    SendOutcome,
-)
 from .messages import Notification
 from .prefs import is_enabled
+from .relay import RelayClient, RelaySettings, SendOutcome
 
 logger = logging.getLogger(__name__)
+
+#: What the Notifications tab says when the master switch is off.  Kept here
+#: rather than at the call site so the emitting path and the "send a test"
+#: button cannot drift into explaining the same state two different ways.
+DISABLED_REASON = (
+    "Notifications are switched off for this instance. Turn them on at the top "
+    "of the Notifications tab."
+)
+
+UNCONFIGURED_REASON = (
+    "No relay API key is set. Notifications are on, but there is nowhere to "
+    "send them until a key is saved."
+)
 
 
 @dataclass(frozen=True)
@@ -61,11 +70,13 @@ class DispatchReport:
     delivered: int = 0
     failed: int = 0
     unregistered: int = 0
-    """Devices Apple reported as dead. They have been deleted."""
+    """Devices Apple reported as dead, by way of the relay. They have been
+    deleted. The relay stores no device tokens and so cannot do this itself —
+    if this side ignores the outcome, nothing else cleans up after it."""
 
     skipped_reason: str | None = None
-    """Set when no push was attempted at all: the type is off, push is not
-    configured, there are no devices, or the credentials do not work."""
+    """Set when no push was attempted at all: notifications are off, the type
+    is off, no relay key is set, or there are no devices."""
 
     @property
     def attempted(self) -> bool:
@@ -92,34 +103,24 @@ async def send_to_devices(
     *,
     notification: Notification,
     devices: list[ApnsDevice],
-    settings: ApnsSettings,
+    settings: RelaySettings,
     http: httpx.AsyncClient,
-    tokens: ProviderTokenCache,
 ) -> DispatchReport:
     """Push to each device in turn, deleting the ones Apple says are gone.
 
     Sequential rather than gathered: an install has a handful of admin devices,
     not thousands, and sending them one at a time keeps a burst from tripping
-    Apple's per-token rate limiting for no gain worth measuring.
+    the relay's per-instance rate limit for no gain worth measuring.
     """
-    client = ApnsClient(settings, client=http, tokens=tokens)
+    client = RelayClient(settings, client=http)
 
     delivered = failed = unregistered = 0
     for device in devices:
-        try:
-            result = await client.send(
-                notification,
-                device_token=device.device_token,
-                environment=device.environment,
-            )
-        except ApnsConfigError as exc:
-            # The key itself is unusable, so every remaining device would fail
-            # the same way. Stop and report it as a configuration problem.
-            logger.error("APNs is misconfigured, giving up on this notification: %s", exc)
-            return DispatchReport(
-                delivered=delivered, failed=failed, unregistered=unregistered,
-                skipped_reason=str(exc),
-            )
+        result = await client.send(
+            notification,
+            device_token=device.device_token,
+            environment=device.environment,
+        )
 
         if result.outcome is SendOutcome.DELIVERED:
             delivered += 1
@@ -142,7 +143,6 @@ async def deliver(
     *,
     sessionmaker: async_sessionmaker[AsyncSession],
     http: httpx.AsyncClient,
-    tokens: ProviderTokenCache,
     notification: Notification,
     exclude_user_id: int | None = None,
 ) -> DispatchReport:
@@ -157,7 +157,6 @@ async def deliver(
                 report = await _deliver_in_session(
                     session,
                     http=http,
-                    tokens=tokens,
                     notification=notification,
                     exclude_user_id=exclude_user_id,
                 )
@@ -175,22 +174,22 @@ async def _deliver_in_session(
     session: AsyncSession,
     *,
     http: httpx.AsyncClient,
-    tokens: ProviderTokenCache,
     notification: Notification,
     exclude_user_id: int | None,
 ) -> DispatchReport:
+    config = await get_config(session)
+
+    # The master switch first, before the per-type ones: an install with
+    # notifications off should read as "off", not as "that type is off".
+    if not config.notifications_enabled:
+        return DispatchReport(skipped_reason=DISABLED_REASON)
+
     if not await is_enabled(session, notification.type):
         return DispatchReport(skipped_reason="This notification type is switched off.")
 
-    config = await get_config(session)
-    settings = ApnsSettings.from_config(config)
+    settings = RelaySettings.from_config(config)
     if settings is None:
-        return DispatchReport(
-            skipped_reason=(
-                "Push is not configured yet. Add the APNs key, key id, team id "
-                "and bundle id on the Notifications tab."
-            )
-        )
+        return DispatchReport(skipped_reason=UNCONFIGURED_REASON)
 
     devices = await eligible_devices(session, exclude_user_id=exclude_user_id)
     if not devices:
@@ -202,8 +201,14 @@ async def _deliver_in_session(
         devices=devices,
         settings=settings,
         http=http,
-        tokens=tokens,
     )
 
 
-__all__ = ["DispatchReport", "deliver", "eligible_devices", "send_to_devices"]
+__all__ = [
+    "DISABLED_REASON",
+    "UNCONFIGURED_REASON",
+    "DispatchReport",
+    "deliver",
+    "eligible_devices",
+    "send_to_devices",
+]

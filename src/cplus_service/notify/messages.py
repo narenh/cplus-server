@@ -59,10 +59,10 @@ class MediaSummary:
 class Notification:
     """A rendered notification, independent of how it is delivered.
 
-    APNs is the only transport today, but this carries no APNs vocabulary: it
+    APNs is the only destination today, but this carries no APNs vocabulary: it
     is the two display lines plus the structured facts a client may want to
-    route on.  :mod:`cplus_service.notify.apns` is what turns it into a
-    payload.
+    route on.  :mod:`cplus_service.notify.relay` is what turns it into a
+    request, and the relay is what turns that into a payload.
     """
 
     type: NotificationType

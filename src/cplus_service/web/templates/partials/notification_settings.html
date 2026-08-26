@@ -1,0 +1,157 @@
+{# Everything the master switch governs, in one swappable block.
+
+   Rendered by GET /admin/notifications as part of the page and returned whole
+   by POST /admin/notifications/enabled, so the two cannot drift into showing
+   different things about the same state.
+
+   When notifications are off this is deliberately *empty* rather than
+   disabled-but-visible: a page full of greyed-out controls invites an admin to
+   fill them in and wonder why nothing happens, and none of these settings mean
+   anything until the switch is on. #}
+<div id="notify-settings">
+{% if not config.notifications_enabled %}
+
+  <section class="card">
+    <p class="empty">
+      Notifications are off. Nothing is sent, no device can register, and the
+      app is told so by <code>GET /capabilities</code> — so it will not ask
+      anyone for permission it cannot use.
+    </p>
+  </section>
+
+{% else %}
+
+  <form class="card" hx-post="/admin/notifications/relay"
+        hx-target="#relay-result" hx-swap="innerHTML">
+    <h2>Relay</h2>
+    <p class="hint">
+      {% if relay_configured %}
+        A key is saved. Use “Check the relay” to confirm it still works.
+      {% else %}
+        Nothing is sent until an API key is saved. Ask the relay's operator for
+        one; it identifies this instance and is what your notifications are
+        counted against.
+      {% endif %}
+    </p>
+
+    <label for="relay_url">Relay URL</label>
+    <input type="text" id="relay_url" name="relay_url" autocomplete="off"
+           value="{{ relay_url }}" placeholder="{{ default_relay_url }}">
+    <p class="hint">
+      Leave as the default unless you run your own relay. Blanking this field
+      resets it to <code>{{ default_relay_url }}</code>.
+    </p>
+
+    <label for="relay_api_key">Relay API key</label>
+    <input type="password" id="relay_api_key" name="relay_api_key" autocomplete="off"
+           spellcheck="false"
+           placeholder="{% if config.notification_relay_api_key %}············ (unchanged){% else %}canopy_…{% endif %}">
+    <p class="hint">
+      {% if config.notification_relay_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
+      It is never shown again here and is not readable over the API. It is a
+      rate-limit identity, not a password over your users' devices — see the
+      README on why isolation between instances does not depend on it.
+    </p>
+
+    <div class="row">
+      <button type="submit">Save</button>
+      <button type="button" class="secondary"
+              hx-post="/admin/notifications/relay/check"
+              hx-target="#relay-result"
+              hx-swap="innerHTML">Check the relay</button>
+      <button type="button" class="secondary"
+              hx-post="/admin/notifications/test"
+              hx-target="#relay-result"
+              hx-swap="innerHTML">Send a test notification</button>
+      <span id="relay-result" class="inline-result"></span>
+    </div>
+  </form>
+
+  <section class="card">
+    <h2>What to notify me about</h2>
+    <p class="hint">
+      Everything is on until you turn it off, including any type added by a later
+      version. You are never notified about your own requests or grabs.
+    </p>
+
+    <ul class="notify-types">
+      {% for info in types %}
+        <li>
+          <div class="notify-switch">
+            {% with is_enabled = enabled[info.type] %}
+              {% include "partials/notification_toggle.html" %}
+            {% endwith %}
+          </div>
+          <div class="notify-copy">
+            <strong>{{ info.label }}</strong>
+            <p class="hint">{{ info.description }}</p>
+            {# The only place an admin sees the shape of a notification before one
+               arrives. The two types differ only in this second line. #}
+            <div class="notify-preview" aria-hidden="true">
+              <span class="preview-title">The End of Oak Street (2026)</span>
+              <span class="preview-subtitle">{{ info.example_subtitle }}</span>
+            </div>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Devices</h2>
+    {% if not devices %}
+      <p class="empty">
+        No devices registered. The app registers itself the next time it checks
+        <code>GET /capabilities</code> and finds notifications switched on —
+        there is nothing to enter here by hand.
+      </p>
+    {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Device</th>
+            <th>Registered to</th>
+            <th>Build</th>
+            <th>Last seen</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for device, owner in devices %}
+          <tr>
+            <td>
+              {{ device.device_name or "Unnamed device" }}
+              <span class="muted nowrap">{{ device.device_token[:8] }}…</span>
+            </td>
+            <td>{{ owner.plex_username if owner else "unknown" }}</td>
+            <td>
+              {% if device.environment == "sandbox" %}
+                <span class="badge">sandbox</span>
+              {% else %}
+                production
+              {% endif %}
+            </td>
+            <td class="nowrap">{{ device.last_seen_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="right">
+              {# The token goes in the body, not the URL: it is a 64-character
+                 device address and has no business in an access log. #}
+              <form method="post" action="/admin/notifications/devices/delete"
+                    onsubmit="return confirm('Stop sending notifications to this device?')">
+                <input type="hidden" name="device_token" value="{{ device.device_token }}">
+                <button type="submit" class="link danger">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="hint">
+        A device removed here comes back the next time that app launches and
+        registers again. To stop one for good, sign out of the app on it.
+        Devices Apple reports as gone are removed on their own.
+      </p>
+    {% endif %}
+  </section>
+
+{% endif %}
+</div>

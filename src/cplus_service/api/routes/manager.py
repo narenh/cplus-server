@@ -215,7 +215,11 @@ async def list_download_clients(
 
 @router.post("/push-devices", response_model=PushDeviceResponse)
 async def register_push_device(
-    db: DbDep, seerr: SeerrDep, plex_token: PlexTokenDep, body: PushDeviceRegistration
+    db: DbDep,
+    config: ConfigDep,
+    seerr: SeerrDep,
+    plex_token: PlexTokenDep,
+    body: PushDeviceRegistration,
 ) -> PushDeviceResponse:
     """Register this device to receive admin notifications. **Admin only.**
 
@@ -226,12 +230,31 @@ async def register_push_device(
     avoid one. Passing this endpoint is what makes a device eligible; the
     Notifications tab is where one is taken away again.
 
+    Also gated on the instance's master notification switch, with a 409 when it
+    is off. Accepting a registration into an instance that will never send
+    anything would leave the app holding a token it believes is live, and would
+    quietly accumulate device tokens for a feature nobody switched on. The app
+    is expected to look at ``GET /capabilities`` first and not ask at all;
+    this is the check that makes that contract true rather than merely
+    documented.
+
+    That check runs *before* authenticating, unusually. It leaks nothing —
+    ``GET /capabilities`` says the same thing to anyone — and it saves a live
+    Seerr round trip on a call whose answer cannot change.
+
     An upsert, since the app calls this on every launch. A token that comes
     back under a different user — someone signed out and an admin signed in on
     the same device — moves to the new owner rather than accumulating a second
     row, which is also what stops the previous owner from being notified
     through hardware they no longer have.
     """
+    if not config.notifications_enabled:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Notifications are switched off for this instance. Check "
+            "GET /capabilities before registering.",
+        )
+
     try:
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:

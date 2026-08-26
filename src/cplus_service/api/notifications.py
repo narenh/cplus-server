@@ -44,8 +44,7 @@ def schedule(
     background.add_task(
         deliver,
         sessionmaker=state.sessionmaker,
-        http=state.apns_http,
-        tokens=state.apns_tokens,
+        http=state.relay_http,
         notification=notification,
         exclude_user_id=exclude_user_id,
     )

@@ -14,15 +14,13 @@ import httpx
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.api.app import create_app
 from cplus_service.db.models import Action, ApnsDevice, Config, Permission, QualityProfile, User
 from cplus_service.db.session import create_engine
-from cplus_service.notify.apns import ApnsSettings
+from cplus_service.notify.relay import RelaySettings
 
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
@@ -30,11 +28,10 @@ PROWLARR_API_KEY = "prowlarr-key"
 TMDB_BEARER_TOKEN = "tmdb-bearer-token"
 PLEX_TOKEN = "plex-token-abc"
 
-APNS_TEAM_ID = "TEAM123456"
-APNS_KEY_ID = "KEY1234567"
-APNS_BUNDLE_ID = "com.example.cplus"
-APNS_PRODUCTION = "https://api.push.apple.com"
-APNS_SANDBOX = "https://api.sandbox.push.apple.com"
+RELAY_URL = "https://relay.test"
+RELAY_API_KEY = "canopy_testinstance_k3jd7q2mfhx4zt8bwv6nra5cyp"
+RELAY_PUSH_URL = f"{RELAY_URL}/v1/push"
+RELAY_VERIFY_URL = f"{RELAY_URL}/v1/verify"
 
 
 def seerr_user_payload(
@@ -122,38 +119,22 @@ def plex_headers() -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 
-@pytest.fixture(scope="session")
-def apns_key_pem() -> str:
-    """A throwaway P-256 key in the shape Apple's ``.p8`` files come in.
-
-    Generated rather than checked in, so the repository never carries something
-    shaped like a signing key. Session-scoped because keygen is the slowest
-    thing in these tests by a wide margin.
-    """
-    key = ec.generate_private_key(ec.SECP256R1())
-    return key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode("ascii")
-
-
 @pytest.fixture
-def apns_settings(apns_key_pem: str) -> ApnsSettings:
-    return ApnsSettings(
-        team_id=APNS_TEAM_ID,
-        key_id=APNS_KEY_ID,
-        bundle_id=APNS_BUNDLE_ID,
-        private_key_pem=apns_key_pem,
-    )
+def relay_settings() -> RelaySettings:
+    return RelaySettings(url=RELAY_URL, api_key=RELAY_API_KEY)
 
 
-async def configure_apns(db: AsyncSession, config: Config, key_pem: str) -> Config:
-    """Fill in the four APNs fields, so ``ApnsSettings.from_config`` is satisfied."""
-    config.apns_team_id = APNS_TEAM_ID
-    config.apns_key_id = APNS_KEY_ID
-    config.apns_bundle_id = APNS_BUNDLE_ID
-    config.apns_private_key = key_pem
+async def enable_notifications(
+    db: AsyncSession, config: Config, *, api_key: str | None = RELAY_API_KEY
+) -> Config:
+    """Turn notifications on and point them at the mocked relay.
+
+    ``api_key=None`` is the half-configured state — switched on, nowhere to
+    send — which several tests need to tell apart from switched off.
+    """
+    config.notifications_enabled = True
+    config.notification_relay_url = RELAY_URL
+    config.notification_relay_api_key = api_key
     db.add(config)
     await db.commit()
     return config

@@ -14,13 +14,16 @@ Layered so that each piece can be read and tested on its own:
     The per-type switches, and the "unset means enabled" rule that makes a new
     type live on existing installs without a backfill.
 
-``apns``
-    Talking to Apple: provider-token signing, the HTTP/2 push, and reading a
-    dead device token out of the response. Knows nothing about who to send to.
+``relay``
+    Talking to the public forwarding service that holds the APNs signing key —
+    which this install has not got and cannot get. Knows nothing about who to
+    send to. Its docstring is also where the isolation argument lives: one
+    instance cannot reach another's users because it has never seen their
+    device tokens, not because the relay enforces a rule.
 
 ``service``
-    The policy: is this type on, is push configured, who gets it, and what to
-    do when Apple says a device is gone.
+    The policy: are notifications on at all, is this type on, is a relay key
+    set, who gets it, and what to do when Apple says a device is gone.
 """
 
 from .messages import MediaSummary, Notification, user_action, user_requested

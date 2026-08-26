@@ -12,8 +12,6 @@ from datetime import datetime
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from ..notify.apns import ProviderTokenCache
-
 
 @dataclass
 class PendingPlexLogin:
@@ -43,14 +41,14 @@ class AppState:
     Seerr session can never be attached to an outbound Prowlarr call.
     """
 
-    apns_http: httpx.AsyncClient
-    """Third client, and the one with the hard requirement behind it: APNs
-    speaks HTTP/2 only, so this one is built with ``http2=True``. The other two
-    talk to self-hosted services that may well be HTTP/1.1 only."""
+    relay_http: httpx.AsyncClient
+    """Third client, for the notification relay.
 
-    apns_tokens: ProviderTokenCache = field(default_factory=ProviderTokenCache)
-    """Cached APNs provider tokens. Process-wide because Apple rate-limits how
-    often a new one may be minted; see :class:`ProviderTokenCache`."""
+    Separate from the other two because it is the only one that talks to a
+    service outside the admin's own network, and because its timeout is set for
+    a different job: a push runs after the response has already gone out, so
+    nothing is waiting on it, but a hung connection would still pin a
+    background task."""
 
     pending_plex_logins: dict[int, PendingPlexLogin] = field(default_factory=dict)
     """In-flight webui sign-ins, keyed by plex.tv PIN id.

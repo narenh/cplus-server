@@ -1,8 +1,9 @@
 """FastAPI application factory.
 
-Long-lived resources (the database engine and the two outbound HTTP clients —
-one for Prowlarr, one kept separate for Seerr) are created once per process in
-the lifespan and hung off ``app.state``. Nothing per-request owns them.
+Long-lived resources (the database engine and the three outbound HTTP clients —
+one for Prowlarr, one kept separate for Seerr, one for the notification relay)
+are created once per process in the lifespan and hung off ``app.state``.
+Nothing per-request owns them.
 """
 
 from __future__ import annotations
@@ -22,7 +23,16 @@ from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import ensure_request_action
 from ..db.session import create_all, create_engine, create_session_factory, session_scope
 from ..web import STATIC_DIR
-from .routes import admin, grab, manager, register, request, seerr, titles
+from .routes import (
+    admin,
+    capabilities,
+    grab,
+    manager,
+    register,
+    request,
+    seerr,
+    titles,
+)
 from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -50,10 +60,11 @@ def create_app(
         sessionmaker = create_session_factory(active_engine)
         http = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
         seerr_http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0))
-        # APNs is HTTP/2 only. The timeout is short because a push runs after
-        # the response has already gone out: nothing is waiting on it, but a
-        # hung connection would still pin a background task.
-        apns_http = httpx.AsyncClient(http2=True, timeout=httpx.Timeout(10.0, connect=5.0))
+        # The notification relay. The timeout is short because a push runs
+        # after the response has already gone out: nothing is waiting on it,
+        # but a hung connection would still pin a background task. Ordinary
+        # HTTP/1.1 — the relay is the one that has to speak HTTP/2, to Apple.
+        relay_http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
 
         if create_schema:
             await create_all(active_engine)
@@ -63,7 +74,7 @@ def create_app(
             sessionmaker=sessionmaker,
             http=http,
             seerr_http=seerr_http,
-            apns_http=apns_http,
+            relay_http=relay_http,
         )
 
         async with session_scope(sessionmaker) as session:
@@ -75,7 +86,7 @@ def create_app(
         finally:
             await http.aclose()
             await seerr_http.aclose()
-            await apns_http.aclose()
+            await relay_http.aclose()
             if owns_engine:
                 await active_engine.dispose()
 
@@ -89,6 +100,7 @@ def create_app(
         lifespan=lifespan,
     )
 
+    app.include_router(capabilities.router)
     app.include_router(register.router)
     app.include_router(titles.router)
     app.include_router(grab.router)
