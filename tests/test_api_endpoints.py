@@ -544,6 +544,16 @@ async def test_health_is_open(client: httpx.AsyncClient) -> None:
     assert (await client.get("/health")).json() == {"status": "ok"}
 
 
+async def test_static_files_are_served_no_cache(client: httpx.AsyncClient) -> None:
+    """A stale ``app.css`` or ``login.html`` asset stuck in a browser cache is
+    exactly the kind of bug this single-admin, rarely-visited login page would
+    hide for a long time, so every static asset is served telling the browser
+    to revalidate rather than assume it still has the latest copy."""
+    response = await client.get("/static/app.css")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+
+
 # --------------------------------------------------------------------------- #
 # POST /grab — schema edges
 #

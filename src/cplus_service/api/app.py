@@ -15,7 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -44,6 +44,25 @@ from .routes import (
 from .state import AppState
 
 logger = logging.getLogger(__name__)
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Static file serving with caching turned off.
+
+    This install ships as a container image, not a CDN-backed site: a build
+    replaces the static files in place, and a browser that cached the old
+    ``app.css`` or ``login.html`` assets has no way to know they changed. The
+    login page in particular gets looked at once per browser and then rarely
+    again, which is exactly when a stale cache is most likely to stick.
+    ``no-cache`` (not ``no-store``) still lets the browser revalidate with
+    ETag/Last-Modified and get a cheap 304 when nothing changed — it just
+    stops it from ever using a copy without asking first.
+    """
+
+    def file_response(self, *args: object, **kwargs: object) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(
@@ -133,7 +152,7 @@ def create_app(
     app.include_router(seerr.router)
     app.include_router(admin.router)
 
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:

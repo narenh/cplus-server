@@ -18,7 +18,10 @@ cannot change without a restart anyway — that is the point.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 SEERR_URL_ENV = "CPLUS_SEERR_URL"
 
@@ -29,8 +32,33 @@ def seerr_url() -> str | None:
     Normalised the way the old admin form normalised it — trimmed, no trailing
     slash — so a value that differs only in those respects is not read as a
     different instance and does not trigger a credential flush.
+
+    Also rejects anything that is not plausibly a URL. ``docker-compose.yml``
+    leans on ``${CPLUS_SEERR_URL:?set CPLUS_SEERR_URL to your Seerr base URL}``
+    to fail the deploy when the variable is missing — but that ``:?`` operator
+    is a real Compose feature, not universal shell syntax, and orchestration
+    tooling that doesn't implement it (some Compose-alikes treat ``:?`` as a
+    plain default, the same as ``:-``) will happily hand the literal error
+    message to the app as if it were the value. Without this check that string
+    passes the truthiness test above and the login page renders it as though
+    it were a real, configured Seerr host — the exact "unconfigured install
+    looks configured" bug this whole page exists to avoid.
     """
-    return os.environ.get(SEERR_URL_ENV, "").strip().rstrip("/") or None
+    value = os.environ.get(SEERR_URL_ENV, "").strip().rstrip("/")
+    if not value:
+        return None
+    if not (value.startswith("http://") or value.startswith("https://")):
+        logger.error(
+            "%s is set but is not a URL (%r) — treating the install as"
+            " unconfigured. If this came from docker-compose.yml's"
+            " ':?' default, your orchestration tool likely does not"
+            " support that operator and substituted its message text"
+            " instead of failing the deploy.",
+            SEERR_URL_ENV,
+            value,
+        )
+        return None
+    return value
 
 
 def seerr_url_fingerprint() -> str:
