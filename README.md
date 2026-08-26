@@ -234,9 +234,17 @@ nothing explicit is present does it fall back to the heuristic:
 | Situation | Inferred profile |
 |---|---|
 | REMUX + DV | 7 |
+| REMUX + DV + Hybrid (no HDR10+) | 8 |
+| REMUX + DV + Hybrid + HDR10+ | 7 |
 | encode + DV | 8 |
 | WEB + DV + HDR | 8 |
 | WEB + DV only | 5 |
+
+"Hybrid" in a REMUX title signals a converted single-layer profile 8 track
+built from a profile 5 HDR10 source, rather than the dual-layer FEL/MEL
+assumption of profile 7. The distinction is visible only when there is no
+explicit profile marker in the title. When HDR10+ is also present, the track is
+a profile 7 FEL/HDR10+ combination instead, so the dual-layer assumption holds.
 
 ### Full discs
 
