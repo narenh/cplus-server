@@ -20,14 +20,9 @@
     <button type="button" id="go" class="plex">Sign in with Plex</button>
   {% else %}
     {# Nothing to sign in against. Say so plainly rather than offering a button
-       that can only fail — and name the variable, since fixing it means a
-       redeploy, not a form on this page. #}
+       that can only fail — fixing it means a redeploy, not a form on this page. #}
     <p class="lede">This install has no Seerr host configured.</p>
-    <p class="signin-host unset">CPLUS_SEERR_URL is not set</p>
-    <p class="hint center">
-      Set it in the deployment's environment and restart. It is not something
-      this page can change: Seerr decides who the admin is here.
-    </p>
+    <p class="hint center">Set it in the deployment's environment and restart.</p>
   {% endif %}
 
   <p id="status" class="status" role="status"></p>
