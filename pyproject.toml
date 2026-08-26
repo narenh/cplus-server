@@ -9,7 +9,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "greenlet>=3.1",
-    "httpx>=0.28",
+    # APNs speaks HTTP/2 only, hence the extra; `cryptography` signs the ES256
+    # provider token. Both are here for push and nothing else.
+    "httpx[http2]>=0.28",
+    "cryptography>=42",
     "jinja2>=3.1",
     "python-multipart>=0.0.20",
     "pydantic>=2.10",

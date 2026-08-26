@@ -24,6 +24,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -41,6 +42,18 @@ class Base(DeclarativeBase):
 class EventType(StrEnum):
     SEARCH = "search"
     GRAB = "grab"
+
+
+class ApnsEnvironment(StrEnum):
+    """Which APNs host a device token is valid against.
+
+    Not a preference: a token minted by a development build is meaningless to
+    the production host and vice versa, so it is a property of the token and is
+    stored per device rather than set once for the whole install.
+    """
+
+    SANDBOX = "sandbox"
+    PRODUCTION = "production"
 
 
 class Config(Base):
@@ -71,6 +84,24 @@ class Config(Base):
     #: first sign-in.  It must not change between sign-ins, or every login
     #: registers a fresh device on the admin's Plex account.
     plex_client_identifier: Mapped[str | None] = mapped_column(String(64))
+
+    #: Apple Developer team that owns the push key, and the key's own id.  Both
+    #: are printed on the key in the developer portal; neither is secret on its
+    #: own.
+    apns_team_id: Mapped[str | None] = mapped_column(String(32))
+    apns_key_id: Mapped[str | None] = mapped_column(String(32))
+
+    #: The app's bundle id, sent as the APNs ``apns-topic`` header.  Apple
+    #: rejects a push whose topic does not match the token's app, so this is
+    #: not optional once push is switched on.
+    apns_bundle_id: Mapped[str | None] = mapped_column(String(256))
+
+    #: The ``.p8`` signing key, PEM text exactly as downloaded.  Handled like
+    #: ``prowlarr_api_key`` — write-only from the admin UI's point of view,
+    #: never rendered back into a page, and never exposed over the API.  Unlike
+    #: the TMDB token there is no read endpoint for it at all: this one signs
+    #: every push for the whole team and is not casually rotatable.
+    apns_private_key: Mapped[str | None] = mapped_column(Text)
 
 
 class User(Base):
@@ -226,6 +257,56 @@ class PlexTokenSession(Base):
 
     token_fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class NotificationPreference(Base):
+    """One admin-facing opt-out, keyed by notification type.
+
+    **A missing row means enabled.**  That is what makes "both enabled by
+    default" true without seeding anything, and it is also what lets a later
+    release add a third type that is live immediately for existing installs —
+    there is no backfill to forget and no migration that has to enumerate the
+    types.  Rows appear only once an admin actually moves a switch.
+
+    ``notification_type`` is the string value of
+    :class:`cplus_service.notify.types.NotificationType` rather than a
+    constrained column, so an unrecognised row (a type from a newer version, or
+    one since removed) is inert data rather than a load failure.
+    """
+
+    __tablename__ = "notification_preferences"
+
+    notification_type: Mapped[str] = mapped_column(String(64), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+
+
+class ApnsDevice(Base):
+    """One iOS/tvOS device registered to receive push notifications.
+
+    Keyed by the device token itself: Apple hands the same token back to every
+    launch of the same app on the same device, so re-registering is an upsert
+    of ``last_seen_at`` rather than a second row.  A token can migrate between
+    users (someone signs out and a different admin signs in on the same
+    device), which is why ``user_id`` is an ordinary column and not part of the
+    key.
+
+    Rows are removed on their own when Apple says so — a 410 from APNs means
+    the app was uninstalled and the token is dead; see
+    :mod:`cplus_service.notify.apns`.
+    """
+
+    __tablename__ = "apns_devices"
+
+    device_token: Mapped[str] = mapped_column(String(200), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    environment: Mapped[ApnsEnvironment] = mapped_column(
+        String(16), default=ApnsEnvironment.PRODUCTION, server_default="production"
+    )
+    #: Free-form label from the registering client ("Naren's Apple TV"), shown
+    #: in the admin UI so a stale device can be told apart from a live one.
+    device_name: Mapped[str | None] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

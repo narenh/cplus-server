@@ -50,6 +50,10 @@ def create_app(
         sessionmaker = create_session_factory(active_engine)
         http = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
         seerr_http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0))
+        # APNs is HTTP/2 only. The timeout is short because a push runs after
+        # the response has already gone out: nothing is waiting on it, but a
+        # hung connection would still pin a background task.
+        apns_http = httpx.AsyncClient(http2=True, timeout=httpx.Timeout(10.0, connect=5.0))
 
         if create_schema:
             await create_all(active_engine)
@@ -59,6 +63,7 @@ def create_app(
             sessionmaker=sessionmaker,
             http=http,
             seerr_http=seerr_http,
+            apns_http=apns_http,
         )
 
         async with session_scope(sessionmaker) as session:
@@ -70,6 +75,7 @@ def create_app(
         finally:
             await http.aclose()
             await seerr_http.aclose()
+            await apns_http.aclose()
             if owns_engine:
                 await active_engine.dispose()
 
