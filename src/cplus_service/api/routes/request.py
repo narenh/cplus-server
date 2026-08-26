@@ -17,15 +17,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from ...auth.identity import authenticate_plex_token
 from ...bootstrap import REQUEST_ACTION_NAME, get_request_action
 from ...db.models import ActivityLog, EventType, Permission
+from ...notify.messages import MediaSummary, user_requested
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep
+from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
+from ..notifications import media_of, schedule
 from ..schemas import RequestCreate, RequestResponse
 
 logger = logging.getLogger(__name__)
@@ -36,8 +38,10 @@ router = APIRouter(tags=["client"])
 @router.post("/request", response_model=RequestResponse)
 async def create_request(
     db: DbDep,
+    state: StateDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    background: BackgroundTasks,
     body: RequestCreate,
 ) -> RequestResponse | JSONResponse:
     """File a request in Seerr on the caller's behalf.
@@ -123,6 +127,27 @@ async def create_request(
                 "success": True,
             },
         )
+    )
+
+    # Notified on the request being *filed*, not on it being approved: the
+    # whole point is to tell an admin there is something waiting for them.
+    #
+    # The fallback title is the bare TMDB id because there is nothing better
+    # to hand here — unlike a grab there is no release name to parse, and
+    # resolving the id would mean a TMDB round trip on a path that has already
+    # made the only outbound call it needs. A client that sends `media_title`
+    # never sees it.
+    schedule(
+        background,
+        state,
+        user_requested(
+            media_of(body, fallback=MediaSummary(title=f"TMDB {body.tmdb_id}")),
+            username=user.plex_username,
+            tmdb_id=body.tmdb_id,
+            media_type=body.type,
+            seerr_request_id=result.id,
+        ),
+        exclude_user_id=user.id,
     )
 
     return RequestResponse(success=True, request_id=result.id)

@@ -10,9 +10,22 @@ from __future__ import annotations
 
 from fastapi import BackgroundTasks
 
-from ..notify.messages import Notification
+from ..notify.messages import MediaSummary, Notification
 from ..notify.service import deliver
+from .schemas import MediaIdentity
 from .state import AppState
+
+
+def media_of(body: MediaIdentity, *, fallback: MediaSummary) -> MediaSummary:
+    """The media a notification is about: what the client sent, else ``fallback``.
+
+    A client that sends a title is believed, year and all — including a client
+    that sends a title and no year, which is a real answer ("this thing has no
+    release year") and not a reason to go back to guessing.
+    """
+    if body.media_title and body.media_title.strip():
+        return MediaSummary(title=body.media_title.strip(), year=body.media_year)
+    return fallback
 
 
 def schedule(
@@ -38,4 +51,4 @@ def schedule(
     )
 
 
-__all__ = ["schedule"]
+__all__ = ["media_of", "schedule"]

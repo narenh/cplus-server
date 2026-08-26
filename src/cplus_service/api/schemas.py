@@ -9,8 +9,32 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 MEDIA_TYPE_MOVIE = "movie"
 MEDIA_TYPE_TV = "tv"
 
+#: Bounds on a client-supplied release year. Wide enough for the whole of
+#: cinema and then some — the point is to reject a mis-mapped field, not to
+#: adjudicate what year a film may have come out in.
+MIN_MEDIA_YEAR = 1870
+MAX_MEDIA_YEAR = 2999
 
-class ReleaseFields(BaseModel):
+
+class MediaIdentity(BaseModel):
+    """What the notification's first line is built from.
+
+    Optional, and only ever used for display. The client is holding the real
+    title and year already — it is showing them on the detail page the button
+    was pressed on — so sending them along saves the server either guessing
+    from a scene release name or making a TMDB call on the path of a request
+    that has nothing else to wait for.
+
+    Omitting them is fine and stays fine: a grab falls back to parsing the
+    release title, and a request falls back to naming the TMDB id. Both read
+    worse than the real thing, which is the only reason to send it.
+    """
+
+    media_title: str | None = Field(default=None, max_length=512)
+    media_year: int | None = Field(default=None, ge=MIN_MEDIA_YEAR, le=MAX_MEDIA_YEAR)
+
+
+class ReleaseFields(MediaIdentity):
     """The release identity shared by every way of grabbing one.
 
     Comes straight back from the search stream the client was already sent.
@@ -61,7 +85,7 @@ class GrabResponse(BaseModel):
     grab_id: int | None = None
 
 
-class RequestCreate(BaseModel):
+class RequestCreate(MediaIdentity):
     """``POST /request``.
 
     ``tmdb_id`` is a TMDB id, not an IMDB id — Seerr's request endpoint is
@@ -96,3 +120,29 @@ class RequestResponse(BaseModel):
     success: bool
     message: str | None = None
     request_id: int | None = None
+
+
+class PushDeviceRegistration(BaseModel):
+    """``POST /manager/push-devices`` — an app offering its APNs device token.
+
+    ``environment`` is a property of the token, not a preference: a token from
+    a development build only works against Apple's sandbox host and a
+    TestFlight or App Store build only against production. The app knows which
+    one it is (``aps-environment`` in its entitlements) and tells us, because
+    the server has no way to tell by looking.
+
+    Sent on every launch, not just the first: Apple can reissue a device token
+    at any time, and a re-registration of an unchanged one is how we know the
+    app is still installed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    device_token: str = Field(min_length=1, max_length=200, pattern=r"^[0-9a-fA-F]+$")
+    environment: Literal["sandbox", "production"] = "production"
+    device_name: str | None = Field(default=None, max_length=256)
+
+
+class PushDeviceResponse(BaseModel):
+    success: bool
+    message: str | None = None

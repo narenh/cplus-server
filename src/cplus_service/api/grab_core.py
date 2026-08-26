@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import status
+from fastapi import BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Action, ActivityLog, EventType, Grab, User
+from ..notify.messages import media_from_release_title, user_action
 from ..prowlarr.client import ProwlarrClient, ProwlarrError
+from .notifications import media_of, schedule
 from .schemas import GrabResponse, ReleaseFields
+from .state import AppState
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +33,14 @@ async def execute_grab(
     action: Action | None,
     download_client_id: int,
     body: ReleaseFields,
+    state: AppState,
+    background: BackgroundTasks,
 ) -> GrabResponse | JSONResponse:
     """Send ``body``'s release to ``download_client_id`` and record the outcome.
 
     ``action`` is ``None`` for the admin app's action-free grab; the ``grabs``
-    row's ``action_id`` is nullable for exactly that reason.
+    row's ``action_id`` is nullable for exactly that reason. It is also what
+    decides whether this raises a notification — see below.
     """
     try:
         await prowlarr.grab(
@@ -94,5 +100,24 @@ async def execute_grab(
             },
         )
     )
+
+    # Only an action-backed grab is "a user performed an action". The other
+    # caller here is the admin app's action-free grab, which is an admin
+    # picking a release during a request approval — their own work, and not
+    # something to notify them about. ``exclude_user_id`` covers the remaining
+    # case: an admin who also holds actions and used one from tvOS.
+    if action is not None:
+        schedule(
+            background,
+            state,
+            user_action(
+                media_of(body, fallback=media_from_release_title(body.release_title)),
+                username=user.plex_username,
+                action_name=action.name,
+                grab_id=record.id,
+                action_id=action.id,
+            ),
+            exclude_user_id=user.id,
+        )
 
     return GrabResponse(success=True, grab_id=record.id)
