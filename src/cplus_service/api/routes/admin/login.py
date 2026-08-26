@@ -10,9 +10,16 @@ Flow, all server-side except the popup:
    the ADMIN bit, and sets the session cookie — the Plex token itself never
    reaches page JavaScript.
 
-Sign-in requires a Seerr URL, because Seerr — not Plex — decides who the admin
-is. On a fresh install the login form asks for it and stores it only after it
-has proven it can authenticate.
+Seerr — not Plex — decides who the admin is, so **which Seerr is asked is not
+the caller's to choose**. It comes from ``CPLUS_SEERR_URL`` in the environment
+and nothing on this page can influence it; the login page only displays it, so
+you can see what you are about to sign in against.
+
+This used to be a field on the form, filled in on first run and remembered. It
+could not stay one: these two endpoints take no authentication, because they
+*are* how you authenticate. A visitor who could name the Seerr instance could
+point a fresh install's login at a server of their own, have it answer "yes,
+admin", and be handed a session here.
 """
 
 from __future__ import annotations
@@ -21,10 +28,10 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from ....auth.identity import apply_seerr_url_change, upsert_user
+from ....auth.identity import upsert_user
 from ....auth.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -34,6 +41,7 @@ from ....auth.sessions import (
 from ....db.session import get_config
 from ....plex.client import PlexError, PlexPinClient
 from ....seerr.client import SeerrAuthError, SeerrClient, SeerrError
+from ....settings import SEERR_URL_ENV, seerr_url
 from ....web import templates
 from ...deps import DbDep, StateDep
 from ...state import AppState, PendingPlexLogin
@@ -70,12 +78,12 @@ def _sweep_expired_logins(state: AppState) -> None:
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, db: DbDep) -> Response:
-    config = await get_config(db)
+async def login_page(request: Request) -> Response:
+    """The sign-in page. Read-only: it shows the Seerr host, it cannot set it."""
     return templates.TemplateResponse(
         request,
         "login.html",
-        {"seerr_url": config.seerr_url or "", "title": "Sign in"},
+        {"seerr_url": seerr_url(), "title": "Sign in"},
     )
 
 
@@ -96,18 +104,17 @@ async def _pin_client(state: StateDep, db: DbDep) -> PlexPinClient:
 
 
 @router.post("/plex/pin")
-async def start_pin(
-    state: StateDep,
-    db: DbDep,
-    seerr_url: str = Form(default=""),
-) -> JSONResponse:
-    """Begin the PIN flow, remembering the Seerr URL to validate against."""
-    config = await get_config(db)
-    target = (seerr_url or config.seerr_url or "").strip().rstrip("/")
-    if not target:
+async def start_pin(state: StateDep, db: DbDep) -> JSONResponse:
+    """Begin the PIN flow.
+
+    Takes no parameters at all — deliberately. The instance this sign-in will be
+    validated against is whatever the environment says, both here and when the
+    PIN is claimed, so there is nothing for a caller to supply.
+    """
+    if seerr_url() is None:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Enter the URL of your Seerr instance first.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
         )
 
     _sweep_expired_logins(state)
@@ -121,10 +128,9 @@ async def start_pin(
         ) from exc
 
     # Timestamped so an abandoned attempt is swept after PENDING_LOGIN_TTL
-    # rather than held until restart.
-    state.pending_plex_logins[pin_id] = PendingPlexLogin(
-        seerr_url=target, created_at=datetime.now(UTC)
-    )
+    # rather than held until restart. The timestamp is all it carries now: the
+    # Seerr URL used to live here, back when the caller chose it.
+    state.pending_plex_logins[pin_id] = PendingPlexLogin(created_at=datetime.now(UTC))
 
     return JSONResponse(
         {"pin_id": pin_id, "code": code, "auth_url": plex.auth_url(code)}
@@ -137,12 +143,17 @@ async def poll_pin(
 ) -> JSONResponse:
     """Poll a PIN; on success, sign the admin in and set the session cookie."""
     _sweep_expired_logins(state)
-    pending = state.pending_plex_logins.get(pin_id)
-    if pending is None:
+    if pin_id not in state.pending_plex_logins:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "That sign-in attempt has expired. Start again."
         )
-    seerr_url = pending.seerr_url
+
+    target = seerr_url()
+    if target is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
+        )
 
     plex = await _pin_client(state, db)
     try:
@@ -158,7 +169,7 @@ async def poll_pin(
 
     state.pending_plex_logins.pop(pin_id, None)
 
-    seerr = SeerrClient(seerr_url, client=state.seerr_http)
+    seerr = SeerrClient(target, client=state.seerr_http)
     try:
         auth = await seerr.authenticate_plex(plex_token)
     except SeerrAuthError as exc:
@@ -168,7 +179,7 @@ async def poll_pin(
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr at {seerr_url}: {exc}"
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr at {target}: {exc}"
         ) from exc
 
     if not auth.user.is_admin:
@@ -178,12 +189,6 @@ async def poll_pin(
         )
 
     user = await upsert_user(db, auth)
-
-    config = await get_config(db)
-    # No keep_session_token: no session exists yet to protect, and the one
-    # about to be created below is for this instance.
-    await apply_seerr_url_change(db, config, seerr_url)
-
     token = await create_session(db, user.id)
     response = JSONResponse({"claimed": True, "redirect": "/admin/config"})
     set_session_cookie(response, request, token)

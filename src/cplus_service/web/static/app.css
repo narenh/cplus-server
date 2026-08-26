@@ -18,6 +18,15 @@
   /* Text laid over a solid --err fill. Light mode's red is dark enough to
      carry white; dark mode's is a pastel, which needs dark ink instead. */
   --on-err: #ffffff;
+
+  /* Plex's brand gold, and a darker press state mixed from it. Fixed in both
+     schemes: it identifies the service you are signing in to, so it is not
+     ours to re-tint the way the palette above gets re-tinted. It is bright
+     enough that only near-black text clears contrast on it — white would land
+     around 2:1 — hence --on-plex. */
+  --plex: #e5a00d;
+  --plex-hover: #cc8e0b;
+  --on-plex: #1a1205;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,6 +89,58 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .nowrap { white-space: nowrap; }
 .hidden { display: none !important; }
 
+/* A setting this UI shows but cannot change — currently just the Seerr host,
+   which lives in the environment. Deliberately not a disabled <input>: that
+   reads as "a field you may be able to edit", and this one is never editable
+   here. */
+.readonly-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px; margin: 0 0 8px; word-break: break-all;
+}
+.readonly-value.unset { font-family: inherit; color: var(--muted); font-style: italic; }
+
+/* Sign-in ----------------------------------------------------------------- */
+
+/* The one page with no header and nothing to scan, so it gets centred as a
+   block rather than starting at the top of the viewport like every other page.
+   min-height leaves room to sit slightly above centre — optically better than
+   true centring for a short stack — and the top padding is what it falls back
+   to on a short window, where centring would otherwise clip the logo. */
+.signin-wrap {
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 20px 96px;
+}
+
+.signin-logo { display: block; margin-bottom: 40px; }
+.signin-logo img {
+  display: block; width: 200px; height: auto;
+}
+
+.signin-card {
+  /* Overrides .card.narrow's own vertical margin: spacing on this page is set
+     by the flex column above, not by the card. */
+  margin: 0; width: 100%; padding: 32px 28px 28px; text-align: center;
+}
+.signin-card .lede { margin-bottom: 10px; }
+
+/* The host you are about to hand a Plex token to. The most important line on
+   the page after the button, so it is the one thing set in the ink colour at
+   full weight while the sentence introducing it stays muted. */
+.signin-host {
+  font-size: 16px; font-weight: 600; margin: 0 0 28px;
+  word-break: break-all; line-height: 1.4;
+}
+.signin-host.unset {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px; font-weight: 400; color: var(--muted);
+}
+
+.signin-card button.plex { padding: 10px 22px; font-size: 15px; }
+.signin-card .hint { margin: 0; }
+.signin-card .status:empty { min-height: 0; margin-top: 0; }
+.signin-card .status:not(:empty) { margin-top: 20px; }
+
 /* Forms ------------------------------------------------------------------- */
 
 label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
@@ -117,6 +178,11 @@ button.destructive, .button.destructive {
 button.destructive.secondary, .button.destructive.secondary {
   background: transparent; color: var(--err); border-color: var(--err);
 }
+button.plex, .button.plex {
+  background: var(--plex); color: var(--on-plex); font-weight: 600;
+}
+button.plex:hover:not(:disabled), .button.plex:hover { background: var(--plex-hover); }
+
 button.link {
   background: none; border: none; color: var(--accent); padding: 0 6px; cursor: pointer;
 }

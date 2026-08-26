@@ -20,9 +20,16 @@ services:
       # to route. Outside Coolify it is simply unset; the app never reads it.
       SERVICE_FQDN_CPLUS_8080: /
 
-      # Everything else — Seerr URL, Prowlarr connection, actions, quality
-      # profiles, permissions — is configured in the web UI after first
-      # launch, not here. These are only what must exist before the UI does.
+      # The one piece of real configuration that lives here rather than in the
+      # web UI. Seerr decides who is admin, so whoever can name the Seerr
+      # instance decides who gets in — that makes it a deploy-time secret-ish
+      # setting, not a form field. Required: with it unset nobody can sign in.
+      # Changing it signs out every device and browser on the next start.
+      CPLUS_SEERR_URL: ${CPLUS_SEERR_URL:?set CPLUS_SEERR_URL to your Seerr base URL}
+
+      # Everything else — Prowlarr connection, actions, quality profiles,
+      # permissions — is configured in the web UI after first launch, not here.
+      # These are only what must exist before the UI does.
       CPLUS_PORT: "8080"
       CPLUS_HOST: 0.0.0.0
       CPLUS_DB_PATH: /data/cplus.db

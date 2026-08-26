@@ -54,65 +54,24 @@
   </div>
 </form>
 
-<form class="card" id="seerr-form" hx-post="/admin/config/seerr-url"
-      hx-target="#seerr-result" hx-swap="innerHTML"
-      hx-confirm="Change the Seerr host? Every device and browser session will be signed out and will need to reconnect.">
+{# Read-only, and not a form. The Seerr host decides who is admin, so it is set
+   in the deployment's environment and changed by redeploying — there is no
+   endpoint that can change it, which is the point. #}
+<section class="card">
   <h2>Seerr</h2>
-  <label for="seerr_url">Seerr URL</label>
-  <input type="url" id="seerr_url" name="seerr_url" value="{{ config.seerr_url or '' }}" disabled>
+  {% if seerr_url %}
+    <p class="readonly-value">{{ seerr_url }}</p>
+  {% else %}
+    <p class="readonly-value unset">Not set — no one can sign in.</p>
+  {% endif %}
   <p class="hint">
-    Used to authenticate every user and to file requests on their behalf.
-    Changing it invalidates every cached session, since permissions and the
-    admin bit were all resolved against whichever instance was configured at
-    the time.
+    Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
+    what authenticates every user and files requests on their behalf, and it is
+    what decides who counts as an admin — so it is deliberately not something
+    any request to this service can change. To point at a different instance,
+    change the variable and redeploy; on the next start every device and browser
+    session is signed out, since permissions and the admin bit were all resolved
+    against the old instance.
   </p>
-
-  {# One row, swapped in place: arming the change replaces the button that
-     offered it with the pair that resolves it, so there is never both an
-     invitation to change the host and a live confirm on screen at once. #}
-  <div class="row">
-    <button type="button" class="destructive secondary" id="seerr-change-btn">Change Seerr host</button>
-    <button type="button" class="secondary hidden" id="seerr-cancel-btn">Cancel</button>
-    <button type="submit" class="destructive hidden" id="seerr-confirm-btn">Confirm host change</button>
-    <span id="seerr-result" class="inline-result"></span>
-  </div>
-</form>
-
-<script>
-  (function () {
-    var input = document.getElementById("seerr_url");
-    var changeBtn = document.getElementById("seerr-change-btn");
-    var cancelBtn = document.getElementById("seerr-cancel-btn");
-    var confirmBtn = document.getElementById("seerr-confirm-btn");
-    var original = input.value;
-
-    function arm(armed) {
-      input.disabled = !armed;
-      changeBtn.classList.toggle("hidden", armed);
-      cancelBtn.classList.toggle("hidden", !armed);
-      confirmBtn.classList.toggle("hidden", !armed);
-    }
-
-    changeBtn.addEventListener("click", function () {
-      arm(true);
-      input.focus();
-      input.select();
-    });
-
-    cancelBtn.addEventListener("click", function () {
-      input.value = original;
-      arm(false);
-    });
-
-    // A confirmed change round-trips through htmx rather than a page
-    // navigation, so put the field back to its idle, disabled state once the
-    // save actually lands instead of leaving it stuck mid-edit.
-    document.getElementById("seerr-form").addEventListener("htmx:afterRequest", function (evt) {
-      if (evt.detail.successful) {
-        original = input.value;
-        arm(false);
-      }
-    });
-  })();
-</script>
+</section>
 {% endblock %}

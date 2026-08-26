@@ -87,7 +87,7 @@ async def test_a_second_config_row_is_rejected(session: AsyncSession) -> None:
     await get_config(session)
     await session.commit()
 
-    session.add(Config(id=2, seerr_url="http://elsewhere"))
+    session.add(Config(id=2, prowlarr_url="http://elsewhere"))
     with pytest.raises(IntegrityError):
         await session.commit()
 
