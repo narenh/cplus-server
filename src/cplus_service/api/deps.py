@@ -131,3 +131,18 @@ def require_request_manager(auth: SeerrAuth) -> None:
             status.HTTP_403_FORBIDDEN,
             "This action is limited to users who can manage requests.",
         )
+
+
+def require_admin(auth: SeerrAuth) -> None:
+    """Refuse a caller who is not a Seerr admin.
+
+    Stricter than :func:`require_request_manager` — ``MANAGE_REQUESTS`` does
+    not imply ``ADMIN``, only the reverse. Checked here rather than left to
+    Seerr, which has no opinion on this endpoint at all: it is config this
+    service owns, not a passthrough call.
+    """
+    if not auth.user.is_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This action is limited to admins.",
+        )

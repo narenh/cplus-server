@@ -31,7 +31,7 @@ from cplus_service.db.models import (
 )
 from cplus_service.quality.models import QualityProfile as ProfileSchema
 
-from .conftest import PROWLARR_URL, SEERR_URL, make_action
+from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, make_action
 
 GB = 1024**3
 PLEX_API = "https://plex.tv/api/v2"
@@ -284,46 +284,80 @@ async def test_saving_config_stores_the_values(
     response = await client.post(
         "/admin/config",
         data={
-            "seerr_url": f"{SEERR_URL}/",
             "prowlarr_url": f"{PROWLARR_URL}/",
             "prowlarr_api_key": "the-key",
             "preferred_indexer_id": "3",
+            "tmdb_bearer_token": "the-tmdb-token",
         },
     )
     assert response.status_code == 200
 
     config = (await db.execute(select(Config))).scalar_one()
-    assert config.seerr_url == SEERR_URL  # trailing slash normalised away
+    assert config.prowlarr_url == PROWLARR_URL  # trailing slash normalised away
     assert config.prowlarr_api_key == "the-key"
     assert config.preferred_indexer_id == 3
+    assert config.tmdb_bearer_token == "the-tmdb-token"
 
 
-async def test_a_blank_api_key_leaves_the_saved_one_alone(
+async def test_saving_config_does_not_touch_the_seerr_url(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    # Seerr host changes are a separate, destructive flow at its own endpoint
+    # — the ordinary Save button never carries a seerr_url field at all.
+    await signed_in(client, db)
+    await client.post(
+        "/admin/config",
+        data={
+            "prowlarr_url": PROWLARR_URL,
+            "prowlarr_api_key": "",
+            "preferred_indexer_id": "",
+            "tmdb_bearer_token": "",
+        },
+    )
+
+    await db.refresh(configured)
+    assert configured.seerr_url == SEERR_URL
+
+
+async def test_a_blank_api_key_and_token_leave_the_saved_ones_alone(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
     await signed_in(client, db)
     await client.post(
         "/admin/config",
         data={
-            "seerr_url": SEERR_URL,
             "prowlarr_url": PROWLARR_URL,
             "prowlarr_api_key": "",
             "preferred_indexer_id": "",
+            "tmdb_bearer_token": "",
         },
     )
 
     await db.refresh(configured)
     assert configured.prowlarr_api_key == "prowlarr-key"
+    assert configured.tmdb_bearer_token == TMDB_BEARER_TOKEN
     # Empty means "All indexers", which is null rather than a sentinel.
     assert configured.preferred_indexer_id is None
 
 
-async def test_the_saved_api_key_is_never_rendered_into_the_page(
+async def test_the_saved_api_key_and_tmdb_token_are_never_rendered_into_the_page(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
     await signed_in(client, db)
     response = await client.get("/admin/config")
     assert "prowlarr-key" not in response.text
+    assert TMDB_BEARER_TOKEN not in response.text
+
+
+async def test_the_seerr_url_field_is_disabled_on_the_config_page(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    await signed_in(client, db)
+    response = await client.get("/admin/config")
+    assert (
+        f'<input type="url" id="seerr_url" name="seerr_url" value="{SEERR_URL}" disabled>'
+        in response.text
+    )
 
 
 async def test_changing_the_seerr_url_signs_out_every_other_device(
@@ -339,13 +373,8 @@ async def test_changing_the_seerr_url_signs_out_every_other_device(
     await db.commit()
 
     response = await client.post(
-        "/admin/config",
-        data={
-            "seerr_url": "http://a-different-seerr.test:5055",
-            "prowlarr_url": PROWLARR_URL,
-            "prowlarr_api_key": "",
-            "preferred_indexer_id": "",
-        },
+        "/admin/config/seerr-url",
+        data={"seerr_url": "http://a-different-seerr.test:5055"},
     )
     assert response.status_code == 200
     assert "signed out" in response.text
@@ -358,10 +387,15 @@ async def test_changing_the_seerr_url_signs_out_every_other_device(
     # ...but the admin who just made the change is still signed in.
     assert (await client.get("/admin/config", follow_redirects=False)).status_code == 200
 
+    await db.refresh(configured)
+    assert configured.seerr_url == "http://a-different-seerr.test:5055"
 
-async def test_saving_config_without_changing_the_seerr_url_keeps_sessions(
+
+async def test_saving_config_never_changes_the_seerr_url_even_if_smuggled_in(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
+    # POST /admin/config has no seerr_url parameter at all, so even a client
+    # that sends one has it silently ignored rather than acted on.
     admin = await signed_in(client, db)
     await remember_token(db, "some-tvos-plex-token", admin)
     await db.commit()
@@ -369,11 +403,32 @@ async def test_saving_config_without_changing_the_seerr_url_keeps_sessions(
     response = await client.post(
         "/admin/config",
         data={
-            "seerr_url": SEERR_URL,  # unchanged
+            "seerr_url": "http://a-different-seerr.test:5055",
             "prowlarr_url": PROWLARR_URL,
             "prowlarr_api_key": "",
             "preferred_indexer_id": "",
+            "tmdb_bearer_token": "",
         },
+    )
+    assert response.status_code == 200
+    assert "signed out" not in response.text
+
+    await db.refresh(configured)
+    assert configured.seerr_url == SEERR_URL
+    assert (await db.execute(select(PlexTokenSession))).scalars().first() is not None
+    assert (await db.execute(select(AdminSession))).scalars().first() is not None
+
+
+async def test_saving_the_seerr_url_unchanged_keeps_sessions(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    admin = await signed_in(client, db)
+    await remember_token(db, "some-tvos-plex-token", admin)
+    await db.commit()
+
+    response = await client.post(
+        "/admin/config/seerr-url",
+        data={"seerr_url": SEERR_URL},  # unchanged
     )
     assert response.status_code == 200
     assert "signed out" not in response.text

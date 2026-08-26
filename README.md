@@ -111,6 +111,16 @@ are worth doing deliberately as whoever runs the container:
   and if you ever suspect a session was compromised, don't stop at signing it
   out — rotate the Prowlarr API key too.
 
+There is one deliberate exception: the **TMDB bearer token**
+(`config.tmdb_bearer_token`) is stored the same way as the Prowlarr key —
+plaintext, never rendered into the admin page — but *is* handed back verbatim
+to any Seerr admin who asks, over `GET /manager/tmdb-token`. That is not an
+oversight; it exists so an admin's own tooling can pull the token for testing
+without reading it out of the database file directly. It is accepted only
+because the key is low-impact (a TMDB read token, unrelated to this service's
+own data) and trivially rotated from TMDB's side. Don't reuse this pattern for
+anything higher-stakes than that.
+
 Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
 publishing the app's port directly) is already in place — that's what keeps
 the admin UI itself from being the softer target.
@@ -352,7 +362,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `plex_client_identifier` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
@@ -428,7 +438,7 @@ persisted only after it has been proven to work, so a typo cannot brick config.
 
 **Changing `seerr_url` to a different instance flushes every cached identity**
 — both `plex_token_sessions` and `admin_sessions`, wholesale — from both
-`POST /admin/config` and the PIN-flow reconnect path. Every row was resolved
+`POST /admin/config/seerr-url` and the PIN-flow reconnect path. Every row was resolved
 against whichever instance was configured when it was written (permissions,
 the ADMIN bit, all of it); repointing at a different instance without
 dropping those caches would leave every device, and every signed-in browser,
@@ -454,6 +464,7 @@ flushed.
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
+| `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — for testing |
 | `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
@@ -515,7 +526,8 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 |---|---|
 | `GET /admin/login` | The only ungated admin route |
 | `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow |
-| `GET/POST /admin/config` | Seerr URL, Prowlarr, preferred indexer |
+| `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token |
+| `POST /admin/config/seerr-url` | Change Seerr host — its own destructive, confirm-gated flow |
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |

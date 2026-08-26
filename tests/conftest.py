@@ -24,6 +24,7 @@ from cplus_service.db.session import create_engine
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
 PROWLARR_API_KEY = "prowlarr-key"
+TMDB_BEARER_TOKEN = "tmdb-bearer-token"
 PLEX_TOKEN = "plex-token-abc"
 
 
@@ -72,6 +73,7 @@ async def configured(db: AsyncSession) -> Config:
         prowlarr_url=PROWLARR_URL,
         prowlarr_api_key=PROWLARR_API_KEY,
         preferred_indexer_id=None,
+        tmdb_bearer_token=TMDB_BEARER_TOKEN,
     )
     db.add(config)
     await db.commit()

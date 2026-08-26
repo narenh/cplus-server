@@ -2,12 +2,16 @@
 
 A different caller from both tvOS and the browser admin webui: it authenticates
 with a Plex token like tvOS does, but — unlike tvOS — always validates live
-against Seerr and gates on the ``MANAGE_REQUESTS`` bit, because these
-operations (grabbing a specific release directly, listing download clients,
-unrestricted search) have no action and no permission grant of their own to
-check against the cache. Named ``/manager/*`` after that gate, to keep it
-visually distinct from tvOS's ``/grab`` and ``/titles/{imdb_id}/actions`` and
-from the cookie-authenticated ``/admin/*`` webui.
+against Seerr, because these operations (grabbing a specific release directly,
+listing download clients, unrestricted search) have no action and no
+permission grant of their own to check against the cache. Named ``/manager/*``
+after that live check, to keep it visually distinct from tvOS's ``/grab`` and
+``/titles/{imdb_id}/actions`` and from the cookie-authenticated ``/admin/*``
+webui.
+
+Most of these gate on the ``MANAGE_REQUESTS`` bit; ``/tmdb-token`` is the
+exception and gates on ``ADMIN`` instead, since it has nothing to do with
+managing requests.
 """
 
 from __future__ import annotations
@@ -24,7 +28,15 @@ from ...db.models import ActivityLog, EventType
 from ...prowlarr.client import ProwlarrError
 from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import ConfigDep, DbDep, PlexTokenDep, ProwlarrDep, SeerrDep, require_request_manager
+from ..deps import (
+    ConfigDep,
+    DbDep,
+    PlexTokenDep,
+    ProwlarrDep,
+    SeerrDep,
+    require_admin,
+    require_request_manager,
+)
 from ..grab_core import execute_grab
 from ..schemas import GrabResponse, ManagerGrabRequest
 
@@ -182,3 +194,34 @@ async def list_download_clients(
             for c in clients
         ]
     }
+
+
+@router.get("/tmdb-token")
+async def tmdb_token(
+    db: DbDep, config: ConfigDep, seerr: SeerrDep, plex_token: PlexTokenDep
+) -> Any:
+    """The saved TMDB bearer token, verbatim. **Admin only.**
+
+    This is a deliberate exception to how every other secret in this service
+    is handled: the Prowlarr key never leaves the server, and the Seerr admin
+    key is never even stored (see ``/seerr/*``). Handing this one back over
+    the API trades that same discipline for convenience — it's a low-impact,
+    easily rotated key with no access to this service's own data, wanted here
+    purely so an admin's own tooling can use it for testing. Gated on the
+    ADMIN bit, not ``MANAGE_REQUESTS``, since it has nothing to do with
+    managing requests.
+    """
+    try:
+        _, auth = await authenticate_plex_token(db, seerr, plex_token)
+    except SeerrAuthError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+        ) from exc
+    except SeerrError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+        ) from exc
+
+    require_admin(auth)
+
+    return {"tmdb_bearer_token": config.tmdb_bearer_token}

@@ -52,18 +52,12 @@ async def save_config(
     request: Request,
     db: DbDep,
     admin: AdminPageDep,
-    seerr_url: str = Form(default=""),
     prowlarr_url: str = Form(default=""),
     prowlarr_api_key: str = Form(default=""),
     preferred_indexer_id: str = Form(default=""),
+    tmdb_bearer_token: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
-    reconnected = await apply_seerr_url_change(
-        db,
-        config,
-        seerr_url.strip().rstrip("/") or None,
-        keep_session_token=request.cookies.get(SESSION_COOKIE_NAME),
-    )
     config.prowlarr_url = prowlarr_url.strip().rstrip("/") or None
 
     # An empty key field means "leave it alone", so the saved key is never
@@ -71,14 +65,48 @@ async def save_config(
     if prowlarr_api_key.strip():
         config.prowlarr_api_key = prowlarr_api_key.strip()
 
+    if tmdb_bearer_token.strip():
+        config.tmdb_bearer_token = tmdb_bearer_token.strip()
+
     # Empty means the "All indexers" default, which is null and not a sentinel.
     config.preferred_indexer_id = (
         int(preferred_indexer_id) if preferred_indexer_id.strip().isdigit() else None
     )
 
-    message = "Configuration saved."
+    return templates.TemplateResponse(
+        request,
+        "partials/saved.html",
+        {"message": "Configuration saved."},
+    )
+
+
+@router.post("/config/seerr-url", response_class=HTMLResponse)
+async def save_seerr_url(
+    request: Request,
+    db: DbDep,
+    admin: AdminPageDep,
+    seerr_url: str = Form(default=""),
+) -> Response:
+    """Change the Seerr host. Its own endpoint, separate from the Save button.
+
+    Repointing at a different Seerr instance flushes every cached identity —
+    see :func:`apply_seerr_url_change` — so it gets its own confirm step in
+    the UI rather than riding along with an ordinary config save.
+    """
+    config = await get_config(db)
+    reconnected = await apply_seerr_url_change(
+        db,
+        config,
+        seerr_url.strip().rstrip("/") or None,
+        keep_session_token=request.cookies.get(SESSION_COOKIE_NAME),
+    )
+
+    message = "Seerr host saved."
     if reconnected:
-        message += " Every device and browser session has been signed out and will reconnect."
+        message = (
+            "Seerr host changed. Every device and browser session has been "
+            "signed out and will reconnect."
+        )
 
     return templates.TemplateResponse(
         request,

@@ -85,6 +85,9 @@ input[type=text], input[type=url], input[type=password], input[type=number], sel
   background: var(--bg); color: var(--ink); font: inherit;
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:disabled, select:disabled {
+  color: var(--muted); background: var(--line); cursor: not-allowed;
+}
 
 button, .button {
   font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid transparent;
@@ -95,6 +98,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.secondary, .button.secondary {
   background: transparent; color: var(--ink); border-color: var(--line);
 }
+button.destructive, .button.destructive {
+  background: var(--err); color: #fff;
+}
+.hidden { display: none !important; }
 button.link {
   background: none; border: none; color: var(--accent); padding: 0 6px; cursor: pointer;
 }

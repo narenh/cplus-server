@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.db.models import ActivityLog, Config, EventType, Grab
 
-from .conftest import PROWLARR_URL, SEERR_URL, seerr_user_payload
+from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, seerr_user_payload
 
 GB = 1024**3
 
@@ -471,3 +471,84 @@ async def test_manager_search_502s_when_seerr_is_unreachable(
 
     assert response.status_code == 502
     assert not route.called
+
+
+# --------------------------------------------------------------------------- #
+# GET /manager/tmdb-token
+#
+# The one endpoint here gated on ADMIN rather than MANAGE_REQUESTS — it has
+# nothing to do with managing requests, only with letting an admin's own
+# tooling read back a low-impact key for testing.
+# --------------------------------------------------------------------------- #
+
+MANAGE_REQUESTS_ONLY = 16
+
+
+@respx.mock
+async def test_an_admin_can_read_the_tmdb_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+
+    response = await client.get("/manager/tmdb-token", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"tmdb_bearer_token": TMDB_BEARER_TOKEN}
+
+
+@respx.mock
+async def test_a_manager_who_is_not_an_admin_cannot_read_the_tmdb_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    # MANAGE_REQUESTS is not ADMIN — this endpoint checks the stricter bit.
+    mock_seerr_auth(permissions=MANAGE_REQUESTS_ONLY)
+
+    response = await client.get("/manager/tmdb-token", headers=plex_headers)
+
+    assert response.status_code == 403
+
+
+@respx.mock
+async def test_a_regular_user_cannot_read_the_tmdb_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=32)
+
+    response = await client.get("/manager/tmdb-token", headers=plex_headers)
+
+    assert response.status_code == 403
+
+
+async def test_tmdb_token_is_null_when_never_configured(
+    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict
+) -> None:
+    from cplus_service.db.session import get_config
+
+    config = await get_config(db)
+    config.seerr_url = SEERR_URL
+    await db.commit()
+
+    with respx.mock:
+        mock_seerr_auth(permissions=2)
+        response = await client.get("/manager/tmdb-token", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"tmdb_bearer_token": None}
+
+
+@respx.mock
+async def test_tmdb_token_401s_when_seerr_rejects_the_token(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_rejects_the_token()
+    response = await client.get("/manager/tmdb-token", headers=plex_headers)
+    assert response.status_code == 401
+
+
+@respx.mock
+async def test_tmdb_token_502s_when_seerr_is_unreachable(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    seerr_is_unreachable()
+    response = await client.get("/manager/tmdb-token", headers=plex_headers)
+    assert response.status_code == 502

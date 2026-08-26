@@ -60,6 +60,13 @@ class Config(Base):
     prowlarr_api_key: Mapped[str | None] = mapped_column(String(256))
     preferred_indexer_id: Mapped[int | None] = mapped_column(Integer)
 
+    #: TMDB's v4 read-access bearer token. Stored the same way as
+    #: ``prowlarr_api_key`` — plaintext in this row, never rendered back into a
+    #: page. Unlike the Prowlarr key it is also exposed verbatim over the API
+    #: (``GET /manager/tmdb-token``, ADMIN-bit gated) for testing purposes; see
+    #: the docstring there for why that is an accepted, deliberate exception.
+    tmdb_bearer_token: Mapped[str | None] = mapped_column(String(1024))
+
     #: Stable per-install identity for the plex.tv PIN flow.  Generated on
     #: first sign-in.  It must not change between sign-ins, or every login
     #: registers a fresh device on the admin's Plex account.
