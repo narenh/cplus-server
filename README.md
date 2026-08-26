@@ -67,11 +67,6 @@ your proxy's TLS.
 7. **Assign permissions.** Users appear on the Permissions page the first time
    their client signs in, so have each user open the app once, then tick the
    actions they may use — including the built-in *Request* action.
-8. *Optional:* **switch on notifications** to be told when a user requests
-   something or runs one of your actions. It is off by default and stays off
-   until you turn it on, because it routes notification text through a relay
-   you do not run; see [Notifications](#notifications). Everything above works
-   without it.
 
 ### Environment variables
 
@@ -84,7 +79,6 @@ Only the handful that must exist before the UI does:
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
-| `CPLUS_RELAY_URL` | `https://apns.canopysf.com` | The notification relay. Only for development or a fork with its own Apple Developer account — see [Notifications](#notifications) |
 
 There is no secret key to set. Admin sessions are opaque random tokens stored in
 the database, so there is nothing to sign, rotate or leak — revoking a session
@@ -96,7 +90,7 @@ so upgrading is pull-and-restart.
 
 ### Securing a self-hosted deployment
 
-The secret this service can't avoid persisting is the Prowlarr API key
+The one secret this service can't avoid persisting is the Prowlarr API key
 (`config.prowlarr_api_key`), stored in plaintext in the SQLite file. Nothing
 in the app itself leaks it — it travels only as a request header, is never
 rendered back into a page, and never appears in an error message or log line
@@ -117,31 +111,15 @@ are worth doing deliberately as whoever runs the container:
   and if you ever suspect a session was compromised, don't stop at signing it
   out — rotate the Prowlarr API key too.
 
-The **relay API key** (`config.notification_relay_api_key`) sits in the same
-file under the same terms, and is worth notably less than the Prowlarr key: it
-identifies this instance to the notification relay for rate-limiting and abuse
-handling, and that is all it can do. It is *not* an access-control boundary
-over anyone's devices — see [Notifications](#notifications) for why isolation
-between instances does not depend on it — so someone who steals it can spend
-your notification budget and nothing else.
-
-You never see or type it: it is obtained automatically when you switch
-notifications on. If one is ever leaked, press **Reconnect** on the
-Notifications tab, which discards it and registers again.
-
-There is no APNs signing key in this file, and there is no way to put one
-there. That key belongs to the Apple Developer account that owns the app and
-signs pushes for that whole team, so it stays on the relay.
-
 There is one deliberate exception: the **TMDB bearer token**
 (`config.tmdb_bearer_token`) is stored the same way as the Prowlarr key —
 plaintext, never rendered into the admin page — but *is* handed back verbatim
-to any Seerr admin who asks, over `GET /manager/tmdb-token`. That is not an
-oversight; it exists so an admin's own tooling can pull the token for testing
-without reading it out of the database file directly. It is accepted only
-because the key is low-impact (a TMDB read token, unrelated to this service's
-own data) and trivially rotated from TMDB's side. Don't reuse this pattern for
-anything higher-stakes than that.
+to any caller who can manage requests, over `GET /manager/tmdb-token`. That is
+not an oversight; the admin app needs TMDB to turn a request's TMDB id into
+the IMDB id it searches on, so the alternative is every client shipping its own
+copy of the same key. It is accepted only because the key is low-impact (a TMDB
+read token, unrelated to this service's own data) and trivially rotated from
+TMDB's side. Don't reuse this pattern for anything higher-stakes than that.
 
 Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
 publishing the app's port directly) is already in place — that's what keeps
@@ -188,20 +166,11 @@ src/cplus_service/
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
   search/stream.py      IMDB and free-text search, NDJSON phases
-  notify/types.py       the catalogue of notification types
-  notify/messages.py    event -> the title/subtitle pair a notification shows
-  notify/prefs.py       the per-type switches; unset means enabled
-  notify/relay.py       the push relay client; also where the isolation
-                        argument between instances is written down
-  notify/service.py     who gets told, and cleaning up dead device tokens
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/notifications.py  the one line a route writes to raise a notification
-  api/routes/           register, capabilities, titles, grab, manager,
-                        request, seerr
+  api/routes/           register, titles, grab, manager, request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
-                        permissions, activity, notifications,
-                        login (Plex PIN flow)
+                        permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
   web/                  Jinja2 templates + vendored HTMX and CSS
   db/models.py          SQLAlchemy 2.0 schema
@@ -393,7 +362,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key` |
+| `config` | singleton row (CHECK-enforced): `seerr_url`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier` |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
 | `actions` | `name`, `download_client_id`, `quality_profile_id` |
@@ -402,19 +371,11 @@ stage 2; they exist now so the migration history has one starting point.
 | `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
-| `notification_preferences` | `notification_type` (PK) → `enabled`. **A missing row means enabled** |
-| `apns_devices` | `device_token` (PK) → user, `environment`, `device_name`, `last_seen_at` |
 
 `PRAGMA foreign_keys=ON` is set per connection — SQLite defaults it *off*, which
 would silently ignore every `ON DELETE` clause. Deleting a user cascades to
-permissions and to their registered devices; deleting an action nulls the
-reference but keeps the grab history; a quality profile in use by an action
-cannot be deleted.
-
-`notification_preferences` is empty on a fresh install and stays empty until an
-admin moves a switch, which is what makes "everything on by default" true with
-nothing seeded — and what lets a later release add a type that is live
-immediately, with no backfill.
+permissions; deleting an action nulls the reference but keeps the grab history;
+a quality profile in use by an action cannot be deleted.
 
 `cplus_service.db.QualityProfile` (ORM row) and
 `cplus_service.quality.QualityProfile` (pydantic rule schema) share a name.
@@ -497,17 +458,14 @@ flushed.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /capabilities` | none | `{"notifications": bool}`. Checked on launch and foreground, *before* sign-in — see [Notifications](#notifications) |
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
-| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?, media_title?, media_year?}` |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
-| `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — for testing |
-| `POST /manager/push-devices` | live Seerr | **admin only** (ADMIN bit). `{device_token, environment?, device_name?}`. Upsert; 409 when notifications are off |
-| `DELETE /manager/push-devices/{token}` | live Seerr | **admin only.** Sign-out. Own device only; never gated on the notification switch; removing an unregistered one still succeeds |
-| `POST /request` | live Seerr | `{tmdb_id, type, seasons?, media_title?, media_year?}` |
+| `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
+| `POST /request` | live Seerr | `{tmdb_id, type, seasons?}` |
 | `GET /seerr/me` | live Seerr | the caller's Seerr user, verbatim |
 | `GET /seerr/requests` | live Seerr | scoped by Seerr: own requests, or all for an admin |
 | `POST /seerr/requests/{id}/approve\|decline` | live Seerr | **admin only** |
@@ -557,14 +515,6 @@ state rather than a client omission. Both bodies reject unknown fields, so
 `/grab` cannot be handed a `download_client_id` and `/manager/grab` cannot be
 handed an `action_id`.
 
-`media_title` and `media_year` on `/grab` and `/request` are **display-only,
-and only for notifications**. Nothing is stored or matched on them. The client
-is already showing the real title and year on the detail page the button was
-pressed on, so sending them saves the server either guessing from a scene
-release name or making a TMDB call on a path that has no other reason to wait.
-Omitting them stays supported — see [Notifications](#notifications) for what
-the fallbacks produce.
-
 Because the grab body is self-contained, the server keeps **no state between
 a search/actions call and a grab** — a restart in between is harmless.
 
@@ -585,12 +535,6 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
-| `GET /admin/notifications` | The master switch, and everything it governs |
-| `POST /admin/notifications/enabled` | The master switch. Registers with the relay the first time it goes on; returns the whole panel |
-| `POST /admin/notifications/types/{type}` | Toggle one type; 404 on an unknown one |
-| `POST /admin/notifications/reconnect` | Discard this instance's relay identity and register again |
-| `POST /admin/notifications/test` | Send a sample push to every device, type switches ignored |
-| `POST /admin/notifications/devices/delete` | Remove a device (`device_token` in the body) |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
@@ -745,269 +689,6 @@ that discriminator rather than widening the enum.
 
 ---
 
-## Notifications
-
-Push notifications to admins, about things *other people* did. Configured on
-the Notifications tab, delivered to Apple through a **relay** — a public
-forwarding service that holds the APNs signing key so this install does not
-have to.
-
-**Off by default, and it stays off until you switch it on.** It is the only
-setting in the admin UI that ships off, and the reason is on the page next to
-the checkbox rather than buried here: turning it on routes notification text
-through a server you do not run, in plaintext. Everything else in this service
-works without it.
-
-### Why there is a relay at all
-
-An APNs signing key belongs to an Apple Developer *team*, not to an app. The
-`.p8` that can push to this app can push to every app on the account that owns
-it, so it cannot be handed out to self-hosters — and self-hosters cannot mint
-their own, because the app is not theirs.
-
-So the key lives on one machine its owner runs, and every install hands that
-machine a device token and two lines of text:
-
-```
-   your instance                 apns.canopysf.com              Apple
-   ─────────────                 ──────────────────              ─────
-   holds: your users'   ──────▶  holds: the .p8              ──────▶     APNs
-          device tokens          holds: nothing else
-```
-
-The relay is [`canopy-apns`](https://github.com/narenh/canopy-apns). Its README
-has the deployment and key-issuing side; what matters here is the isolation
-argument.
-
-### Isolation comes from token custody, not from the relay
-
-The obvious worry: if two instances push through the same relay, what stops one
-notifying the other's users?
-
-**Neither instance can name a device token it was never given.** An APNs device
-token is per-device, per-app and unguessable, and an instance only ever learns
-the tokens its own logged-in users hand it. `cplus.example.com` has never seen
-your users' tokens and has no way to obtain one, so it cannot address a push to
-them, whatever it sends the relay.
-
-The relay therefore keeps **no device→instance mapping at all** — no routing
-table, no ownership registry, nothing to look up. Adding one would not make the
-guarantee stronger (it is already absolute) and would create exactly the
-correlation this design does not have to hold.
-
-Two things follow, both worth being explicit about:
-
-* **The relay API key is a rate-limit identity and an abuse handle, not an
-  access-control boundary over devices.** Someone who steals yours can spend
-  your notification budget. They cannot reach your users, because the key does
-  not carry their tokens. That is exactly why you never handle one: a
-  credential protecting nothing you chose is friction, so this instance obtains
-  it automatically when you switch notifications on.
-* **The relay sees notification text in plaintext.** APNs requires that —
-  Apple has to read an alert to display it — so there is no arrangement where
-  the relay forwards without seeing. For the duration of one request it holds a
-  device token, a media title and a username. It stores none of it, and its
-  logs record the instance and the outcome rather than the content. That is
-  what the checkbox is asking you to accept, which is why it says so on its
-  face.
-
-### What a notification looks like
-
-Two lines, always. The first says what, the second says who and how:
-
-```
-The End of Oak Street (2026)      <- aps.alert.title
-Requested by Robin Example        <- aps.alert.subtitle
-```
-
-```
-I Love Boosters (2026)            <- aps.alert.title
-Robin Example: Stream Now         <- aps.alert.subtitle
-```
-
-There is deliberately **no `body`**. iOS renders a title/subtitle pair happily
-without one, and there is no third fact worth a third line — padding it out
-with the release name would bury the part that matters. The structured facts
-ride alongside `aps` under a `canopy` key, so the app can deep-link on a tap
-instead of parsing the text back apart.
-
-This service sends the relay *text*, not an APNs payload — the relay builds
-`aps` itself and refuses one sent from an instance. That is what stops any
-instance sending a silent `content-available` background wake signed with the
-relay operator's key.
-
-### Types
-
-| Type | Fires when | Subtitle |
-|---|---|---|
-| `user_requested` | Someone files a request through the built-in Request action | `Requested by {user}` |
-| `user_action` | Someone runs one of your actions on a release | `{user}: {action name}` |
-
-Both are on by default once notifications are on, and **so is any type a later
-version adds**. The rule that buys that: a type with no row in
-`notification_preferences` is enabled, so "on by default" needs nothing seeded
-and a new type needs no backfill. Adding a third is a one-line change in
-`notify/types.py` plus an emitter at the place the thing happens — the switch
-list, the storage and the defaults all follow.
-
-### Who is not notified
-
-**The person who caused the event never hears about it**, on any device they
-own. An admin who also holds actions and grabs something from tvOS gets
-nothing; a notification that fires on your own tap is the fastest way to get
-push switched off entirely. The admin app's action-free grab
-(`POST /manager/grab`) — an admin picking a release during a request approval —
-raises nothing at all, for anyone.
-
-Whether someone is an admin is decided **at registration**, not at send time:
-a row in `apns_devices` exists only because a caller passed the ADMIN check on
-`POST /manager/push-devices`. Re-validating every device against Seerr on every
-push would put an outbound call back onto a path that exists to avoid one. If
-someone stops being an admin, remove their device on the Notifications tab.
-
-### How the app knows to ask
-
-Capability discovery is **decoupled from login**, and this is the part that
-makes "the admin enabled notifications six months after everyone installed the
-app" work without asking every user to sign out and back in.
-
-`GET /capabilities` is unauthenticated and reports one thing:
-
-```json
-{ "notifications": true }
-```
-
-The contract, stated as the rule it is: **registration is driven by (OS
-permission × capability flag), never by login events.**
-
-1. On launch and on foreground, the app calls `GET /capabilities`. It is cheap;
-   there is no push-to-tell-you-about-push here.
-2. While `notifications` is `false`, the app does not prompt for OS permission
-   at all — there is nothing it could do with a grant.
-3. When the flag flips to `true`, the app prompts for permission if it has not
-   already, and on a grant calls `POST /manager/push-devices` with the token.
-4. If OS permission was already granted (from an earlier instance, or an
-   earlier configuration of this one) the app already holds a token, so a later
-   flip to `true` registers without prompting again. Permission is per app
-   install; registration is per instance.
-
-Login only decides *which* instance's `/manager/push-devices` would be called
-once both conditions hold.
-
-Two things on the server make that contract true rather than merely documented:
-
-* `POST /manager/push-devices` answers **409** while the switch is off. An app
-  that skipped the capability check does not end up holding a registration this
-  instance will never honour, and this instance does not accumulate device
-  tokens for a feature nobody switched on. That check runs before
-  authenticating: it leaks nothing `/capabilities` does not already say, and it
-  saves a live Seerr round trip on a call whose answer cannot change.
-* `DELETE /manager/push-devices/{token}` is **never** gated on the switch. An
-  app signing out — or repointing at a different instance — has to be able to
-  hand its token back to the instance it is leaving, which is exactly the
-  situation a stale registration most needs clearing in. **Unregister on
-  sign-out and on an instance switch, explicitly**, rather than hoping the
-  previous instance eventually gives up.
-
-`/capabilities` deliberately tracks the master switch *only*, not "and a relay
-key is set". An admin mid-setup would otherwise see the flag flap, and the app
-has nothing useful to do differently in that window.
-
-### Delivery
-
-Runs **after the response, as a background task with its own session**. A push
-is never on the critical path: the relay being slow must not make a grab slow,
-and the relay being down must not make one fail. Every failure is logged and
-swallowed — the event already happened and the caller is long gone.
-
-Specifics worth knowing:
-
-* **The relay's status and Apple's verdict are two different facts.** The relay
-  answers 200 whenever Apple answered, *including* a rejection, and reserves
-  non-2xx for its own problems. So a 401 (bad key), 429 (rate limit) or 503
-  (relay has no signing key) is a delivery failure and says nothing about the
-  device token. Reading one as the other would delete every registered device
-  the next time the relay had a bad afternoon.
-* **`"result": "unregistered"` means the token is dead, and only this side can
-  act on it.** The relay stores no device tokens, so it cannot delete one. The
-  row is deleted here. Apple returns this for an uninstalled app and, via
-  `BadDeviceToken`, for a sandbox token sent to production.
-* **No retry from this side.** The relay already retries what is worth retrying
-  against Apple — a stale provider token, a throttle — and knows things this
-  side cannot. Retrying again here would double a burst the relay is
-  rate-limiting us for, on a background task nobody is waiting on.
-* **Sandbox and production are per device.** A token minted by a development
-  build only works against Apple's sandbox host, so `environment` is stored on
-  the device row and the app declares it at registration; it is a property of
-  the token, not a preference. The relay picks Apple's host from it — only this
-  side knows which build a token came from.
-* **An unrecognised `result` is treated as a failure, not a delivery.** Guessing
-  "probably fine" from a relay speaking a dialect we do not know is how a dead
-  device token stays in the table forever.
-
-### Setting it up
-
-**Tick one box.** That is the whole of it:
-
-1. Notifications tab → **Enable push notifications**, having read the sentence
-   next to it.
-2. Open the app on a device signed in as an admin. It registers itself.
-3. Press **Send a test notification**.
-
-There is no relay URL to enter and no API key to obtain. Switching the box on
-registers this instance with the relay and stores the credential it hands back;
-turning it off and on again reuses that credential rather than burning a new
-one.
-
-**If registering fails, the box comes back off** and the page says why. That is
-deliberate: an instance left switched on with no relay identity would report
-itself capable through `GET /capabilities`, accept device registrations, and
-then silently send nothing — which was exactly what the old settings form was
-good at producing.
-
-**Reconnect** discards this instance's relay identity and registers again. It
-is the recovery path for the one failure you cannot otherwise get out of: a key
-the relay no longer accepts, because it was revoked or because the relay's
-signing secret was rotated. Nothing can be repaired in place — the relay stores
-no keys, so there is nothing to look up — which makes registering again both the
-fix and the only fix. Registered devices are untouched.
-
-#### Why there is no relay setting
-
-Running a relay means holding an Apple Developer account's signing key, so in
-practice no self-hoster will ever run one. A URL box was therefore a field with
-exactly one possible value, sitting next to a credential that protects nothing
-the admin chose — isolation between instances comes from token custody, not from
-the key. Together they made a piece of plumbing look like a decision, and put a
-credential in front of someone whose actual intent was "I would like
-notifications".
-
-For development, or a fork with its own Apple Developer account — the only two
-cases that were ever real — set `CPLUS_RELAY_URL`.
-
-**Turning the switch back off does not delete registered devices.** They go
-inert — nothing is sent, nothing new may register, `/capabilities` reports
-`false` — and come back when it is switched on again. An admin toggling this
-while investigating something should not silently cost every admin their
-registration, with no way back but asking each of them to relaunch the app.
-
-### Upgrading from a version that held its own APNs key
-
-Earlier versions stored `apns_team_id`, `apns_key_id`, `apns_bundle_id` and
-`apns_private_key` on the config row. The migration **drops all four**, and the
-signing key with them: anything in that column was either the wrong file or a
-key whose owner should now rotate it, and carrying it forward would leave a
-secret in the config row that nothing reads.
-
-`notifications_enabled` lands `false` for everyone, including installs where
-push was working before the upgrade. That is not a regression to fix — the new
-arrangement sends text through a third party, and no migration gets to make
-that decision on an admin's behalf. Device registrations and per-type switches
-are kept, so an admin who does switch it on finds their configuration where
-they left it.
-
----
-
 ## Admin web UI
 
 Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
@@ -1043,17 +724,10 @@ instead of a broken profile.
 * A quality profile still used by an action cannot be deleted; the page says
   which action is holding it.
 * An empty API-key field means "leave the saved key alone", and the saved key is
-  never rendered back into the page. The relay API key follows the same rule.
-* The Notifications tab hides everything below the master switch while it is
-  off, rather than greying it out. A page of disabled controls invites an admin
-  to fill them in and wonder why nothing happens, and none of those settings
-  mean anything until the switch is on.
+  never rendered back into the page.
 * Removing a user is immediate: deleting the row cascades to their browser
-  sessions, their stored Plex-token mappings *and* their registered devices.
+  sessions *and* to their stored Plex-token mappings.
   Revoking a single permission is not immediate — see below.
-* Removing a device on the Notifications tab is not permanent on its own: the
-  app re-registers on its next launch. Signing out of the app is what stops it
-  for good. The page says so rather than implying otherwise.
 
 ---
 

@@ -42,10 +42,11 @@
          placeholder="{{ '············ (unchanged)' if config.tmdb_bearer_token else 'required' }}">
   <p class="hint">
     {% if config.tmdb_bearer_token %}A token is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-    A TMDB v4 read-access token, for testing. Unlike the keys above, this one
-    is readable by any admin over the API (<code>GET /manager/tmdb-token</code>)
-    — fine for a low-impact, easily rotated key, not a place to put anything
-    more sensitive.
+    A TMDB v4 read-access token. Unlike the keys above, this one is readable
+    over the API (<code>GET /manager/tmdb-token</code>) by anyone who can
+    manage requests, because the admin app needs it to look titles up — fine
+    for a low-impact, easily rotated key, not a place to put anything more
+    sensitive.
   </p>
 
   <div class="row">
