@@ -1,8 +1,20 @@
 """Quality profiles and the recommendation rule engine."""
 
-from .engine import apply_filters, preferred_indexer_candidates, rank, recommend
+from .engine import (
+    Judgement,
+    apply_filters,
+    choice_index,
+    explain,
+    matches,
+    preferred_indexer_candidates,
+    rank,
+    recommend,
+    rejection,
+)
 from .models import (
     AudioMatchRule,
+    Choice,
+    ChoiceMatch,
     ExcludePrereleaseRule,
     HdrMatchRule,
     KeywordExcludeRule,
@@ -15,13 +27,17 @@ from .models import (
     SizeDirection,
     SizeRule,
     SourceOrderRule,
+    TieBreak,
     default_profile,
 )
 
 __all__ = [
     "AudioMatchRule",
+    "Choice",
+    "ChoiceMatch",
     "ExcludePrereleaseRule",
     "HdrMatchRule",
+    "Judgement",
     "KeywordExcludeRule",
     "QualityProfile",
     "QualityRule",
@@ -32,9 +48,14 @@ __all__ = [
     "SizeDirection",
     "SizeRule",
     "SourceOrderRule",
+    "TieBreak",
     "apply_filters",
+    "choice_index",
     "default_profile",
+    "explain",
+    "matches",
     "preferred_indexer_candidates",
     "rank",
     "recommend",
+    "rejection",
 ]

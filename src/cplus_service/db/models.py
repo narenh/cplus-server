@@ -146,12 +146,21 @@ class User(Base):
 
 
 class QualityProfile(Base):
-    """A named, ordered list of rules.
+    """A named profile: filter rules, ordered choices, and tie-breakers.
 
     ``rules`` is the JSON serialisation of
     :class:`cplus_service.quality.models.QualityProfile.rules` — an ordered list
     of rule objects, each discriminated by its ``type`` key.  Order is
     meaningful and must be preserved on read.
+
+    ``choices`` is the same for
+    :class:`cplus_service.quality.models.Choice`: an ordered list of "I'd
+    rather have this kind of release" rungs, applied ahead of the preference
+    rules.  It is a separate column rather than more entries in ``rules``
+    because it is a different shape of thing, and because leaving ``rules``
+    untouched means every profile stored before choices existed still loads and
+    still behaves identically — an empty choice list is "one pool", which is
+    what those profiles always were.
     """
 
     __tablename__ = "quality_profiles"
@@ -159,6 +168,9 @@ class QualityProfile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
     rules: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    choices: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
 
     actions: Mapped[list[Action]] = relationship(back_populates="quality_profile")
 

@@ -8,6 +8,8 @@ all show up here.
 
 from __future__ import annotations
 
+import re
+
 import httpx
 import pytest
 import respx
@@ -63,6 +65,14 @@ async def profile_named(db: AsyncSession, name: str) -> QualityProfile | None:
 async def profile_names(db: AsyncSession) -> list[str]:
     result = await db.execute(select(QualityProfile.name).order_by(QualityProfile.name))
     return list(result.scalars().all())
+
+
+
+def ticked_resolutions(html: str) -> list[str]:
+    """The resolution boxes the choice rows come back with ticked, in row order."""
+    return re.findall(
+        r'name="choices-\d+-resolutions"\s+value="([^"]+)"\s+checked', html
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -659,10 +669,61 @@ async def test_the_rule_builder_can_add_a_rule(
     await signed_in(client, db)
     response = await client.post(
         "/admin/quality-profiles/rows",
-        data={"op": "add", "rule_type": "audio_match", "rules-0-type": "exclude_prerelease"},
+        data={
+            "op": "add",
+            "kind": "preference",
+            "rule_type_preference": "audio_match",
+            "rules-0-type": "exclude_prerelease",
+        },
     )
     assert response.status_code == 200
     assert 'name="rules-1-type" value="audio_match"' in response.text
+
+
+async def test_each_section_adds_from_its_own_dropdown(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Both dropdowns are inside the one form and both are submitted, so the
+    # button has to say which one it meant.
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/rows",
+        data={
+            "op": "add",
+            "kind": "filter",
+            "rule_type_filter": "size_cap_gb",
+            "rule_type_preference": "audio_match",
+        },
+    )
+    assert response.status_code == 200
+    assert 'value="size_cap_gb"' in response.text
+    assert 'name="rules-0-type" value="audio_match"' not in response.text
+
+
+async def test_a_move_never_crosses_the_filter_boundary(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Filters have no order and tie-breakers do; sliding one list into the
+    # other would look like a change and be none.
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/rows",
+        data={
+            "op": "down",
+            "index": "0",
+            "rules-0-type": "size_cap_gb",
+            "rules-0-value": "25",
+            "rules-1-type": "size",
+            "rules-1-direction": "largest",
+        },
+    )
+
+    order = [
+        line.split('value="')[1].split('"')[0]
+        for line in response.text.splitlines()
+        if 'name="rules-' in line and "-type" in line
+    ]
+    assert order == ["size_cap_gb", "size"]
 
 
 async def test_a_profile_in_use_cannot_be_deleted(
@@ -691,6 +752,227 @@ async def test_an_unused_profile_can_be_deleted(
     )
     assert response.status_code == 303
     assert await profile_named(db, "Spare") is None
+
+
+# --------------------------------------------------------------------------- #
+# Choices, and the preview
+# --------------------------------------------------------------------------- #
+
+
+#: The profile an admin could not build before choices existed: two wants with
+#: different size rules, ranked one above the other.
+FOUR_K_OR_BIG_HD = {
+    "name": "4K or big HD",
+    "rules-0-type": "exclude_prerelease",
+    "rules-0-enabled": "on",
+    "choices-0-present": "1",
+    "choices-0-resolutions": "2160p",
+    "choices-0-sources": "WEB-DL",
+    "choices-0-tie_break": "biggest",
+    "choices-1-present": "1",
+    "choices-1-resolutions": "1080p",
+    "choices-1-max_size_gb": "15",
+    "choices-1-tie_break": "biggest",
+}
+
+
+async def test_choices_are_stored_in_the_order_they_were_submitted(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles", data=FOUR_K_OR_BIG_HD, follow_redirects=False
+    )
+    assert response.status_code == 303
+
+    profile = await profile_named(db, "4K or big HD")
+    assert profile is not None
+    assert [choice["match"]["resolutions"] for choice in profile.choices] == [
+        ["2160p"],
+        ["1080p"],
+    ]
+    assert profile.choices[0]["match"]["max_size_gb"] is None
+    assert profile.choices[1]["match"]["max_size_gb"] == 15.0
+    assert [choice["tie_break"] for choice in profile.choices] == ["biggest", "biggest"]
+
+    # And it round-trips into the schema the engine consumes.
+    reparsed = ProfileSchema(
+        name=profile.name, rules=profile.rules, choices=profile.choices
+    )
+    assert len(reparsed.choices) == 2
+
+
+async def test_a_choice_with_nothing_ticked_survives_a_round_trip(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # It submits no fields of its own, so without the hidden marker the server
+    # would read the row as deleted — and an admin would watch a row they just
+    # added disappear when they touched anything else.
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/rows",
+        data={"op": "", "choices-0-present": "1", "choices-1-present": "1"},
+    )
+    assert response.status_code == 200
+    assert 'name="choices-0-present"' in response.text
+    assert 'name="choices-1-present"' in response.text
+
+
+async def test_the_choice_builder_reorders_and_removes(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    form = {
+        "target": "choices",
+        "choices-0-present": "1",
+        "choices-0-resolutions": "2160p",
+        "choices-1-present": "1",
+        "choices-1-resolutions": "1080p",
+    }
+
+    moved = await client.post(
+        "/admin/quality-profiles/rows", data={**form, "op": "up", "index": "1"}
+    )
+    assert ticked_resolutions(moved.text) == ["1080p", "2160p"]
+
+    removed = await client.post(
+        "/admin/quality-profiles/rows", data={**form, "op": "remove", "index": "0"}
+    )
+    assert 'name="choices-1-present"' not in removed.text
+
+
+async def test_the_builder_reads_the_profile_back_in_plain_english(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # The complaint this whole page answers: which rules rank, which filter,
+    # and what does the combination actually do?
+    await signed_in(client, db)
+    response = await client.post("/admin/quality-profiles/rows", data=FOUR_K_OR_BIG_HD)
+
+    assert response.status_code == 200
+    assert "4K · WEB-DL, biggest file" in response.text
+    assert "1080p · under 15 GB, biggest file" in response.text
+    assert "Never grab" in response.text
+
+
+async def test_a_catch_all_choice_above_another_is_flagged(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/rows",
+        data={
+            "choices-0-present": "1",
+            "choices-1-present": "1",
+            "choices-1-resolutions": "2160p",
+        },
+    )
+    assert "no later choice can ever apply" in response.text
+
+
+async def test_the_preview_ranks_the_sample_releases_through_the_draft(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Against the unsaved form, and with nothing configured — the sample cast
+    # needs no Prowlarr and no saved profile.
+    await signed_in(client, db)
+    response = await client.post("/admin/quality-profiles/preview", data=FOUR_K_OR_BIG_HD)
+
+    assert response.status_code == 200
+    assert "2160p.WEB-DL" in response.text
+    assert "1st choice" in response.text
+    assert "2nd choice" in response.text
+    # Nothing was saved by previewing.
+    assert await profile_named(db, "4K or big HD") is None
+
+
+async def test_the_preview_names_the_filter_that_dropped_a_release(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/preview",
+        data={"rules-0-type": "exclude_prerelease", "rules-0-enabled": "on"},
+    )
+
+    assert "dropped: pre-release" in response.text
+    # The dropped release is still listed — a candidate silently missing is the
+    # confusion the preview exists to end.
+    assert "HDTS" in response.text
+
+
+async def test_the_preview_survives_a_half_typed_rule(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # It redraws on every keystroke, so an invalid draft is an ordinary state
+    # here rather than an error worth a status code.
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/preview",
+        data={"rules-0-type": "hdr_match", "rules-0-values": "NOT_A_TAG"},
+    )
+
+    assert response.status_code == 200
+    assert "not valid yet" in response.text
+
+
+@respx.mock
+async def test_the_preview_can_run_a_real_prowlarr_search(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "title": "Real.Film.2024.2160p.WEB-DL.DDP5.1.Atmos-FLUX",
+                    "guid": "real-uhd",
+                    "indexerId": 1,
+                    "size": 25 * GB,
+                }
+            ],
+        )
+    )
+    await signed_in(client, db)
+
+    response = await client.post(
+        "/admin/quality-profiles/preview",
+        data={
+            **FOUR_K_OR_BIG_HD,
+            "preview_source": "prowlarr",
+            "preview_query": "tt0111161",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Real.Film.2024.2160p" in response.text
+
+
+async def test_a_live_preview_without_prowlarr_says_so_instead_of_failing(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Losing a half-built profile to a failed lookup would be a worse answer
+    # than "that didn't work".
+    await signed_in(client, db)
+    response = await client.post(
+        "/admin/quality-profiles/preview",
+        data={"preview_source": "prowlarr", "preview_query": "anything"},
+    )
+
+    assert response.status_code == 200
+    assert "Prowlarr is not configured yet" in response.text
+
+
+async def test_the_profile_list_reads_profiles_back_rather_than_listing_rule_types(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    await client.post("/admin/quality-profiles", data=FOUR_K_OR_BIG_HD)
+
+    response = await client.get("/admin/quality-profiles")
+
+    assert "4K · WEB-DL, biggest file" in response.text
+    assert "exclude_prerelease" not in response.text
 
 
 # --------------------------------------------------------------------------- #

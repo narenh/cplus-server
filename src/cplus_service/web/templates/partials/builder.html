@@ -1,0 +1,84 @@
+{# The whole profile builder: what it does, then the three things it is made of.
+
+   Re-rendered wholesale after every add/remove/move, because the reading at the
+   top spans all three sections and would otherwise drift out of date. #}
+
+{% include "partials/profile_summary.html" %}
+
+<section class="builder-section filters">
+  <h2><span class="step">1</span> Never grab</h2>
+  <p class="lede">
+    A filter removes releases from consideration entirely — nothing below can
+    bring one back. Order does not matter here: one filter anywhere applies to
+    everything.
+  </p>
+
+  {% with section = "filter",
+          empty_text = "No filters. Every release an indexer returns is eligible." %}
+    {% include "partials/rule_rows.html" %}
+  {% endwith %}
+
+  <div class="row add-rule">
+    {# One select per section, distinctly named: both are inside the same form,
+       so a shared name would make "Add tie-breaker" read the filter dropdown. #}
+    <select name="rule_type_filter" aria-label="Filter to add">
+      {% for spec in rule_specs if spec.kind == "filter" %}
+        <option value="{{ spec.type }}">{{ spec.label }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="secondary"
+            hx-post="/admin/quality-profiles/rows"
+            hx-include="closest form"
+            hx-vals='{"op": "add", "target": "rules", "kind": "filter"}'
+            hx-target="#builder" hx-swap="innerHTML">Add filter</button>
+  </div>
+</section>
+
+<section class="builder-section choices">
+  <h2><span class="step">2</span> Prefer, in order</h2>
+  <p class="lede">
+    Each row describes a <em>kind</em> of release you would rather have. Every
+    release matching the 1st choice beats every release matching the 2nd,
+    whatever the tie-breakers say. A release matching none of them ranks last —
+    still eligible, just last. This is how "the biggest 4K WEB copy, or failing
+    that the biggest 1080p under 15 GB" gets said.
+  </p>
+
+  {% include "partials/choice_rows.html" %}
+
+  <div class="row add-rule">
+    <button type="button" class="secondary"
+            hx-post="/admin/quality-profiles/rows"
+            hx-include="closest form"
+            hx-vals='{"op": "add", "target": "choices"}'
+            hx-target="#builder" hx-swap="innerHTML">Add choice</button>
+  </div>
+</section>
+
+<section class="builder-section preferences">
+  <h2><span class="step">3</span> Break ties by</h2>
+  <p class="lede">
+    Used inside a choice, when several releases are the same kind. Order matters:
+    the first decides, each later one breaks the ties the previous one left. A
+    choice that takes "the biggest file" has already decided, so these only
+    settle what it could not.
+  </p>
+
+  {% with section = "preference",
+          empty_text = "No tie-breakers. Equally-matched releases keep the order the indexer gave them." %}
+    {% include "partials/rule_rows.html" %}
+  {% endwith %}
+
+  <div class="row add-rule">
+    <select name="rule_type_preference" aria-label="Tie-breaker to add">
+      {% for spec in rule_specs if spec.kind == "preference" %}
+        <option value="{{ spec.type }}">{{ spec.label }}</option>
+      {% endfor %}
+    </select>
+    <button type="button" class="secondary"
+            hx-post="/admin/quality-profiles/rows"
+            hx-include="closest form"
+            hx-vals='{"op": "add", "target": "rules", "kind": "preference"}'
+            hx-target="#builder" hx-swap="innerHTML">Add tie-breaker</button>
+  </div>
+</section>

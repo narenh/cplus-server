@@ -1,45 +1,64 @@
 {% extends "base.html" %}
 {% block content %}
-<form class="card" method="post" action="/admin/quality-profiles">
-  {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% endif %}
-
-  <label for="name">Profile name</label>
-  <input type="text" id="name" name="name" value="{{ name }}" placeholder="4K Remux" required>
-
-  <h2>Rules</h2>
-  <p class="lede">
-    Filters remove candidates outright; their position does not matter.
-    Preferences rank whatever survives, and their order does — the first
-    preference decides, each later one breaks the previous one's ties.
-  </p>
-
-  <div id="rule-rows">
-    {% include "partials/rule_rows.html" %}
+{% if errors %}
+  <div class="card err-card">
+    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
   </div>
+{% endif %}
 
-  <div class="row add-rule">
-    <select name="rule_type" id="rule_type">
-      <optgroup label="Filters">
-        {% for spec in rule_specs if spec.kind == "filter" %}
-          <option value="{{ spec.type }}">{{ spec.label }}</option>
-        {% endfor %}
-      </optgroup>
-      <optgroup label="Preferences">
-        {% for spec in rule_specs if spec.kind == "preference" %}
-          <option value="{{ spec.type }}">{{ spec.label }}</option>
-        {% endfor %}
-      </optgroup>
-    </select>
-    <button type="button" class="secondary"
-            hx-post="/admin/quality-profiles/rows"
-            hx-include="closest form"
-            hx-vals='{"op": "add"}'
-            hx-target="#rule-rows" hx-swap="innerHTML">Add rule</button>
-  </div>
+<div class="profile-editor">
+  <form class="card" method="post" action="/admin/quality-profiles" id="profile-form">
+    {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% endif %}
 
-  <div class="row">
-    <button type="submit">Save profile</button>
-    <a class="secondary button" href="/admin/quality-profiles">Cancel</a>
-  </div>
-</form>
+    <label for="name">Profile name</label>
+    <input type="text" id="name" name="name" value="{{ name }}" placeholder="4K, or 1080p if that's all there is" required>
+
+    <div id="builder">
+      {% include "partials/builder.html" %}
+    </div>
+
+    <div class="row">
+      <button type="submit">Save profile</button>
+      <a class="secondary button" href="/admin/quality-profiles">Cancel</a>
+    </div>
+  </form>
+
+  {# The preview sits outside the form so its controls are never saved with the
+     profile, and pulls the draft in with hx-include instead. #}
+  <aside class="card preview-card">
+    <h2>What this would grab</h2>
+    <p class="lede">
+      Re-ranked as you edit, against the unsaved rules — including the releases
+      they throw away.
+    </p>
+
+    <div id="preview-controls" class="preview-controls">
+      <label class="check">
+        <input type="radio" name="preview_source" value="" checked>
+        Sample releases
+      </label>
+      <label class="check">
+        <input type="radio" name="preview_source" value="prowlarr">
+        A real search
+      </label>
+      <div class="row">
+        <input type="text" name="preview_query" placeholder="tt0111161, or a film title">
+        <button type="button" class="secondary" id="preview-run">Search</button>
+      </div>
+    </div>
+
+    <div id="preview"
+         hx-post="/admin/quality-profiles/preview"
+         hx-include="#profile-form, #preview-controls"
+         hx-target="this" hx-swap="innerHTML"
+         hx-trigger="load,
+                     change from:#profile-form delay:400ms,
+                     change from:#preview-controls,
+                     keyup[key=='Enter'] from:#preview-controls,
+                     click from:#preview-run,
+                     htmx:afterSwap from:#builder">
+      <p class="empty">Loading…</p>
+    </div>
+  </aside>
+</div>
 {% endblock %}

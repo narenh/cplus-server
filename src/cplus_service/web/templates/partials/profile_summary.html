@@ -1,0 +1,46 @@
+{# The profile read back in plain English, generated from the same objects the
+   engine consumes. It is the top of the builder because it is the question an
+   admin actually has — not "which controls are set" but "what will this do?" #}
+
+<div class="profile-summary">
+  {% if summary is none %}
+    <p class="err">
+      Something below is not valid yet, so there is nothing to read back. Save to
+      see what needs fixing.
+    </p>
+  {% elif summary.is_empty %}
+    <p class="muted">
+      This profile takes anything, in the order the indexer listed it. Add a
+      choice below to say what you would rather have.
+    </p>
+  {% else %}
+    <dl>
+      {% if summary.never_grab %}
+        <dt>Never grab</dt>
+        <dd>{{ summary.never_grab|join("; ") }}</dd>
+      {% endif %}
+
+      {% if summary.choices %}
+        <dt>Prefer</dt>
+        <dd>
+          <ol class="summary-choices">
+            {% for reading in summary.choices %}<li>{{ reading }}</li>{% endfor %}
+            <li class="muted">everything else</li>
+          </ol>
+        </dd>
+      {% endif %}
+
+      {% if summary.tie_breaks %}
+        <dt>Break ties by</dt>
+        <dd>{{ summary.tie_breaks|join(", then ") }}</dd>
+      {% endif %}
+    </dl>
+
+    {% if summary.catch_all_choice is not none %}
+      <p class="hint warn">
+        The {{ ordinal(summary.catch_all_choice) }} choice matches anything, so
+        nothing after it can ever apply.
+      </p>
+    {% endif %}
+  {% endif %}
+</div>

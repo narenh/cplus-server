@@ -277,3 +277,86 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .rule-head .kind { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 .rule-controls { margin-left: auto; display: flex; gap: 4px; }
 .add-rule select { width: auto; min-width: 220px; }
+
+/* The three sections answer three different questions, and the numbered step
+   is what says so at a glance — a filter and a tie-breaker look alike as form
+   controls, which is exactly the confusion this layout is here to remove. */
+.builder-section { margin: 0 0 28px; }
+.builder-section > h2 { display: flex; align-items: center; gap: 8px; }
+.builder-section .step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--line); color: var(--ink);
+  font-size: 12px; font-weight: 700;
+}
+.builder-section.filters .step { background: color-mix(in srgb, var(--filter) 35%, transparent); }
+.builder-section.choices .step { background: color-mix(in srgb, var(--ok) 30%, transparent); }
+.builder-section.preferences .step { background: color-mix(in srgb, var(--preference) 30%, transparent); }
+.builder-section .lede { font-size: 13px; margin-bottom: 12px; }
+
+/* A choice is a condition plus an ordering, so it gets more room than a rule
+   row and its own accent — it is neither a filter nor a tie-breaker. */
+.choice {
+  border: 1px solid var(--line); border-left: 4px solid var(--ok);
+  border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
+}
+.choice-reading { font-size: 13px; }
+.choice-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.choice-field .choice-label {
+  display: block; font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); margin-bottom: 6px;
+}
+.choice-field .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.choice-field label.check { font-size: 13px; }
+.choice-field .hint { margin-bottom: 0; }
+.choice-field input.dim { opacity: .55; }
+
+/* The profile in plain English, at the top of the builder. */
+.profile-summary {
+  border: 1px solid var(--line); border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  padding: 12px 14px; margin-bottom: 24px;
+}
+.profile-summary dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.profile-summary dt {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); padding-top: 2px;
+}
+.profile-summary dd { margin: 0; }
+.profile-summary .summary-choices { margin: 0; padding-left: 18px; }
+.profile-summary .hint { margin-bottom: 0; }
+
+.profile-reading .reading-part { display: block; }
+.profile-reading .reading-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  opacity: .8;
+}
+
+/* Editor and preview side by side on a wide window, stacked on a narrow one:
+   the preview is a second opinion on the form, so it wants to be visible at
+   the same time as the controls it is judging. */
+.profile-editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.profile-editor > .card { align-self: start; }
+@media (max-width: 1000px) {
+  .profile-editor { grid-template-columns: minmax(0, 1fr); }
+}
+.preview-card { position: sticky; top: 16px; }
+.preview-card h2 { margin-top: 0; }
+.preview-controls { margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+.preview-controls .row { flex-basis: 100%; }
+
+table.preview { font-size: 13px; }
+table.preview td { vertical-align: top; padding: 7px 8px; }
+table.preview tr.winner td { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+table.preview tr.dropped td { opacity: .55; }
+table.preview tr.dropped td.release { text-decoration: line-through; }
+table.preview .tags { display: block; margin-top: 3px; }
+table.preview .tag {
+  display: inline-block; margin-right: 4px; padding: 0 5px; border-radius: 3px;
+  background: var(--line); color: var(--muted); font-size: 11px;
+}
+table.preview .verdict { display: block; }
+table.preview .dropped-by { color: var(--err); }
