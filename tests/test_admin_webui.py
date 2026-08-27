@@ -841,13 +841,13 @@ async def test_the_choice_builder_reorders_and_removes(
     assert 'name="choices-1-present"' not in removed.text
 
 
-async def test_the_builder_reads_the_profile_back_in_plain_english(
+async def test_the_profile_reads_back_in_plain_english(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
     # The complaint this whole page answers: which rules rank, which filter,
     # and what does the combination actually do?
     await signed_in(client, db)
-    response = await client.post("/admin/quality-profiles/rows", data=FOUR_K_OR_BIG_HD)
+    response = await client.post("/admin/quality-profiles/preview", data=FOUR_K_OR_BIG_HD)
 
     assert response.status_code == 200
     assert "4K · WEB-DL, biggest file" in response.text
@@ -855,19 +855,35 @@ async def test_the_builder_reads_the_profile_back_in_plain_english(
     assert "Never grab" in response.text
 
 
+async def test_the_reading_travels_with_the_preview_so_it_cannot_go_stale(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # The builder only re-renders on add/remove/move. If the reading lived
+    # there it would ignore the checkbox you just ticked, and a confident wrong
+    # description is worse than none — so it rides on the preview instead,
+    # which redraws on every edit, and swaps itself back in out of band.
+    await signed_in(client, db)
+    rows = await client.post("/admin/quality-profiles/rows", data=FOUR_K_OR_BIG_HD)
+    preview = await client.post("/admin/quality-profiles/preview", data=FOUR_K_OR_BIG_HD)
+
+    assert 'id="profile-reading"' not in rows.text
+    assert 'id="profile-reading" hx-swap-oob="true"' in preview.text
+
+
 async def test_a_catch_all_choice_above_another_is_flagged(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
+    # Every choice below it is dead, and nothing about the form says so.
     await signed_in(client, db)
     response = await client.post(
-        "/admin/quality-profiles/rows",
+        "/admin/quality-profiles/preview",
         data={
             "choices-0-present": "1",
             "choices-1-present": "1",
             "choices-1-resolutions": "2160p",
         },
     )
-    assert "no later choice can ever apply" in response.text
+    assert "nothing after it can ever apply" in response.text
 
 
 async def test_the_preview_ranks_the_sample_releases_through_the_draft(

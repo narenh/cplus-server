@@ -90,9 +90,6 @@ def _builder_context(rules: list[dict], choices: list[dict]) -> dict:
         "hdr_options": HDR_OPTIONS,
         "audio_options": AUDIO_OPTIONS,
         "summary": summary,
-        # Each choice's own reading, so a row can say what it means without the
-        # admin having to look back up at the summary.
-        "readings": summary.choices if summary is not None else [""] * len(choices),
         "ordinal": ordinal,
     }
 

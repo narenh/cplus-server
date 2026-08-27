@@ -271,8 +271,8 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
   border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
   padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
 }
-.rule.filter { border-left-color: var(--filter); }
-.rule.preference { border-left-color: var(--preference); }
+.rule.kind-filter { border-left-color: var(--filter); }
+.rule.kind-preference { border-left-color: var(--preference); }
 .rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .rule-head .kind { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 .rule-controls { margin-left: auto; display: flex; gap: 4px; }
@@ -338,7 +338,13 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 /* Editor and preview side by side on a wide window, stacked on a narrow one:
    the preview is a second opinion on the form, so it wants to be visible at
    the same time as the controls it is judging. */
-.profile-editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+/* The one page that earns more than the standard column: it is two panels that
+   have to be read against each other, and release titles are long. Scoped by
+   :has() so nothing else widens, and a browser without it just keeps the
+   ordinary width. */
+.wrap:has(.profile-editor) { max-width: 1320px; }
+
+.profile-editor { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .profile-editor > .card { align-self: start; }
 @media (max-width: 1000px) {
   .profile-editor { grid-template-columns: minmax(0, 1fr); }
@@ -348,7 +354,13 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .preview-controls { margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
 .preview-controls .row { flex-basis: 100%; }
 
+/* Release titles are long and the tag row is wide, so the table's min-content
+   width can exceed the panel. Scroll it inside the panel rather than letting
+   it push the page sideways. */
+#preview { overflow-x: auto; }
+
 table.preview { font-size: 13px; }
+table.preview td.release { word-break: break-word; }
 table.preview td { vertical-align: top; padding: 7px 8px; }
 table.preview tr.winner td { background: color-mix(in srgb, var(--ok) 10%, transparent); }
 table.preview tr.dropped td { opacity: .55; }

@@ -1,9 +1,13 @@
-{# The whole profile builder: what it does, then the three things it is made of.
+{# The three things a profile is made of, in the order the engine applies them.
 
-   Re-rendered wholesale after every add/remove/move, because the reading at the
-   top spans all three sections and would otherwise drift out of date. #}
+   Re-rendered wholesale after every add/remove/move — the sections share one
+   flat rule encoding and the choice numbering, so re-rendering one at a time
+   would leave the other holding stale indices.
 
-{% include "partials/profile_summary.html" %}
+   The plain-English reading is deliberately *not* here: this fragment only
+   re-renders on a structural change, and a reading that ignored the checkbox
+   you just ticked would be worse than none. It rides on the preview instead,
+   which redraws on every edit. #}
 
 <section class="builder-section filters">
   <h2><span class="step">1</span> Never grab</h2>

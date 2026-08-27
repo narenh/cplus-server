@@ -18,7 +18,9 @@
 {% for rule in rows %}
   {% set index = rule.index %}
   {% set spec = specs_by_type.get(rule.type) %}
-  <div class="rule {{ rule.kind }}">
+  {# `kind-` prefixed: a bare `filter` class would collide with the filter bar
+     on the activity and grabs pages, which is a flex row. #}
+  <div class="rule kind-{{ rule.kind }}">
     <div class="rule-head">
       {% if section == "preference" %}<span class="badge">{{ loop.index }}</span>{% endif %}
       <strong>{{ spec.label if spec else rule.type }}</strong>

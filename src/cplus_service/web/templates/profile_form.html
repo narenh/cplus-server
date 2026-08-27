@@ -13,6 +13,13 @@
     <label for="name">Profile name</label>
     <input type="text" id="name" name="name" value="{{ name }}" placeholder="4K, or 1080p if that's all there is" required>
 
+    {# The profile in plain English. Rendered here on load and thereafter
+       replaced out of band by every preview response, so it can never disagree
+       with the ranking shown beside it. #}
+    <div id="profile-reading">
+      {% include "partials/profile_summary.html" %}
+    </div>
+
     <div id="builder">
       {% include "partials/builder.html" %}
     </div>

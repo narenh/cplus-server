@@ -20,7 +20,6 @@
   <div class="choice">
     <div class="rule-head">
       <span class="badge">{{ ordinal(index) }} choice</span>
-      <span class="muted choice-reading">{{ readings[index] }}</span>
 
       <span class="rule-controls">
         <button type="button" class="icon" title="Prefer this sooner"
@@ -44,15 +43,6 @@
     </div>
 
     <input type="hidden" name="choices-{{ index }}-present" value="1">
-
-    {% if not loop.last and choice.resolutions|length == 0 and choice.sources|length == 0
-          and choice.hdr|length == 0 and choice.audio|length == 0
-          and choice.min_size_gb is none and choice.max_size_gb is none %}
-      <p class="hint warn">
-        This choice matches anything, so no later choice can ever apply. Tick
-        something, or move it to the bottom as the catch-all.
-      </p>
-    {% endif %}
 
     <div class="choice-grid">
       {% for field, label, options in choice_fields %}

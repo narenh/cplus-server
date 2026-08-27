@@ -5,6 +5,13 @@
    Showing the rejects is the point — a release quietly missing from a list is
    exactly the confusion this panel exists to end. #}
 
+{# The reading, swapped out of band into its slot at the top of the form. It
+   travels with the preview because the preview is what redraws on every edit:
+   one request keeps both the words and the ranking honest. #}
+<div id="profile-reading" hx-swap-oob="true">
+  {% include "partials/profile_summary.html" %}
+</div>
+
 {% if invalid %}
   <p class="err">The rules are not valid yet, so there is nothing to preview.</p>
 {% elif error %}
@@ -45,10 +52,8 @@
             {% elif judgement.choice is not none %}
               <span class="verdict">{{ ordinal(judgement.choice) }} choice</span>
               <span class="muted">{{ summary.choices[judgement.choice] }}</span>
-            {% else %}
-              <span class="verdict muted">
-                {% if summary and summary.choices %}matched no choice{% else %}eligible{% endif %}
-              </span>
+            {% elif summary and summary.choices %}
+              <span class="verdict muted">matched no choice</span>
             {% endif %}
           </td>
         </tr>
