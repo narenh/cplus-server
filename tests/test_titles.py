@@ -221,11 +221,12 @@ async def test_a_display_title_becomes_the_button_copy_without_changing_the_name
 
 
 @respx.mock
-async def test_the_request_action_can_carry_button_copy_too(
+async def test_the_request_action_is_told_apart_by_kind_not_by_its_words(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
-    # Its *name* is the client's routing key and cannot move; the copy on the
-    # button is not, so an admin may reword it.
+    # Both its name and its button copy are the admin's to change, so a client
+    # that matched on either would break the first time one did. `kind` is the
+    # field that says where pressing this button posts.
     mock_seerr_auth()
     await authenticate(client, plex_headers)
 
@@ -233,6 +234,7 @@ async def test_the_request_action_can_carry_button_copy_too(
     request_action = (
         await db.execute(select(Action).where(Action.is_system.is_(True)))
     ).scalar_one()
+    request_action.name = "Ask the household"
     request_action.display_title = "Ask for this"
     await db.commit()
     await grant(db, user, request_action)
@@ -240,7 +242,7 @@ async def test_the_request_action_can_carry_button_copy_too(
     response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
 
     offer = ndjson(response)[0]["actions"][0]
-    assert offer["name"] == "Request"
+    assert offer["name"] == "Ask the household"
     assert offer["display_title"] == "Ask for this"
     assert offer["kind"] == "request"
 

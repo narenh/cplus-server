@@ -1,15 +1,16 @@
 """Action CRUD.
 
-The built-in Request action is listed but never editable: it has no download
-client and no quality profile to edit, and its name is part of the tvOS client
-contract — the client routes a button to ``POST /request`` by matching on it.
-Renaming or deleting it would silently break every client.
+**Every action's name and button title are the admin's to change, the built-in
+Request action included.** Nothing identifies an action by its name: the server
+finds the built-in one by ``is_system`` and the client tells a request button
+from a grab button by the ``kind`` field in the actions payload. So a name is a
+label and nothing else, and an admin who wants their Request button filed as
+"Ask the household" may have it.
 
-Its **display title** is the one exception, and has its own endpoint. That
-field is pure client copy — nothing routes, joins or matches on it — so an
-admin can make the Request button say "Ask for this" without touching the name
-the contract depends on. The separate endpoint is what keeps the two apart: the
-edit endpoint below still refuses a system action outright.
+What the built-in action still refuses is a download client or a quality
+profile — it never touches Prowlarr, so there is nothing for either to mean —
+and deletion, because it is the only route to ``POST /request`` and the next
+startup would seed it straight back anyway.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from ....bootstrap import REQUEST_ACTION_NAME
 from ....db.models import Action, QualityProfile
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
@@ -65,16 +65,10 @@ def _clean_display_title(raw: str) -> str | None:
     return clean
 
 
-async def _editable(db: DbDep, action_id: int) -> Action:
+async def _load(db: DbDep, action_id: int) -> Action:
     action = await db.get(Action, action_id)
     if action is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such action")
-    if action.is_system:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            f"'{action.name}' is built in and cannot be edited or deleted. "
-            "Grant or revoke it per user on the Permissions page instead.",
-        )
     return action
 
 
@@ -104,7 +98,6 @@ async def list_actions(
             "clients": clients,
             "client_names": client_names,
             "client_error": client_error,
-            "request_action_name": REQUEST_ACTION_NAME,
             "admin": admin,
             "title": "Actions",
             "nav": "actions",
@@ -124,11 +117,6 @@ async def create_action(
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
-    if clean.casefold() == REQUEST_ACTION_NAME.casefold():
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"'{REQUEST_ACTION_NAME}' is reserved for the built-in action.",
-        )
     if await db.get(QualityProfile, quality_profile_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
 
@@ -157,26 +145,49 @@ async def update_action(
     admin: AdminPageDep,
     action_id: int,
     name: str = Form(...),
-    download_client_id: int = Form(...),
-    quality_profile_id: int = Form(...),
     display_title: str = Form(default=""),
+    download_client_id: int | None = Form(default=None),
+    quality_profile_id: int | None = Form(default=None),
 ) -> Response:
-    action = await _editable(db, action_id)
+    """Rename an action, retitle its button, and repoint it.
+
+    One endpoint for both kinds, because the labels work identically on both.
+    The Prowlarr targets are optional here rather than required: the built-in
+    action's row has no such fields to submit, and offering it a download client
+    would be offering it something it can never use.
+    """
+    action = await _load(db, action_id)
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
-    if clean.casefold() == REQUEST_ACTION_NAME.casefold():
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"'{REQUEST_ACTION_NAME}' is reserved for the built-in action.",
-        )
-    if await db.get(QualityProfile, quality_profile_id) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
 
+    if action.is_system:
+        if download_client_id is not None or quality_profile_id is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"'{action.name}' files a request in Seerr and never touches"
+                " Prowlarr, so it takes no download client or quality profile.",
+            )
+    else:
+        # Guaranteed by ck_action_targets_required_unless_system, and worth a
+        # readable error rather than an IntegrityError from the flush.
+        if download_client_id is None or quality_profile_id is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "An action needs a download client and a quality profile.",
+            )
+        if await db.get(QualityProfile, quality_profile_id) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
+
+    # Validated first, applied second: raising mid-update would roll the
+    # request's transaction back anyway, but a half-applied action is not a
+    # state worth being able to reason about.
     action.name = clean
     action.display_title = _clean_display_title(display_title)
-    action.download_client_id = download_client_id
-    action.quality_profile_id = quality_profile_id
+    if not action.is_system:
+        action.download_client_id = download_client_id
+        action.quality_profile_id = quality_profile_id
+
     try:
         await db.flush()
     except IntegrityError as exc:
@@ -188,29 +199,15 @@ async def update_action(
     return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/{action_id}/display-title")
-async def update_display_title(
-    db: DbDep,
-    admin: AdminPageDep,
-    action_id: int,
-    display_title: str = Form(default=""),
-) -> Response:
-    """Set just the button copy — allowed on the built-in action too.
-
-    Nothing routes or joins on this field, so changing it on the system action
-    cannot break the client contract the way renaming it would.
-    """
-    action = await db.get(Action, action_id)
-    if action is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such action")
-
-    action.display_title = _clean_display_title(display_title)
-    await db.flush()
-    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
-
-
 @router.post("/{action_id}/delete")
 async def delete_action(db: DbDep, admin: AdminPageDep, action_id: int) -> Response:
-    action = await _editable(db, action_id)
+    action = await _load(db, action_id)
+    if action.is_system:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"'{action.name}' is the built-in request action and cannot be deleted"
+            " — the next start would seed it again. Revoke it per user on the"
+            " Permissions page instead.",
+        )
     await db.delete(action)
     return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
