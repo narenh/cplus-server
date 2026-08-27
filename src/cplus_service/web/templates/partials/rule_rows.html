@@ -1,43 +1,51 @@
-{# Numbered rows with move/remove controls.
+{# One section's worth of rule rows — filters or tie-breakers, per `section`.
 
    Every control posts the whole enclosing form to /admin/quality-profiles/rows,
-   which decodes it, applies the operation and returns this fragment again. No
-   draft lives on the server, so two tabs cannot corrupt each other and an
+   which decodes it, applies the operation and returns the whole builder again.
+   No draft lives on the server, so two tabs cannot corrupt each other and an
    abandoned edit leaves nothing behind.
 
-   Row indices carry order only; they are renumbered from zero on every render. #}
+   `rule.index` is the row's position in the single flat `rules-<i>-…` encoding
+   and is what the form posts under; the number shown to the admin counts within
+   this section, because that is the number that means something to them. #}
 
-{% if not rules %}
-  <p class="empty">No rules yet. An empty profile recommends the first release Prowlarr returned.</p>
+{% set rows = rules|selectattr("kind", "equalto", section)|list %}
+
+{% if not rows %}
+  <p class="empty">{{ empty_text }}</p>
 {% endif %}
 
-{% for rule in rules %}
-  {% set index = loop.index0 %}
+{% for rule in rows %}
+  {% set index = rule.index %}
   {% set spec = specs_by_type.get(rule.type) %}
-  <div class="rule {{ spec.kind if spec else '' }}">
+  {# `kind-` prefixed: a bare `filter` class would collide with the filter bar
+     on the activity and grabs pages, which is a flex row. #}
+  <div class="rule kind-{{ rule.kind }}">
     <div class="rule-head">
-      <span class="badge">{{ loop.index }}</span>
+      {% if section == "preference" %}<span class="badge">{{ loop.index }}</span>{% endif %}
       <strong>{{ spec.label if spec else rule.type }}</strong>
-      <span class="kind">{{ spec.kind if spec else '' }}</span>
 
       <span class="rule-controls">
-        <button type="button" class="icon" title="Move up"
-                hx-post="/admin/quality-profiles/rows"
-                hx-include="closest form"
-                hx-vals='{"op": "up", "index": "{{ index }}"}'
-                hx-target="#rule-rows" hx-swap="innerHTML"
-                {% if loop.first %}disabled{% endif %}>&uarr;</button>
-        <button type="button" class="icon" title="Move down"
-                hx-post="/admin/quality-profiles/rows"
-                hx-include="closest form"
-                hx-vals='{"op": "down", "index": "{{ index }}"}'
-                hx-target="#rule-rows" hx-swap="innerHTML"
-                {% if loop.last %}disabled{% endif %}>&darr;</button>
+        {% if section == "preference" %}
+          {# Filters have no order to change: one anywhere applies to everything. #}
+          <button type="button" class="icon" title="Break ties earlier"
+                  hx-post="/admin/quality-profiles/rows"
+                  hx-include="closest form"
+                  hx-vals='{"op": "up", "target": "rules", "index": "{{ index }}"}'
+                  hx-target="#builder" hx-swap="innerHTML"
+                  {% if loop.first %}disabled{% endif %}>&uarr;</button>
+          <button type="button" class="icon" title="Break ties later"
+                  hx-post="/admin/quality-profiles/rows"
+                  hx-include="closest form"
+                  hx-vals='{"op": "down", "target": "rules", "index": "{{ index }}"}'
+                  hx-target="#builder" hx-swap="innerHTML"
+                  {% if loop.last %}disabled{% endif %}>&darr;</button>
+        {% endif %}
         <button type="button" class="icon danger" title="Remove"
                 hx-post="/admin/quality-profiles/rows"
                 hx-include="closest form"
-                hx-vals='{"op": "remove", "index": "{{ index }}"}'
-                hx-target="#rule-rows" hx-swap="innerHTML">&times;</button>
+                hx-vals='{"op": "remove", "target": "rules", "index": "{{ index }}"}'
+                hx-target="#builder" hx-swap="innerHTML">&times;</button>
       </span>
     </div>
 

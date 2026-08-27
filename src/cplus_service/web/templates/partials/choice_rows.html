@@ -1,0 +1,101 @@
+{# The ordered choices: "I'd rather have this kind of release than that kind."
+
+   Order is the entire meaning of this list, so every row carries move controls
+   and is labelled with its standing (1st choice, 2nd choice, …) rather than a
+   bare number.
+
+   The hidden `present` field is load-bearing: a choice with nothing ticked and
+   no sizes typed submits no fields at all, and without a marker the server
+   would decode the row as deleted. #}
+
+{% if not choices %}
+  <p class="empty">
+    No choices yet — every release that survives the filters is treated as the
+    same kind of thing, and the tie-breakers below decide between them.
+  </p>
+{% endif %}
+
+{% for choice in choices %}
+  {% set index = choice.index %}
+  <div class="choice">
+    <div class="rule-head">
+      <span class="badge">{{ ordinal(index) }} choice</span>
+
+      <span class="rule-controls">
+        <button type="button" class="icon" title="Prefer this sooner"
+                hx-post="/admin/quality-profiles/rows"
+                hx-include="closest form"
+                hx-vals='{"op": "up", "target": "choices", "index": "{{ index }}"}'
+                hx-target="#builder" hx-swap="innerHTML"
+                {% if loop.first %}disabled{% endif %}>&uarr;</button>
+        <button type="button" class="icon" title="Prefer this later"
+                hx-post="/admin/quality-profiles/rows"
+                hx-include="closest form"
+                hx-vals='{"op": "down", "target": "choices", "index": "{{ index }}"}'
+                hx-target="#builder" hx-swap="innerHTML"
+                {% if loop.last %}disabled{% endif %}>&darr;</button>
+        <button type="button" class="icon danger" title="Remove"
+                hx-post="/admin/quality-profiles/rows"
+                hx-include="closest form"
+                hx-vals='{"op": "remove", "target": "choices", "index": "{{ index }}"}'
+                hx-target="#builder" hx-swap="innerHTML">&times;</button>
+      </span>
+    </div>
+
+    <input type="hidden" name="choices-{{ index }}-present" value="1">
+
+    <div class="choice-grid">
+      {% for field, label, options in choice_fields %}
+        <div class="choice-field">
+          <span class="choice-label">{{ label }}</span>
+          <div class="checks">
+            {% for option in options %}
+              <label class="check">
+                <input type="checkbox" name="choices-{{ index }}-{{ field }}"
+                       value="{{ option }}"
+                       {% if option in choice[field] %}checked{% endif %}>
+                {{ option }}
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+
+      <div class="choice-field">
+        <span class="choice-label">Size</span>
+        <div class="row">
+          <input type="number" step="0.1" min="0.1" name="choices-{{ index }}-min_size_gb"
+                 value="{{ choice.min_size_gb if choice.min_size_gb is not none else '' }}"
+                 placeholder="at least (GB)">
+          <input type="number" step="0.1" min="0.1" name="choices-{{ index }}-max_size_gb"
+                 value="{{ choice.max_size_gb if choice.max_size_gb is not none else '' }}"
+                 placeholder="at most (GB)">
+        </div>
+        <p class="hint">
+          A release whose size the indexer did not report never satisfies a size
+          bound — it falls through to a later choice rather than being let in on
+          a guess.
+        </p>
+      </div>
+
+      <div class="choice-field">
+        <span class="choice-label">Of these, take</span>
+        <div class="row">
+          <select name="choices-{{ index }}-tie_break">
+            {% for value, label in tie_break_options %}
+              <option value="{{ value }}" {% if choice.tie_break == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input type="number" step="0.1" min="0.1" name="choices-{{ index }}-tie_break_gb"
+                 value="{{ choice.tie_break_gb if choice.tie_break_gb is not none else '' }}"
+                 placeholder="target GB"
+                 {% if choice.tie_break != "closest_to_gb" %}class="dim"{% endif %}>
+        </div>
+        <p class="hint">
+          The biggest file is the closest thing to "highest bitrate" a release
+          name will tell you. Target GB applies only to <em>closest to a size</em>.
+        </p>
+      </div>
+    </div>
+  </div>
+{% endfor %}

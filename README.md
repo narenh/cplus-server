@@ -67,10 +67,15 @@ your proxy's TLS.
 5. **Quality profiles.** Every Prowlarr-backed action needs one, so a fresh
    install is seeded with a profile called **All** — it filters nothing and
    ranks by the conventional order (resolution, source, HDR, audio, size), so
-   you can go straight to creating actions and come back to this later. Add
-   your own when you want something specific: filter rules eliminate
-   candidates, preference rules rank what survives, and preference order is
-   what decides ties.
+   you can go straight to creating actions and come back to this later.
+
+   When you do come back, a profile is three things, and the builder asks them
+   in that order: what to **never grab**, what you'd **prefer, in order**, and
+   how to **break ties**. The middle one is where "the biggest 4K WEB copy, or
+   failing that the biggest 1080p under 15 GB" gets said — add a choice per
+   kind of release you'd accept, best first. The panel beside the form shows
+   what the rules would actually pick, including what they throw away, before
+   you save.
 6. **Create actions** — a name, a Prowlarr download client, and a quality
    profile. These become the buttons in the client, e.g. "Stream Now", "Add 4K".
    Optionally give an action a **button title**: the name is yours (it labels
@@ -173,8 +178,10 @@ python scripts/demo.py tt1160419     # against a real Prowlarr
 src/cplus_service/
   release/models.py     ParsedTitle / ParsedRelease — the stable client contract
   release/parser.py     title -> structured metadata; drops full discs
-  quality/models.py     quality profile rule schema (pydantic, discriminated union)
+  quality/models.py     quality profile schema: filters, choices, tie-breakers
   quality/engine.py     recommend(candidates, profile) -> ParsedRelease | None
+  quality/describe.py   the same profile in plain English, for the admin UI
+  quality/samples.py    the fixed release cast the profile preview ranks
   prowlarr/client.py    async Prowlarr API wrapper
   seerr/client.py       async Seerr API wrapper (auth + allowlisted request ops)
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
@@ -189,7 +196,7 @@ src/cplus_service/
   plex/client.py        plex.tv PIN flow — webui sign-in only
   web/                  Jinja2 templates + vendored HTMX and CSS
   db/models.py          SQLAlchemy 2.0 schema
-  bootstrap.py          seeds the built-in Request action
+  bootstrap.py          seeds the built-in Request action and the "All" profile
 migrations/             Alembic
 docker/entrypoint.sh    migrate, then serve
 scripts/demo.py         offline + live REPL-style driver
@@ -295,11 +302,21 @@ Pure: no I/O, no database, no clock. `rank()` is also exported for a "why this
 release?" view. `None` is an expected, valid outcome — it means every candidate
 was eliminated by the filters. It is not an error.
 
-A profile is an **ordered list of rules**, with both kinds coexisting in the one
-list.
+A profile decides one thing — which of these releases should this action grab?
+— in three passes, and they are separate because they answer different
+questions:
 
-**Filter rules** — eliminate candidates before ranking. Position in the list is
-irrelevant.
+1. **filters** eliminate candidates outright;
+2. **choices** sort what is left into "I'd rather have this kind of release"
+   rungs;
+3. **preference rules** order the releases inside a rung.
+
+`explain(candidates, profile)` reports all three for every candidate — the
+position it landed in, the choice it matched, or the filter that dropped it —
+and is what the admin UI's preview is built on.
+
+**Filter rules** — eliminate candidates before anything else. Position in the
+list is irrelevant.
 
 | Rule | Behaviour |
 |---|---|
@@ -307,9 +324,34 @@ irrelevant.
 | `keyword_exclude` | drops releases whose raw title contains any of these, case-insensitively |
 | `size_cap_gb` | drops releases larger than the cap. Unknown size is kept — it is not evidence of a violation |
 
-**Preference rules** — rank the survivors. Position **is** load-bearing: rules
-apply in the order they appear in the profile, each breaking the ties left by
-the previous. The conventional ordering (available as `default_profile()`) is:
+**Choices** — an ordered list of kinds of release, best first. Every release
+matching the 1st choice beats every release matching the 2nd, whatever the
+preference rules say; a release matching none of them ranks last but is still
+eligible. This is the part that can express *"the biggest 4K WEB copy, or
+failing that the biggest 1080p under 15 GB"* — two wants with different size
+rules, which one ordered preference list cannot say.
+
+A choice is a **match** plus an optional **tie-break**:
+
+| Field | Meaning |
+|---|---|
+| `match.resolutions` / `.sources` / `.hdr` / `.audio` | empty is no constraint; a non-empty list means the release has to be one of (or, for the tag fields, to carry one of) them |
+| `match.min_size_gb` / `.max_size_gb` | inclusive bounds. **An unknown size never satisfies either** — the release falls through to a later choice rather than being admitted on a guess |
+| `tie_break` | `biggest`, `smallest`, `closest_to_gb` (+ `tie_break_gb`), `newest`, `most_seeders`. Unset means the preference rules decide |
+
+`biggest` is the practical stand-in for "highest bitrate": bitrate is not in a
+release name, and for two copies of the same film at the same resolution the
+larger file is the less compressed one.
+
+`choices` defaults to empty, and empty means one undifferentiated pool — which
+is exactly how every profile behaved before choices existed, so a stored
+profile that predates them needs no migration and does not change behaviour.
+
+**Preference rules** — rank the survivors *within* a choice. Position **is**
+load-bearing: rules apply in the order they appear in the profile, each
+breaking the ties left by the previous. A choice that sets its own tie-break
+decides first and leaves these to break *its* ties. The conventional ordering
+(available as `default_profile()`) is:
 
 1. `repack_proper_priority` — prefers a REPACK/PROPER over the base release of the same underlying title. Title-diffed via `base_title`, not tag-matched: a REPACK of *another* movie never demotes an unrelated release.
 2. `resolution_order` — `["2160p", "1080p", "720p", "480p"]`
@@ -387,7 +429,7 @@ stage 2; they exist now so the migration history has one starting point.
 |---|---|
 | `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`. Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
 | `users` | `seerr_user_id` (unique), `plex_username` |
-| `quality_profiles` | `name`, `rules` (ordered JSON list) |
+| `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
 | `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, release title/guid/indexer/size, `created_at` |
@@ -593,7 +635,8 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
-| `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, rule builder, delete |
+| `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, builder rebuild, delete |
+| `POST /admin/quality-profiles/preview` | Ranks a candidate set through the **unsaved** draft in the form. Sample releases by default; a real Prowlarr search with `preview_source=prowlarr` |
 | `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD. The edit endpoint takes the built-in action too — its name and button title are editable, its Prowlarr targets are not, and delete refuses it |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
@@ -781,27 +824,70 @@ that discriminator rather than widening the enum.
 Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
 `web/static/`, so a container with no outbound access still works.
 
-### The rule builder
+### The profile builder
 
-The one genuinely interactive piece. Rules are numbered rows with ↑ / ↓ / ×
-controls and an add-rule dropdown; filters and preferences are colour-coded
-apart, since only preference *order* is meaningful.
+The one genuinely interactive piece, and the page most of the UI thinking went
+into. A profile is three different questions, so the builder is three numbered
+sections that ask them in the order the engine answers them:
 
-It holds **no server-side draft**. Every add, remove and move posts the whole
-current form to `POST /admin/quality-profiles/rows`, which decodes it, applies
-the operation and re-renders the rows. So two tabs cannot corrupt each other's
+1. **Never grab** — the filters. No ordering controls at all, because their
+   position means nothing: one filter anywhere applies to everything.
+2. **Prefer, in order** — the choices, each labelled *1st choice*, *2nd
+   choice*, … with move controls, because their order is their entire meaning.
+   A choice is checkboxes (resolution, source, dynamic range, audio), a size
+   range, and *of these, take…*.
+3. **Break ties by** — the preference rules, numbered and movable, described as
+   what they are: the thing that settles what a choice could not.
+
+Two readouts stop this from being a wall of controls:
+
+**The reading.** The top of the form says what the profile does in plain
+English — *never grab CAM…; prefer 4K · WEB-DL, biggest file, then 1080p ·
+under 15 GB, biggest file, then everything else; break ties by…* — generated by
+`quality/describe.py` from the same objects the engine consumes, so it cannot
+drift from the behaviour. It is rendered by the *preview* response and swapped
+into place out of band, because the builder fragment only re-renders on a
+structural change: a reading that ignored the checkbox you just ticked would be
+worse than none. The profile list uses the same reading instead of
+listing rule type names. It also calls out a choice that matches everything
+while sitting above another one, which silently kills every choice below it.
+
+**The preview.** A panel beside the form that ranks a candidate set through the
+**unsaved** draft and shows every release: the pick, the ranked rest with the
+choice each one matched, and the dropped ones struck through and labelled with
+the filter that dropped them. Two sources — a fixed cast of sample releases
+(`quality/samples.py`, deliberately awkward: a 60 GB remux, a 4K WEB copy, a
+CAM, a REPACK and its base) that needs nothing configured, and a real Prowlarr
+search by IMDB id or title. A failed live lookup is reported as text in the
+panel rather than as a status code: losing a half-built profile to a failed
+search would be a worse answer than "that didn't work".
+
+The builder holds **no server-side draft**. Every add, remove and move posts the
+whole current form to `POST /admin/quality-profiles/rows`, which decodes it,
+applies the operation and re-renders. So two tabs cannot corrupt each other's
 draft, an abandoned edit leaves nothing to clean up, and a restart mid-edit
 costs nothing. Row indices carry order only and are renumbered on every render.
+
+Filters and preference rules share one flat `rules-<i>-…` encoding, kept
+canonical (filters first). That is what lets two visually separate sections run
+off one list: the preferences are contiguous, so "move up" is a swap with the
+neighbouring index, and a move never crosses the boundary — a filter sliding
+into the preference list would look like a change and be none. Every choice row
+carries a hidden `present` marker, because a choice with nothing ticked submits
+no fields at all and would otherwise decode as deleted.
 
 Ordered rules (`resolution_order`, `source_order`, `hdr_match`, `audio_match`)
 use a comma-separated text input rather than a multi-select: order is the whole
 point of those rules, and browsers submit multi-select options in document
-order, not click order.
+order, not click order. A choice's fields are checkboxes instead, since a
+choice asks "is it one of these?" and the tick order means nothing.
 
-Before saving, the decoded rules are validated through stage 1's pydantic
-schema. Stored JSON therefore can never hold a shape the engine will not accept,
-and an unknown token like `hdr_match: NOT_A_TAG` comes back as a form error
-instead of a broken profile.
+Before saving, the decoded rules and choices are validated through stage 1's
+pydantic schema. Stored JSON therefore can never hold a shape the engine will
+not accept, and an unknown token like `hdr_match: NOT_A_TAG` comes back as a
+form error instead of a broken profile. The preview treats the same invalidity
+as an ordinary state — it redraws while an admin is midway through typing —
+and says so rather than erroring.
 
 ### Guards worth knowing about
 

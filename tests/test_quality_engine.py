@@ -7,14 +7,22 @@ be a parser failure in disguise.  The one exception is
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from cplus_service.quality.engine import (
     apply_filters,
+    choice_index,
+    explain,
+    matches,
     preferred_indexer_candidates,
     rank,
     recommend,
+    rejection,
 )
 from cplus_service.quality.models import (
     AudioMatchRule,
+    Choice,
+    ChoiceMatch,
     ExcludePrereleaseRule,
     HdrMatchRule,
     KeywordExcludeRule,
@@ -25,6 +33,7 @@ from cplus_service.quality.models import (
     SizeDirection,
     SizeRule,
     SourceOrderRule,
+    TieBreak,
     default_profile,
 )
 from cplus_service.release.models import (
@@ -57,6 +66,8 @@ def make(
     size_gb: float | None = 10.0,
     indexer_id: int | None = 1,
     guid: str = "",
+    seeders: int | None = None,
+    publish_date: datetime | None = None,
 ) -> ParsedRelease:
     return ParsedRelease(
         title=title,
@@ -75,6 +86,8 @@ def make(
         base_title=base_title,
         size_bytes=None if size_gb is None else int(size_gb * GB),
         indexer_id=indexer_id,
+        seeders=seeders,
+        publish_date=publish_date,
     )
 
 
@@ -489,3 +502,254 @@ def test_engine_consumes_real_parser_output() -> None:
     assert best.dv_profile == 8
     assert best.is_hdr10plus is True
     assert best.has_atmos is True
+
+
+# --------------------------------------------------------------------------- #
+# Choices
+#
+# The thing an ordered preference list cannot say: "the best 4K WEB copy, or
+# failing that the biggest 1080p under 15 GB". Two wants, different size rules.
+# --------------------------------------------------------------------------- #
+
+
+UHD_WEB = Choice(
+    match=ChoiceMatch(resolutions=[Resolution.UHD_2160P], sources=[Source.WEB_DL]),
+    tie_break=TieBreak.BIGGEST,
+)
+HD_UNDER_15 = Choice(
+    match=ChoiceMatch(resolutions=[Resolution.FHD_1080P], max_size_gb=15),
+    tie_break=TieBreak.BIGGEST,
+)
+
+
+def test_a_first_choice_beats_a_second_choice_however_good_the_second_is() -> None:
+    profile = QualityProfile(
+        name="4K or big HD",
+        choices=[UHD_WEB, HD_UNDER_15],
+        # A tie-breaker that would pick the huge 1080p if choices did not exist.
+        rules=[SizeRule(direction=SizeDirection.LARGEST)],
+    )
+    small_uhd = make(guid="uhd", resolution=Resolution.UHD_2160P, size_gb=9)
+    big_hd = make(guid="hd", resolution=Resolution.FHD_1080P, size_gb=14.5)
+
+    assert recommend([big_hd, small_uhd], profile) is small_uhd
+
+
+def test_each_choice_carries_its_own_size_rule() -> None:
+    # The whole point: 4K is unbounded here, 1080p is capped at 15 GB, and no
+    # single ordered list of rules can hold both of those at once.
+    profile = QualityProfile(name="p", choices=[UHD_WEB, HD_UNDER_15])
+    huge_uhd = make(guid="uhd", resolution=Resolution.UHD_2160P, size_gb=60)
+    over_cap_hd = make(guid="hd-big", resolution=Resolution.FHD_1080P, size_gb=40)
+    under_cap_hd = make(guid="hd-ok", resolution=Resolution.FHD_1080P, size_gb=12)
+
+    ordered = rank([over_cap_hd, under_cap_hd, huge_uhd], profile)
+    assert [r.guid for r in ordered] == ["uhd", "hd-ok", "hd-big"]
+
+
+def test_a_release_matching_no_choice_ranks_last_but_is_still_eligible() -> None:
+    profile = QualityProfile(name="p", choices=[UHD_WEB])
+    unmatched = make(guid="sd", resolution=Resolution.SD_480P, size_gb=1)
+
+    # Last, not dropped — and still the pick when it is all there is.
+    assert choice_index(unmatched, profile) == 1
+    assert recommend([unmatched], profile) is unmatched
+
+
+def test_a_profile_with_no_choices_ranks_exactly_as_it_did_before() -> None:
+    # Every profile stored before choices existed has none, so this is the
+    # compatibility guarantee, not a nicety.
+    rules = [ResolutionOrderRule(values=[Resolution.UHD_2160P, Resolution.FHD_1080P])]
+    hd = make(guid="hd", resolution=Resolution.FHD_1080P)
+    uhd = make(guid="uhd", resolution=Resolution.UHD_2160P)
+
+    assert [r.guid for r in rank([hd, uhd], QualityProfile(name="p", rules=rules))] == [
+        "uhd",
+        "hd",
+    ]
+
+
+def test_a_choice_tie_break_decides_before_the_preference_rules() -> None:
+    profile = QualityProfile(
+        name="p",
+        choices=[Choice(tie_break=TieBreak.SMALLEST)],
+        rules=[SizeRule(direction=SizeDirection.LARGEST)],
+    )
+    small = make(guid="small", size_gb=2)
+    big = make(guid="big", size_gb=40)
+
+    assert recommend([big, small], profile) is small
+
+
+def test_preference_rules_break_the_ties_a_choice_leaves() -> None:
+    profile = QualityProfile(
+        name="p",
+        choices=[Choice(match=ChoiceMatch(resolutions=[Resolution.UHD_2160P]))],
+        rules=[SourceOrderRule(values=[Source.REMUX, Source.WEB_DL])],
+    )
+    web = make(guid="web", resolution=Resolution.UHD_2160P, source=Source.WEB_DL)
+    remux = make(guid="remux", resolution=Resolution.UHD_2160P, source=Source.REMUX)
+
+    assert recommend([web, remux], profile) is remux
+
+
+def test_a_filter_still_beats_every_choice() -> None:
+    profile = QualityProfile(
+        name="p",
+        choices=[Choice(match=ChoiceMatch(resolutions=[Resolution.UHD_2160P]))],
+        rules=[SizeCapGbRule(value=20)],
+    )
+    over_cap = make(guid="huge", resolution=Resolution.UHD_2160P, size_gb=60)
+    small = make(guid="small", resolution=Resolution.SD_480P, size_gb=1)
+
+    # First choice, and still gone: filters run before choices are consulted.
+    assert recommend([over_cap, small], profile) is small
+
+
+# --------------------------------------------------------------------------- #
+# Matching
+# --------------------------------------------------------------------------- #
+
+
+def test_an_empty_match_matches_anything() -> None:
+    assert matches(make(), ChoiceMatch()) is True
+    assert ChoiceMatch().is_anything is True
+
+
+def test_a_match_field_is_satisfied_by_any_of_its_values() -> None:
+    match = ChoiceMatch(sources=[Source.WEB_DL, Source.WEBRIP])
+    assert matches(make(source=Source.WEBRIP), match) is True
+    assert matches(make(source=Source.BLURAY), match) is False
+
+
+def test_tag_fields_match_when_the_release_carries_any_listed_tag() -> None:
+    dv_or_hdr = ChoiceMatch(hdr=["DV", "HDR10+"])
+    assert matches(make(dv_profile=8), dv_or_hdr) is True
+    assert matches(make(is_hdr10plus=True), dv_or_hdr) is True
+    assert matches(make(is_hdr=True), dv_or_hdr) is False
+
+    atmos = ChoiceMatch(audio=[AudioTag.ATMOS])
+    assert matches(make(has_atmos=True, has_truehd=True), atmos) is True
+    assert matches(make(has_truehd=True), atmos) is False
+
+
+def test_every_listed_field_has_to_match() -> None:
+    match = ChoiceMatch(resolutions=[Resolution.UHD_2160P], sources=[Source.WEB_DL])
+    assert matches(make(resolution=Resolution.UHD_2160P, source=Source.WEB_DL), match)
+    assert not matches(make(resolution=Resolution.UHD_2160P, source=Source.REMUX), match)
+
+
+def test_an_unknown_size_never_satisfies_a_size_bound() -> None:
+    # Not a guess in either direction: the release falls through to a later
+    # choice rather than being admitted on evidence nobody has.
+    under_15 = ChoiceMatch(max_size_gb=15)
+    assert matches(make(size_gb=None), under_15) is False
+    assert matches(make(size_gb=None), ChoiceMatch(min_size_gb=1)) is False
+    # ...while the size *filter* keeps it, because there the cost of guessing
+    # wrong is elimination rather than a lower ranking.
+    kept = apply_filters([make(size_gb=None)], QualityProfile(rules=[SizeCapGbRule(value=15)]))
+    assert len(kept) == 1
+
+
+def test_size_bounds_are_inclusive_at_both_ends() -> None:
+    between = ChoiceMatch(min_size_gb=10, max_size_gb=15)
+    assert matches(make(size_gb=10), between) is True
+    assert matches(make(size_gb=15), between) is True
+    assert matches(make(size_gb=9.9), between) is False
+    assert matches(make(size_gb=15.1), between) is False
+
+
+# --------------------------------------------------------------------------- #
+# Tie-breaks
+# --------------------------------------------------------------------------- #
+
+
+def test_closest_to_a_size_wins_from_either_side() -> None:
+    profile = QualityProfile(
+        name="p", choices=[Choice(tie_break=TieBreak.CLOSEST_TO_GB, tie_break_gb=10)]
+    )
+    under = make(guid="under", size_gb=8)
+    over = make(guid="over", size_gb=10.5)
+    far = make(guid="far", size_gb=40)
+
+    assert [r.guid for r in rank([far, under, over], profile)] == ["over", "under", "far"]
+
+
+def test_newest_and_most_seeders_order_on_their_own_fields() -> None:
+    old = make(guid="old", publish_date=datetime(2024, 1, 1, tzinfo=UTC), seeders=900)
+    new = make(guid="new", publish_date=datetime(2026, 1, 1, tzinfo=UTC), seeders=3)
+
+    newest = QualityProfile(name="p", choices=[Choice(tie_break=TieBreak.NEWEST)])
+    seeders = QualityProfile(name="p", choices=[Choice(tie_break=TieBreak.MOST_SEEDERS)])
+
+    assert recommend([old, new], newest) is new
+    assert recommend([new, old], seeders) is old
+
+
+def test_a_release_a_tie_break_cannot_speak_about_ranks_behind_ones_it_can() -> None:
+    # Not treated as zero seeders or as an ancient release: unknown is its own
+    # thing, and it loses to anything the tie-break can actually compare.
+    known = make(guid="known", seeders=1)
+    unknown = make(guid="unknown", seeders=None)
+    profile = QualityProfile(name="p", choices=[Choice(tie_break=TieBreak.MOST_SEEDERS)])
+
+    assert [r.guid for r in rank([unknown, known], profile)] == ["known", "unknown"]
+
+
+# --------------------------------------------------------------------------- #
+# explain()
+# --------------------------------------------------------------------------- #
+
+
+def test_explain_reports_every_candidate_kept_or_dropped() -> None:
+    profile = QualityProfile(
+        name="p", rules=[ExcludePrereleaseRule()], choices=[UHD_WEB]
+    )
+    uhd = make(guid="uhd", resolution=Resolution.UHD_2160P, size_gb=20)
+    hd = make(guid="hd", size_gb=8)
+    cam = make(guid="cam", is_prerelease=True)
+
+    judged = explain([cam, hd, uhd], profile)
+
+    assert [j.release.guid for j in judged] == ["uhd", "hd", "cam"]
+    assert judged[0].kept and judged[0].position == 0 and judged[0].choice == 0
+    # Kept, ranked last, and matching no choice — three different facts.
+    assert judged[1].kept and judged[1].position == 1 and judged[1].choice is None
+    assert not judged[2].kept
+
+
+def test_explain_names_the_filter_that_dropped_each_release() -> None:
+    profile = QualityProfile(
+        name="p",
+        rules=[
+            ExcludePrereleaseRule(),
+            KeywordExcludeRule(values=["korsub"]),
+            SizeCapGbRule(value=20),
+        ],
+    )
+    dropped = {
+        j.release.guid: j.dropped_by
+        for j in explain(
+            [
+                make(guid="cam", is_prerelease=True),
+                make(guid="korsub", title="Movie.2024.KORSUB.1080p"),
+                make(guid="huge", size_gb=60),
+            ],
+            profile,
+        )
+    }
+
+    assert dropped["cam"] == "pre-release"
+    assert dropped["korsub"] == "title contains 'korsub'"
+    # No trailing ".0" — the number is read by an admin, not a machine.
+    assert dropped["huge"] == "larger than 20 GB"
+
+
+def test_rejection_and_apply_filters_cannot_disagree() -> None:
+    # The preview's explanation is the filter behaviour, not a second opinion
+    # on it: same function, applied to one release or to a list.
+    profile = QualityProfile(name="p", rules=[SizeCapGbRule(value=20)])
+    candidates = [make(guid="a", size_gb=5), make(guid="b", size_gb=50)]
+
+    survivors = {r.guid for r in apply_filters(candidates, profile)}
+    assert survivors == {c.guid for c in candidates if rejection(c, profile) is None}

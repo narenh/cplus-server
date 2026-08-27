@@ -1,0 +1,63 @@
+{# What the draft rules do to a real candidate list.
+
+   Every candidate appears: the survivors in the order the profile ranks them,
+   then the ones it dropped, each labelled with the filter that dropped it.
+   Showing the rejects is the point — a release quietly missing from a list is
+   exactly the confusion this panel exists to end. #}
+
+{# The reading, swapped out of band into its slot at the top of the form. It
+   travels with the preview because the preview is what redraws on every edit:
+   one request keeps both the words and the ranking honest. #}
+<div id="profile-reading" hx-swap-oob="true">
+  {% include "partials/profile_summary.html" %}
+</div>
+
+{% if invalid %}
+  <p class="err">The rules are not valid yet, so there is nothing to preview.</p>
+{% elif error %}
+  <p class="err">{{ error }}</p>
+{% elif not judgements %}
+  <p class="empty">Nothing came back{% if live %} for “{{ query }}”{% endif %}.</p>
+{% else %}
+  <table class="preview">
+    <thead>
+      <tr><th></th><th>Release</th><th class="right">Size</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+      {% for judgement in judgements %}
+        {% set release = judgement.release %}
+        <tr class="{{ 'dropped' if not judgement.kept else ('winner' if judgement.position == 0) }}">
+          <td class="right nowrap">
+            {% if not judgement.kept %}<span class="muted">—</span>
+            {% elif judgement.position == 0 %}<span class="badge">pick</span>
+            {% else %}<span class="muted">{{ judgement.position + 1 }}</span>{% endif %}
+          </td>
+          <td class="release">
+            {{ release.title }}
+            <span class="tags">
+              <span class="tag">{{ release.resolution.value }}</span>
+              <span class="tag">{{ release.source.value }}</span>
+              {% for tag in release.hdr_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+              {% for tag in release.audio_tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+              {% if release.is_repack_or_proper %}<span class="tag">REPACK</span>{% endif %}
+            </span>
+          </td>
+          <td class="right nowrap">
+            {% if release.size_gb is none %}<span class="muted">?</span>
+            {% else %}{{ "%.1f"|format(release.size_gb) }} GB{% endif %}
+          </td>
+          <td>
+            {% if not judgement.kept %}
+              <span class="verdict dropped-by">dropped: {{ judgement.dropped_by }}</span>
+            {% elif judgement.choice is not none %}
+              <span class="verdict">{{ ordinal(judgement.choice) }} choice</span>
+              <span class="muted">{{ summary.choices[judgement.choice] }}</span>
+            {% elif summary and summary.choices %}
+              <span class="verdict muted">matched no choice</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}

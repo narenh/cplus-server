@@ -82,7 +82,12 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
             id=action.id,
             name=action.name,
             display_title=action.button_title,
-            profile=ProfileSchema(id=profile.id, name=profile.name, rules=profile.rules),
+            profile=ProfileSchema(
+                id=profile.id,
+                name=profile.name,
+                rules=profile.rules,
+                choices=profile.choices or [],
+            ),
         )
         for action, profile in result.all()
     ]

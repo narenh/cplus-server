@@ -6,15 +6,36 @@
   <p class="empty">No quality profiles yet. Every action needs one, so start here.</p>
 {% else %}
 <table>
-  <thead><tr><th>Name</th><th>Rules</th><th></th></tr></thead>
+  <thead><tr><th>Name</th><th>What it does</th><th></th></tr></thead>
   <tbody>
   {% for profile in profiles %}
+    {% set summary = summaries.get(profile.id) %}
     <tr>
       <td><a href="/admin/quality-profiles/{{ profile.id }}">{{ profile.name }}</a></td>
-      <td class="muted">
-        {% if profile.rules %}
-          {{ profile.rules|map(attribute='type')|join(' → ') }}
-        {% else %}<em>no rules</em>{% endif %}
+      {# The reading, not the rule types: the list is for recognising a profile,
+         and "exclude_prerelease → resolution_order" is not how anyone thinks of
+         one. #}
+      <td class="muted profile-reading">
+        {% if summary.is_empty %}
+          <em>takes anything, in indexer order</em>
+        {% else %}
+          {% if summary.never_grab %}
+            <span class="reading-part">
+              <span class="reading-label">never</span> {{ summary.never_grab|join("; ") }}
+            </span>
+          {% endif %}
+          {% if summary.choices %}
+            <span class="reading-part">
+              <span class="reading-label">prefer</span>
+              {{ summary.choices|join(", then ") }}, then everything else
+            </span>
+          {% endif %}
+          {% if summary.tie_breaks %}
+            <span class="reading-part">
+              <span class="reading-label">ties</span> {{ summary.tie_breaks|join(", then ") }}
+            </span>
+          {% endif %}
+        {% endif %}
       </td>
       <td class="right">
         {% if profile.id in in_use %}

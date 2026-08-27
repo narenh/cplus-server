@@ -140,6 +140,80 @@ async def test_quality_profile_rules_round_trip_as_ordered_json(
     assert reparsed.rules == schema.rules
 
 
+async def test_quality_profile_choices_round_trip_as_ordered_json(
+    session: AsyncSession,
+) -> None:
+    # Order is the entire meaning of this column, and a nested match object has
+    # more to lose in a round trip than a flat rule does.
+    stored = QualityProfile(
+        name="Tiered",
+        rules=[],
+        choices=[
+            {
+                "match": {
+                    "resolutions": ["2160p"],
+                    "sources": ["WEB-DL"],
+                    "hdr": [],
+                    "audio": [],
+                    "min_size_gb": None,
+                    "max_size_gb": None,
+                },
+                "tie_break": "biggest",
+                "tie_break_gb": None,
+            },
+            {
+                "match": {
+                    "resolutions": ["1080p"],
+                    "sources": [],
+                    "hdr": [],
+                    "audio": [],
+                    "min_size_gb": None,
+                    "max_size_gb": 15.0,
+                },
+                "tie_break": "biggest",
+                "tie_break_gb": None,
+            },
+        ],
+    )
+    session.add(stored)
+    await session.commit()
+    session.expunge_all()
+
+    loaded = (
+        await session.execute(select(QualityProfile).where(QualityProfile.name == "Tiered"))
+    ).scalar_one()
+
+    reparsed = ProfileSchema(
+        id=loaded.id, name=loaded.name, rules=loaded.rules, choices=loaded.choices
+    )
+    assert [choice.match.resolutions for choice in reparsed.choices] == [
+        ["2160p"],
+        ["1080p"],
+    ]
+    assert reparsed.choices[1].match.max_size_gb == 15.0
+
+
+async def test_a_profile_stored_before_choices_existed_still_loads(
+    session: AsyncSession,
+) -> None:
+    # The compatibility guarantee for the column: absent means one pool, which
+    # is exactly what those profiles always were.
+    schema = default_profile("Old")
+    session.add(
+        QualityProfile(
+            name=schema.name, rules=[r.model_dump(mode="json") for r in schema.rules]
+        )
+    )
+    await session.commit()
+    session.expunge_all()
+
+    loaded = (
+        await session.execute(select(QualityProfile).where(QualityProfile.name == "Old"))
+    ).scalar_one()
+    assert loaded.choices == []
+    assert ProfileSchema(name=loaded.name, rules=loaded.rules, choices=loaded.choices).choices == []
+
+
 async def test_a_profile_in_use_by_an_action_cannot_be_deleted(
     session: AsyncSession,
 ) -> None:

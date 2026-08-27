@@ -15,7 +15,14 @@ import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cplus_service.db.models import Action, ActivityLog, Config, EventType, User
+from cplus_service.db.models import (
+    Action,
+    ActivityLog,
+    Config,
+    EventType,
+    QualityProfile,
+    User,
+)
 
 from .conftest import PROWLARR_URL, SEERR_URL, grant, make_action, seerr_user_payload
 
@@ -186,6 +193,35 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
     }
     assert actions[grab_action.id]["kind"] == "grab"
     assert actions[grab_action.id]["recommended_release_guid"] == "guid-uhd"
+
+
+@respx.mock
+async def test_an_actions_recommendation_honours_the_profiles_choices(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # The whole path, end to end: a profile's choices have to reach the engine
+    # attached to it, or the button recommends one release while the admin page
+    # insists on another. The 4K copy is listed first and would win on its own,
+    # so only the choices can produce the answer below.
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160, WEB_1080])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    profile = await db.get(QualityProfile, action.quality_profile_id)
+    assert profile is not None
+    profile.choices = [
+        {"match": {"resolutions": ["1080p"]}, "tie_break": "biggest"},
+        {"match": {"resolutions": ["2160p"]}, "tie_break": "biggest"},
+    ]
+    await db.commit()
+    await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    # 1080p is the smaller, second-listed release; only the choices put it first.
+    assert ndjson(response)[0]["actions"][0]["recommended_release_guid"] == "guid-fhd"
 
 
 # --------------------------------------------------------------------------- #
