@@ -19,11 +19,14 @@
   {% for action in actions %}
     {% if action.is_system %}
       <tr class="system">
-        <form method="post" action="/admin/actions/{{ action.id }}/display-title"
-              id="action-title-{{ action.id }}"></form>
-        <td>{{ action.name }} <span class="badge">built in</span></td>
+        <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
         <td>
-          <input form="action-title-{{ action.id }}" type="text" name="display_title"
+          <input form="action-{{ action.id }}" type="text" name="name"
+                 value="{{ action.name }}" required>
+          <span class="badge">built in</span>
+        </td>
+        <td>
+          <input form="action-{{ action.id }}" type="text" name="display_title"
                  value="{{ action.display_title or '' }}" maxlength="128"
                  placeholder="{{ action.name }}">
         </td>
@@ -33,7 +36,7 @@
           supports TV as well as films.
         </td>
         <td class="right nowrap">
-          <button form="action-title-{{ action.id }}" type="submit" class="link">Save</button>
+          <button form="action-{{ action.id }}" type="submit" class="link">Save</button>
           <span class="muted">grant per user</span>
         </td>
       </tr>
@@ -111,9 +114,9 @@
   when those are the right words for two different audiences.
 </p>
 <p class="hint">
-  The name of the built-in <code>{{ request_action_name }}</code> action is part of the
-  client contract — clients route a button to the request endpoint by matching it,
-  which is why it cannot be renamed or reused. Its button title is only copy, so
-  that you can change.
+  The built-in action can be renamed like any other — nothing identifies an
+  action by its name. It cannot be deleted (the next start would seed it again)
+  and it takes no download client or quality profile, because it files a request
+  in Seerr rather than grabbing anything.
 </p>
 {% endblock %}

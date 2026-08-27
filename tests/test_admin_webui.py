@@ -1033,29 +1033,94 @@ async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -
     assert action.is_system is False
 
 
-async def test_an_action_cannot_take_the_reserved_request_name(
+async def test_no_name_is_reserved_because_no_name_identifies_anything(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
-    # The tvOS client routes on this name; letting an admin reuse it would
-    # silently break every client.
+    # The built-in action is found by its is_system flag and told apart on the
+    # wire by `kind`, so "Request" is a label like any other. Only the ordinary
+    # uniqueness constraint applies — and it is the built-in action that
+    # already holds this one.
     await signed_in(client, db)
     profile = QualityProfile(name="P", rules=[])
     db.add(profile)
     await db.commit()
 
-    for name in ("Request", "request", "REQUEST"):
-        response = await client.post(
-            "/admin/actions",
-            data={
-                "name": name,
-                "download_client_id": "5",
-                "quality_profile_id": str(profile.id),
-            },
-        )
-        assert response.status_code == 409, name
+    taken = await client.post(
+        "/admin/actions",
+        data={
+            "name": "Request",
+            "download_client_id": "5",
+            "quality_profile_id": str(profile.id),
+        },
+    )
+    assert taken.status_code == 409
+    assert "already exists" in taken.json()["detail"]
+
+    # Free the name on the built-in action, and it is available like any other.
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    await client.post(
+        f"/admin/actions/{system.id}", data={"name": "Ask the household"}
+    )
+    freed = await client.post(
+        "/admin/actions",
+        data={
+            "name": "Request",
+            "download_client_id": "5",
+            "quality_profile_id": str(profile.id),
+        },
+        follow_redirects=False,
+    )
+    assert freed.status_code == 303
 
 
-async def test_the_built_in_action_cannot_be_edited_or_deleted(
+async def test_the_built_in_action_can_be_renamed(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Nothing routes on it: the server finds this action by is_system and the
+    # client reads `kind`. So the admin who wants their request button filed
+    # under different words may have them.
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+
+    response = await client.post(
+        f"/admin/actions/{system.id}",
+        data={"name": "Ask the household", "display_title": "Ask for this"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await db.refresh(system)
+    assert system.name == "Ask the household"
+    assert system.display_title == "Ask for this"
+    assert system.is_system is True
+
+
+async def test_the_built_in_action_takes_no_prowlarr_targets(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # It files a request in Seerr and never touches Prowlarr, so a download
+    # client is not something it could use.
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+
+    response = await client.post(
+        f"/admin/actions/{system.id}",
+        data={"name": "Request", "download_client_id": "5", "quality_profile_id": "1"},
+    )
+    assert response.status_code == 400
+    assert "never touches" in response.json()["detail"]
+
+    await db.refresh(system)
+    assert system.download_client_id is None
+
+
+async def test_the_built_in_action_cannot_be_deleted(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
     await signed_in(client, db)
@@ -1063,17 +1128,28 @@ async def test_the_built_in_action_cannot_be_edited_or_deleted(
         await db.execute(select(Action).where(Action.is_system.is_(True)))
     ).scalar_one()
 
-    edit = await client.post(
-        f"/admin/actions/{system.id}",
-        data={"name": "Renamed", "download_client_id": "5", "quality_profile_id": "1"},
-    )
-    assert edit.status_code == 403
-
     delete = await client.post(f"/admin/actions/{system.id}/delete")
     assert delete.status_code == 403
 
-    await db.refresh(system)
-    assert system.name == "Request"
+    db.expunge_all()
+    assert await db.get(Action, system.id) is not None
+
+
+async def test_an_ordinary_action_still_needs_its_prowlarr_targets(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # The optional form fields exist for the built-in action's row, not as a
+    # way to strip a Prowlarr action of the things /grab depends on.
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}", data={"name": "Stream Now"}
+    )
+    assert response.status_code == 400
+
+    await db.refresh(action)
+    assert action.download_client_id == 5
 
 
 @respx.mock
@@ -1158,28 +1234,6 @@ async def test_a_blank_button_title_falls_back_to_the_name(
     assert action.button_title == "Stream Now"
 
 
-async def test_the_built_in_actions_button_title_can_be_changed(
-    client: httpx.AsyncClient, db: AsyncSession
-) -> None:
-    # Its name is the client's routing key, but the words on the button are
-    # only copy — so this is the one thing about it an admin may edit.
-    await signed_in(client, db)
-    system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
-    ).scalar_one()
-
-    response = await client.post(
-        f"/admin/actions/{system.id}/display-title",
-        data={"display_title": "Ask for this"},
-        follow_redirects=False,
-    )
-    assert response.status_code == 303
-
-    await db.refresh(system)
-    assert system.name == "Request"
-    assert system.display_title == "Ask for this"
-
-
 async def test_a_button_title_longer_than_the_column_is_rejected(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
@@ -1187,8 +1241,13 @@ async def test_a_button_title_longer_than_the_column_is_rejected(
     action = await make_action(db, "Stream Now")
 
     response = await client.post(
-        f"/admin/actions/{action.id}/display-title",
-        data={"display_title": "x" * 129},
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "display_title": "x" * 129,
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
     )
     assert response.status_code == 400
 

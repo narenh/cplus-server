@@ -14,10 +14,13 @@ do:
 Every action is reported with both a ``name`` and a ``display_title``, and the
 client should print the **display title** on the button. The name is the
 admin's own label — it identifies the action in the admin UI and in
-notification text, and for the built-in Request action it is the routing key —
-while the display title is copy chosen for whoever is holding the remote. An
-action with no display title configured reports its name in both fields, so a
-client can read ``display_title`` unconditionally.
+notification text — while the display title is copy chosen for whoever is
+holding the remote. An action with no display title configured reports its name
+in both fields, so a client can read ``display_title`` unconditionally.
+
+**Route on ``kind``, never on either of them.** Both are free text an admin can
+change at any moment, the built-in Request action's included; ``kind`` is what
+says whether pressing this button posts to ``/request`` or to ``/grab``.
 
 The full candidate list rides along in the same response, so pressing
 "view all releases" needs no second call — it is a client-side reveal of

@@ -577,12 +577,15 @@ posts to `/grab`. The full release list rides along in the same response, so
 
 **Print `display_title` on the button, not `name`.** Every action reports
 both. The name is the admin's own label — it identifies the action in the
-admin UI, the grab history and notification text, and for the built-in Request
-action it is the routing key — while `display_title` is copy chosen for
-whoever is holding the remote: an admin may file something as "Add to library
-in HD" and want the button to read "Play Now". An action with no button copy
-configured reports its name in both fields, so a client can read
+admin UI, the grab history and notification text — while `display_title` is
+copy chosen for whoever is holding the remote: an admin may file something as
+"Add to library in HD" and want the button to read "Play Now". An action with
+no button copy configured reports its name in both fields, so a client can read
 `display_title` unconditionally and never has to implement the fallback.
+
+**Route on `kind`, never on either of them.** Both are free text the admin can
+change at any moment, the built-in Request action's included; `kind` is what
+says whether pressing a button posts to `/request` or to `/grab`.
 
 **Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
 caller with none — zero actions, or only the built-in Request action, which
@@ -634,8 +637,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
 | `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, builder rebuild, delete |
 | `POST /admin/quality-profiles/preview` | Ranks a candidate set through the **unsaved** draft in the form. Sample releases by default; a real Prowlarr search with `preview_source=prowlarr` |
-| `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
-| `POST /admin/actions/{id}/display-title` | Just the button copy — the one edit the built-in action accepts |
+| `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD. The edit endpoint takes the built-in action too — its name and button title are editable, its Prowlarr targets are not, and delete refuses it |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
 
@@ -797,9 +799,9 @@ next start seeds it again.
 Seeded idempotently on startup, marked `is_system`, and carrying neither a
 download client nor a quality profile — a CHECK constraint allows those nulls
 only for a system action. Granted per user through the normal `permissions`
-table like any other action, but not editable or deletable — save for its
-`display_title`, the copy its button carries, which is not part of any
-contract and has its own endpoint.
+table like any other action. Its name and button title are the admin's to
+change like any other action's; it cannot be deleted, and it takes no download
+client or quality profile.
 
 It is the one part of the service that is **not** movies-only, and the one that
 is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
@@ -889,14 +891,13 @@ and says so rather than erroring.
 
 ### Guards worth knowing about
 
-* The built-in **Request** action is listed but read-only, and no other action
-  may take its name (`Request`, case-insensitively). The tvOS client routes on
-  that name, so renaming or reusing it would silently break every client. Its
-  **button title** is the one exception, and has its own endpoint
-  (`POST /admin/actions/{id}/display-title`): that field is pure copy — nothing
-  routes, joins or matches on it — so rewording the button cannot break a
-  client the way renaming the action would. The ordinary edit endpoint still
-  refuses a system action outright.
+* **No action name is reserved, and no name identifies anything.** The
+  built-in Request action can be renamed like any other: the server finds it by
+  `is_system` and clients tell a request button from a grab button by the
+  `kind` field, so a name is a label and nothing else. What the built-in one
+  refuses is a download client or a quality profile — it never touches
+  Prowlarr, so neither could mean anything — and deletion, since it is the only
+  route to `POST /request` and the next startup would seed it again anyway.
 * A quality profile still used by an action cannot be deleted; the page says
   which action is holding it.
 * An empty API-key field means "leave the saved key alone", and the saved key is

@@ -183,16 +183,21 @@ class Action(Base):
 
     The built-in Request action is the one exception: it is seeded with
     ``is_system=True`` and carries neither a download client nor a quality
-    profile, because it never touches Prowlarr.  A system action cannot be
-    edited or deleted, which is what makes its name a stable identifier — the
-    tvOS client routes on ``name == "Request"``.  The CHECK constraint keeps
-    the nullable columns from being abused: only a system action may omit them.
+    profile, because it never touches Prowlarr.  The CHECK constraint keeps the
+    nullable columns from being abused: only a system action may omit them.
+
+    ``is_system`` is that action's identity — every lookup of it goes through
+    the flag, and clients tell a request button from a grab button by the
+    ``kind`` field the actions payload carries.  Nothing anywhere identifies an
+    action by its name, which is why the built-in one can be renamed like any
+    other.  It cannot be deleted: it is the only route to ``POST /request``,
+    and the next startup would seed it again regardless.
 
     ``name`` and ``display_title`` are deliberately two different things.  The
-    name is the admin's own label — unique, used in the admin UI, in grab
-    history and in notification text, and for the system action it is part of
-    the client contract.  The display title is the copy the client prints on
-    the button, and it answers a different question: an admin may name an
+    name is the admin's own label — unique, and what identifies the action in
+    the admin UI, in grab history and in notification text.  The display title
+    is the copy the client prints on the button, and it answers a different
+    question: an admin may name an
     action "Add to library in HD" for their own bookkeeping while the person
     holding the remote should just see "Play Now".  It is optional; when it is
     unset the name is the button copy, which is why every existing install

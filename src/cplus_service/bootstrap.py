@@ -21,15 +21,15 @@ from .quality.models import default_profile
 
 logger = logging.getLogger(__name__)
 
-#: The system action's name is part of the client contract: tvOS routes a button
-#: to ``POST /request`` instead of ``POST /grab`` by matching on it. Because a
-#: system action cannot be renamed or deleted, that match is stable — but stage
-#: 3's admin UI must refuse to create or rename any other action to this name.
+#: What the built-in action is *called when seeded*, and nothing more. It is an
+#: ordinary label an admin may change: the server finds this action by
+#: ``is_system`` and clients tell it apart by the ``kind`` field in the actions
+#: payload, so no lookup anywhere goes through the name.
 REQUEST_ACTION_NAME = "Request"
 
-#: The starter profile's name. Unlike the Request action's name this is not a
-#: contract with anything — it is an ordinary profile an admin may rename,
-#: edit or delete once they have one of their own.
+#: The starter profile's name. Like every other name here it is a label and not
+#: a contract — an ordinary profile an admin may rename, edit or delete once
+#: they have one of their own.
 DEFAULT_PROFILE_NAME = "All"
 
 
@@ -53,12 +53,13 @@ async def ensure_request_action(session: AsyncSession) -> Action | None:
 
     clash = await session.execute(select(Action).where(Action.name == REQUEST_ACTION_NAME))
     if clash.scalars().first() is not None:
-        # An admin-defined action already holds the reserved name. Leave it
-        # alone rather than mangling their configuration; /request will report
-        # itself unavailable until the name is freed.
+        # Names are unique and an admin-defined action already holds this one.
+        # Reachable only on an install that predates the built-in action and
+        # already had one of its own called "Request"; leave their
+        # configuration alone rather than mangling it, and say what to do.
         logger.error(
-            "cannot seed the built-in Request action: a non-system action is already"
-            " named %r. Rename it to enable /request.",
+            "cannot seed the built-in request action: a non-system action is already"
+            " named %r. Rename that one to enable /request.",
             REQUEST_ACTION_NAME,
         )
         return None
