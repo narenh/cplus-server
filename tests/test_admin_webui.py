@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.auth.plex_cache import remember_token
 from cplus_service.auth.sessions import SESSION_COOKIE_NAME, create_session
+from cplus_service.bootstrap import DEFAULT_PROFILE_NAME
 from cplus_service.db.models import (
     Action,
     ActivityLog,
@@ -47,6 +48,21 @@ async def signed_in(client: httpx.AsyncClient, db: AsyncSession) -> User:
     await db.commit()
     client.cookies.set(SESSION_COOKIE_NAME, token)
     return admin
+
+
+async def profile_named(db: AsyncSession, name: str) -> QualityProfile | None:
+    """One profile by name.
+
+    Tests name what they are looking for rather than assuming the table holds
+    exactly one row: an install always starts with the seeded starter profile.
+    """
+    result = await db.execute(select(QualityProfile).where(QualityProfile.name == name))
+    return result.scalars().first()
+
+
+async def profile_names(db: AsyncSession) -> list[str]:
+    result = await db.execute(select(QualityProfile.name).order_by(QualityProfile.name))
+    return list(result.scalars().all())
 
 
 # --------------------------------------------------------------------------- #
@@ -495,8 +511,8 @@ async def test_creating_a_profile_stores_rules_the_engine_accepts(
     )
     assert response.status_code == 303
 
-    profile = (await db.execute(select(QualityProfile))).scalar_one()
-    assert profile.name == "4K"
+    profile = await profile_named(db, "4K")
+    assert profile is not None
     assert [rule["type"] for rule in profile.rules] == [
         "exclude_prerelease",
         "resolution_order",
@@ -523,7 +539,8 @@ async def test_rule_order_is_preserved_exactly_as_submitted(
         follow_redirects=False,
     )
 
-    profile = (await db.execute(select(QualityProfile))).scalar_one()
+    profile = await profile_named(db, "Ordered")
+    assert profile is not None
     assert [rule["type"] for rule in profile.rules] == ["source_order", "resolution_order"]
     assert profile.rules[0]["values"] == ["REMUX", "BluRay"]
     assert profile.rules[1]["values"] == ["1080p", "2160p"]
@@ -544,7 +561,7 @@ async def test_an_invalid_rule_value_is_reported_not_stored(
 
     assert response.status_code == 422
     assert "NOT_A_REAL_TAG" in response.text
-    assert (await db.execute(select(QualityProfile))).scalars().first() is None
+    assert await profile_named(db, "Bad") is None
 
 
 async def test_a_profile_needs_a_name(
@@ -553,7 +570,8 @@ async def test_a_profile_needs_a_name(
     await signed_in(client, db)
     response = await client.post("/admin/quality-profiles", data={"name": "  "})
     assert response.status_code == 422
-    assert (await db.execute(select(QualityProfile))).scalars().first() is None
+    # Nothing was stored: the starter profile seeded at startup is all there is.
+    assert await profile_names(db) == [DEFAULT_PROFILE_NAME]
 
 
 async def test_editing_a_profile_replaces_its_rules(
@@ -593,7 +611,8 @@ async def test_an_unchecked_toggle_is_stored_as_disabled(
         follow_redirects=False,
     )
 
-    profile = (await db.execute(select(QualityProfile))).scalar_one()
+    profile = await profile_named(db, "Off")
+    assert profile is not None
     assert profile.rules[0]["enabled"] is False
 
 
@@ -671,7 +690,7 @@ async def test_an_unused_profile_can_be_deleted(
         f"/admin/quality-profiles/{profile.id}/delete", follow_redirects=False
     )
     assert response.status_code == 303
-    assert (await db.execute(select(QualityProfile))).scalars().first() is None
+    assert await profile_named(db, "Spare") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -757,6 +776,37 @@ async def test_the_built_in_action_cannot_be_edited_or_deleted(
 
     await db.refresh(system)
     assert system.name == "Request"
+
+
+@respx.mock
+async def test_a_new_admin_can_create_an_action_without_building_a_profile_first(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    # The whole point of seeding the starter profile: the Actions page of a
+    # fresh install is usable, not a dead end pointing at another page.
+    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+        return_value=httpx.Response(200, json=[{"id": 5, "name": "qBittorrent"}])
+    )
+    await signed_in(client, db)
+
+    page = await client.get("/admin/actions")
+    assert page.status_code == 200
+    assert "Create a quality profile first" not in page.text
+    assert DEFAULT_PROFILE_NAME in page.text
+
+    starter = await profile_named(db, DEFAULT_PROFILE_NAME)
+    assert starter is not None
+
+    created = await client.post(
+        "/admin/actions",
+        data={
+            "name": "Stream Now",
+            "download_client_id": "5",
+            "quality_profile_id": str(starter.id),
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
 
 
 async def test_an_action_can_carry_button_copy_separate_from_its_name(

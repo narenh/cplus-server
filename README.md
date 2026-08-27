@@ -64,9 +64,13 @@ your proxy's TLS.
    the web UI has no non-admin use case.
 4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
    Optionally pick a preferred indexer; the default, *All indexers*, is fine.
-5. **Create at least one quality profile.** Every Prowlarr-backed action needs
-   one. Add filter rules to eliminate candidates and preference rules to rank
-   what survives — preference order is what decides ties.
+5. **Quality profiles.** Every Prowlarr-backed action needs one, so a fresh
+   install is seeded with a profile called **All** — it filters nothing and
+   ranks by the conventional order (resolution, source, HDR, audio, size), so
+   you can go straight to creating actions and come back to this later. Add
+   your own when you want something specific: filter rules eliminate
+   candidates, preference rules rank what survives, and preference order is
+   what decides ties.
 6. **Create actions** — a name, a Prowlarr download client, and a quality
    profile. These become the buttons in the client, e.g. "Stream Now", "Add 4K".
    Optionally give an action a **button title**: the name is yours (it labels
@@ -308,7 +312,7 @@ apply in the order they appear in the profile, each breaking the ties left by
 the previous. The conventional ordering (available as `default_profile()`) is:
 
 1. `repack_proper_priority` — prefers a REPACK/PROPER over the base release of the same underlying title. Title-diffed via `base_title`, not tag-matched: a REPACK of *another* movie never demotes an unrelated release.
-2. `resolution_order` — e.g. `["2160p", "1080p"]`
+2. `resolution_order` — `["2160p", "1080p", "720p", "480p"]`
 3. `source_order` — e.g. `["WEB-DL", "WEBRip", "BluRay", "REMUX"]`
 4. `hdr_match` — ordered HDR/DV tokens
 5. `audio_match` — ordered audio tokens
@@ -719,6 +723,29 @@ Authorisation is Seerr's, with one addition:
 Response bodies are passed through **verbatim**, so a client that previously
 talked to Seerr directly only has to change its base URL and swap the API key
 for its Plex token.
+
+---
+
+## Startup seeding
+
+Two things are seeded on startup rather than by a data migration, so an
+existing deployment picks them up on upgrade with nothing to run.
+
+**The built-in Request action** — always, if missing. See below.
+
+**A starter quality profile named `All`** — only when the `quality_profiles`
+table is empty. Every Prowlarr-backed action needs a profile, so an install
+with none has a dead end on the Actions page: an admin who has just connected
+Prowlarr is sent off to build a rule list before they can create the one button
+they came for. The starter removes that step.
+
+It is called `All` because it **filters nothing** — no candidate is ever
+eliminated by it — but it is not empty: it carries `default_profile()`'s
+conventional ranking, so its pick is the best available copy rather than
+whichever release an indexer happened to list first. Nothing keys off its name
+or id; it is an ordinary profile to rename, edit or delete. Deleting *every*
+profile puts the install back in the dead end this exists to prevent, so the
+next start seeds it again.
 
 ---
 
