@@ -11,6 +11,14 @@ do:
   one shared Prowlarr fetch, and reports its recommended release (or ``null``
   if nothing survived its filters).
 
+Every action is reported with both a ``name`` and a ``display_title``, and the
+client should print the **display title** on the button. The name is the
+admin's own label — it identifies the action in the admin UI and in
+notification text, and for the built-in Request action it is the routing key —
+while the display title is copy chosen for whoever is holding the remote. An
+action with no display title configured reports its name in both fields, so a
+client can read ``display_title`` unconditionally.
+
 The full candidate list rides along in the same response, so pressing
 "view all releases" needs no second call — it is a client-side reveal of
 ``releases``, not a fetch.
@@ -70,6 +78,7 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
         ScorableAction(
             id=action.id,
             name=action.name,
+            display_title=action.button_title,
             profile=ProfileSchema(id=profile.id, name=profile.name, rules=profile.rules),
         )
         for action, profile in result.all()
@@ -117,6 +126,7 @@ async def title_actions(
         request_offer = {
             "id": request_action.id,
             "name": request_action.name,
+            "display_title": request_action.button_title,
             "kind": KIND_REQUEST,
             "recommended_release_guid": None,
         }
@@ -171,6 +181,7 @@ async def title_actions(
                     {
                         "id": action.id,
                         "name": action.name,
+                        "display_title": action.display_title or action.name,
                         "kind": KIND_GRAB,
                         "recommended_release_guid": recommendations.get(str(action.id)),
                     }

@@ -175,6 +175,16 @@ class Action(Base):
     edited or deleted, which is what makes its name a stable identifier — the
     tvOS client routes on ``name == "Request"``.  The CHECK constraint keeps
     the nullable columns from being abused: only a system action may omit them.
+
+    ``name`` and ``display_title`` are deliberately two different things.  The
+    name is the admin's own label — unique, used in the admin UI, in grab
+    history and in notification text, and for the system action it is part of
+    the client contract.  The display title is the copy the client prints on
+    the button, and it answers a different question: an admin may name an
+    action "Add to library in HD" for their own bookkeeping while the person
+    holding the remote should just see "Play Now".  It is optional; when it is
+    unset the name is the button copy, which is why every existing install
+    keeps behaving exactly as before.
     """
 
     __tablename__ = "actions"
@@ -188,6 +198,13 @@ class Action(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
+
+    #: Optional button copy for the client.  Not unique — two actions may
+    #: reasonably print the same words — and never used to identify anything.
+    #: ``None`` means "use the name", which is what every action created before
+    #: this column existed does.
+    display_title: Mapped[str | None] = mapped_column(String(128))
+
     download_client_id: Mapped[int | None] = mapped_column(Integer)
     quality_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("quality_profiles.id", ondelete="RESTRICT")
@@ -198,6 +215,14 @@ class Action(Base):
         back_populates="actions", lazy="selectin"
     )
     users: Mapped[list[User]] = relationship(secondary="permissions", back_populates="actions")
+
+    @property
+    def button_title(self) -> str:
+        """The copy a client should print on this action's button.
+
+        The one place the fallback lives, so no caller has to remember it.
+        """
+        return self.display_title or self.name
 
 
 class Permission(Base):

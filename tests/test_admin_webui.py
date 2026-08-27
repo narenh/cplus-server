@@ -759,6 +759,95 @@ async def test_the_built_in_action_cannot_be_edited_or_deleted(
     assert system.name == "Request"
 
 
+async def test_an_action_can_carry_button_copy_separate_from_its_name(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    profile = QualityProfile(name="P", rules=[])
+    db.add(profile)
+    await db.commit()
+
+    response = await client.post(
+        "/admin/actions",
+        data={
+            "name": "Add to library in HD",
+            "display_title": "  Play Now  ",
+            "download_client_id": "5",
+            "quality_profile_id": str(profile.id),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    action = (
+        await db.execute(select(Action).where(Action.name == "Add to library in HD"))
+    ).scalar_one()
+    assert action.display_title == "Play Now"
+    assert action.button_title == "Play Now"
+
+
+async def test_a_blank_button_title_falls_back_to_the_name(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+    action.display_title = "Play Now"
+    await db.commit()
+
+    await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "display_title": "   ",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+
+    await db.refresh(action)
+    assert action.display_title is None
+    assert action.button_title == "Stream Now"
+
+
+async def test_the_built_in_actions_button_title_can_be_changed(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Its name is the client's routing key, but the words on the button are
+    # only copy — so this is the one thing about it an admin may edit.
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+
+    response = await client.post(
+        f"/admin/actions/{system.id}/display-title",
+        data={"display_title": "Ask for this"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await db.refresh(system)
+    assert system.name == "Request"
+    assert system.display_title == "Ask for this"
+
+
+async def test_a_button_title_longer_than_the_column_is_rejected(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}/display-title",
+        data={"display_title": "x" * 129},
+    )
+    assert response.status_code == 400
+
+    await db.refresh(action)
+    assert action.display_title is None
+
+
 async def test_editing_and_deleting_an_ordinary_action(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:

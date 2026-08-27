@@ -215,6 +215,15 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
   background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
 }
 
+/* Says who a column is for, in the header, so the difference between the
+   admin's own name for an action and the copy its button carries is visible
+   without reading the note under the table. */
+.th-hint {
+  font-weight: 400; text-transform: none; letter-spacing: 0;
+  opacity: .75; font-size: 12px; margin-left: 4px;
+}
+.th-hint::before { content: "· "; }
+
 /* Notifications ----------------------------------------------------------- */
 
 /* The master switch. Larger than the per-type toggles and set on its own line,
