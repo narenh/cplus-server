@@ -64,11 +64,20 @@ your proxy's TLS.
    the web UI has no non-admin use case.
 4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
    Optionally pick a preferred indexer; the default, *All indexers*, is fine.
-5. **Create at least one quality profile.** Every Prowlarr-backed action needs
-   one. Add filter rules to eliminate candidates and preference rules to rank
-   what survives — preference order is what decides ties.
+5. **Quality profiles.** Every Prowlarr-backed action needs one, so a fresh
+   install is seeded with a profile called **All** — it filters nothing and
+   ranks by the conventional order (resolution, source, HDR, audio, size), so
+   you can go straight to creating actions and come back to this later. Add
+   your own when you want something specific: filter rules eliminate
+   candidates, preference rules rank what survives, and preference order is
+   what decides ties.
 6. **Create actions** — a name, a Prowlarr download client, and a quality
    profile. These become the buttons in the client, e.g. "Stream Now", "Add 4K".
+   Optionally give an action a **button title**: the name is yours (it labels
+   the action in the admin UI, the grab history and notifications), while the
+   button title is what the app prints on the button. Name one "Add to library
+   in HD" and title its button "Play Now" when those are the right words for
+   two different audiences. Leave it blank and the name is used.
 7. **Assign permissions.** Users appear on the Permissions page the first time
    their client signs in, so have each user open the app once, then tick the
    actions they may use — including the built-in *Request* action.
@@ -303,7 +312,7 @@ apply in the order they appear in the profile, each breaking the ties left by
 the previous. The conventional ordering (available as `default_profile()`) is:
 
 1. `repack_proper_priority` — prefers a REPACK/PROPER over the base release of the same underlying title. Title-diffed via `base_title`, not tag-matched: a REPACK of *another* movie never demotes an unrelated release.
-2. `resolution_order` — e.g. `["2160p", "1080p"]`
+2. `resolution_order` — `["2160p", "1080p", "720p", "480p"]`
 3. `source_order` — e.g. `["WEB-DL", "WEBRip", "BluRay", "REMUX"]`
 4. `hdr_match` — ordered HDR/DV tokens
 5. `audio_match` — ordered audio tokens
@@ -379,7 +388,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`. Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `quality_profiles` | `name`, `rules` (ordered JSON list) |
-| `actions` | `name`, `download_client_id`, `quality_profile_id` |
+| `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
@@ -524,6 +533,15 @@ client routes a press on `kind`: `"request"` posts to `/request`, `"grab"`
 posts to `/grab`. The full release list rides along in the same response, so
 "view all releases" needs no second call.
 
+**Print `display_title` on the button, not `name`.** Every action reports
+both. The name is the admin's own label — it identifies the action in the
+admin UI, the grab history and notification text, and for the built-in Request
+action it is the routing key — while `display_title` is copy chosen for
+whoever is holding the remote: an admin may file something as "Add to library
+in HD" and want the button to read "Play Now". An action with no button copy
+configured reports its name in both fields, so a client can read
+`display_title` unconditionally and never has to implement the fallback.
+
 **Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
 caller with none — zero actions, or only the built-in Request action, which
 never touches Prowlarr — never triggers a search on `/titles/{imdb_id}/actions`;
@@ -574,6 +592,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
 | `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, rule builder, delete |
 | `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD |
+| `POST /admin/actions/{id}/display-title` | Just the button copy — the one edit the built-in action accepts |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
 
@@ -644,8 +663,8 @@ For an `imdb_id`-scoped search with a preferred indexer and
 The response is NDJSON, one object per line:
 
 ```
-{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add 4K","kind":"grab","recommended_release_guid":null}]}
-{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add 4K","kind":"grab","recommended_release_guid":"guid-b"},{"id":3,"name":"Request","kind":"request","recommended_release_guid":null}]}
+{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","recommended_release_guid":null}]}
+{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","recommended_release_guid":"guid-b"},{"id":3,"name":"Request","display_title":"Request","kind":"request","recommended_release_guid":null}]}
 ```
 
 **Client merge rule: apply the last line you received, wholesale.** Union the
@@ -707,12 +726,37 @@ for its Plex token.
 
 ---
 
+## Startup seeding
+
+Two things are seeded on startup rather than by a data migration, so an
+existing deployment picks them up on upgrade with nothing to run.
+
+**The built-in Request action** — always, if missing. See below.
+
+**A starter quality profile named `All`** — only when the `quality_profiles`
+table is empty. Every Prowlarr-backed action needs a profile, so an install
+with none has a dead end on the Actions page: an admin who has just connected
+Prowlarr is sent off to build a rule list before they can create the one button
+they came for. The starter removes that step.
+
+It is called `All` because it **filters nothing** — no candidate is ever
+eliminated by it — but it is not empty: it carries `default_profile()`'s
+conventional ranking, so its pick is the best available copy rather than
+whichever release an indexer happened to list first. Nothing keys off its name
+or id; it is an ordinary profile to rename, edit or delete. Deleting *every*
+profile puts the install back in the dead end this exists to prevent, so the
+next start seeds it again.
+
+---
+
 ## Built-in Request action
 
 Seeded idempotently on startup, marked `is_system`, and carrying neither a
 download client nor a quality profile — a CHECK constraint allows those nulls
 only for a system action. Granted per user through the normal `permissions`
-table like any other action, but not editable or deletable.
+table like any other action, but not editable or deletable — save for its
+`display_title`, the copy its button carries, which is not part of any
+contract and has its own endpoint.
 
 It is the one part of the service that is **not** movies-only, and the one that
 is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
@@ -761,7 +805,12 @@ instead of a broken profile.
 
 * The built-in **Request** action is listed but read-only, and no other action
   may take its name (`Request`, case-insensitively). The tvOS client routes on
-  that name, so renaming or reusing it would silently break every client.
+  that name, so renaming or reusing it would silently break every client. Its
+  **button title** is the one exception, and has its own endpoint
+  (`POST /admin/actions/{id}/display-title`): that field is pure copy — nothing
+  routes, joins or matches on it — so rewording the button cannot break a
+  client the way renaming the action would. The ordinary edit endpoint still
+  refuses a system action outright.
 * A quality profile still used by an action cannot be deleted; the page says
   which action is holding it.
 * An empty API-key field means "leave the saved key alone", and the saved key is

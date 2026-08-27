@@ -79,6 +79,10 @@ class ScorableAction:
     id: int
     name: str
     profile: QualityProfile
+    #: The button copy, already resolved — an action's ``display_title`` when
+    #: it has one, otherwise its name. Carried alongside the name rather than
+    #: replacing it because the two are reported separately on the wire.
+    display_title: str = ""
 
 
 @dataclass(frozen=True, slots=True)

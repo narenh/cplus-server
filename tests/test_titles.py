@@ -117,6 +117,8 @@ async def test_titles_streams_ndjson_with_action_offers(
         {
             "id": action.id,
             "name": "Stream Now",
+            # No display title configured, so the button copy is the name.
+            "display_title": "Stream Now",
             "kind": "grab",
             "recommended_release_guid": "guid-uhd",
         }
@@ -178,11 +180,69 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
     assert actions[request_action.id] == {
         "id": request_action.id,
         "name": "Request",
+        "display_title": "Request",
         "kind": "request",
         "recommended_release_guid": None,
     }
     assert actions[grab_action.id]["kind"] == "grab"
     assert actions[grab_action.id]["recommended_release_guid"] == "guid-uhd"
+
+
+# --------------------------------------------------------------------------- #
+# Button copy
+#
+# The admin's name for an action and the words on the button are two different
+# things: an admin may file something as "Add to library in HD" while the
+# person holding the remote should just see "Play Now".
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_display_title_becomes_the_button_copy_without_changing_the_name(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Add to library in HD")
+    action.display_title = "Play Now"
+    await db.commit()
+    await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    offer = ndjson(response)[0]["actions"][0]
+    assert offer["display_title"] == "Play Now"
+    # The name is unchanged: it is what the admin UI, the grab history and the
+    # notification text call this action.
+    assert offer["name"] == "Add to library in HD"
+
+
+@respx.mock
+async def test_the_request_action_can_carry_button_copy_too(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Its *name* is the client's routing key and cannot move; the copy on the
+    # button is not, so an admin may reword it.
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    request_action = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    request_action.display_title = "Ask for this"
+    await db.commit()
+    await grant(db, user, request_action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    offer = ndjson(response)[0]["actions"][0]
+    assert offer["name"] == "Request"
+    assert offer["display_title"] == "Ask for this"
+    assert offer["kind"] == "request"
 
 
 # --------------------------------------------------------------------------- #
@@ -237,6 +297,7 @@ async def test_a_user_with_only_the_request_action_never_triggers_a_search(
                 {
                     "id": request_action.id,
                     "name": "Request",
+                    "display_title": "Request",
                     "kind": "request",
                     "recommended_release_guid": None,
                 }

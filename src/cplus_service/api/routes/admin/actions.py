@@ -4,6 +4,12 @@ The built-in Request action is listed but never editable: it has no download
 client and no quality profile to edit, and its name is part of the tvOS client
 contract — the client routes a button to ``POST /request`` by matching on it.
 Renaming or deleting it would silently break every client.
+
+Its **display title** is the one exception, and has its own endpoint. That
+field is pure client copy — nothing routes, joins or matches on it — so an
+admin can make the Request button say "Ask for this" without touching the name
+the contract depends on. The separate endpoint is what keeps the two apart: the
+edit endpoint below still refuses a system action outright.
 """
 
 from __future__ import annotations
@@ -40,6 +46,23 @@ async def _download_clients(state: StateDep, db: DbDep) -> tuple[list[dict], str
         ], None
     except ProwlarrError as exc:
         return [], str(exc)
+
+
+#: Matches ``Action.display_title``'s column width; the form is client input.
+MAX_DISPLAY_TITLE = 128
+
+
+def _clean_display_title(raw: str) -> str | None:
+    """Normalise the button-copy field. Blank means "use the name"."""
+    clean = raw.strip()
+    if not clean:
+        return None
+    if len(clean) > MAX_DISPLAY_TITLE:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"A button title can be at most {MAX_DISPLAY_TITLE} characters.",
+        )
+    return clean
 
 
 async def _editable(db: DbDep, action_id: int) -> Action:
@@ -96,6 +119,7 @@ async def create_action(
     name: str = Form(...),
     download_client_id: int = Form(...),
     quality_profile_id: int = Form(...),
+    display_title: str = Form(default=""),
 ) -> Response:
     clean = name.strip()
     if not clean:
@@ -111,6 +135,7 @@ async def create_action(
     db.add(
         Action(
             name=clean,
+            display_title=_clean_display_title(display_title),
             download_client_id=download_client_id,
             quality_profile_id=quality_profile_id,
         )
@@ -134,6 +159,7 @@ async def update_action(
     name: str = Form(...),
     download_client_id: int = Form(...),
     quality_profile_id: int = Form(...),
+    display_title: str = Form(default=""),
 ) -> Response:
     action = await _editable(db, action_id)
     clean = name.strip()
@@ -148,6 +174,7 @@ async def update_action(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
 
     action.name = clean
+    action.display_title = _clean_display_title(display_title)
     action.download_client_id = download_client_id
     action.quality_profile_id = quality_profile_id
     try:
@@ -158,6 +185,27 @@ async def update_action(
             status.HTTP_409_CONFLICT, f"An action named '{clean}' already exists."
         ) from exc
 
+    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/{action_id}/display-title")
+async def update_display_title(
+    db: DbDep,
+    admin: AdminPageDep,
+    action_id: int,
+    display_title: str = Form(default=""),
+) -> Response:
+    """Set just the button copy — allowed on the built-in action too.
+
+    Nothing routes or joins on this field, so changing it on the system action
+    cannot break the client contract the way renaming it would.
+    """
+    action = await db.get(Action, action_id)
+    if action is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such action")
+
+    action.display_title = _clean_display_title(display_title)
+    await db.flush()
     return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
 
 

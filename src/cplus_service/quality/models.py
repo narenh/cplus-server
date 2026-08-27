@@ -219,12 +219,25 @@ def default_profile(name: str = "Default") -> QualityProfile:
 
     Matches the priority order described in the spec: repack/proper, then
     resolution, source, HDR, audio, and size as the final tie-break.
+
+    **No filter rules at all**, which is what makes it safe to seed for a new
+    admin who has not decided anything yet: it never eliminates a candidate, it
+    only decides which of them is best.  The resolution ladder names every
+    resolution rather than stopping at 1080p, so a profile built from this
+    ranks an SD copy over an unparseable one instead of leaving both unranked.
     """
     return QualityProfile(
         name=name,
         rules=[
             RepackProperPriorityRule(),
-            ResolutionOrderRule(values=[Resolution.UHD_2160P, Resolution.FHD_1080P]),
+            ResolutionOrderRule(
+                values=[
+                    Resolution.UHD_2160P,
+                    Resolution.FHD_1080P,
+                    Resolution.HD_720P,
+                    Resolution.SD_480P,
+                ]
+            ),
             SourceOrderRule(
                 values=[Source.WEB_DL, Source.WEBRIP, Source.BLURAY, Source.REMUX]
             ),
