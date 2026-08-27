@@ -1033,46 +1033,97 @@ async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -
     assert action.is_system is False
 
 
-async def test_no_name_is_reserved_because_no_name_identifies_anything(
-    client: httpx.AsyncClient, db: AsyncSession
+@pytest.mark.parametrize("word", ["Request", "request", "REQUEST", "  ReQuEsT  "])
+@pytest.mark.parametrize("field", ["name", "display_title"])
+async def test_only_the_built_in_action_may_say_request(
+    client: httpx.AsyncClient, db: AsyncSession, word: str, field: str
 ) -> None:
-    # The built-in action is found by its is_system flag and told apart on the
-    # wire by `kind`, so "Request" is a label like any other. Only the ordinary
-    # uniqueness constraint applies — and it is the built-in action that
-    # already holds this one.
+    # Not a routing rule — nothing looks an action up by its words. "Request"
+    # is what this service calls filing a request in Seerr, so a grab button
+    # wearing it would promise a user the one thing it cannot do.
     await signed_in(client, db)
     profile = QualityProfile(name="P", rules=[])
     db.add(profile)
     await db.commit()
 
-    taken = await client.post(
-        "/admin/actions",
+    form = {
+        "name": "Stream Now",
+        "download_client_id": "5",
+        "quality_profile_id": str(profile.id),
+    }
+    response = await client.post("/admin/actions", data={**form, field: word})
+
+    assert response.status_code == 409
+    assert "built-in action" in response.json()["detail"]
+    # Nothing was written: the built-in action is still the only one there is.
+    saved = (await db.execute(select(Action))).scalars().all()
+    assert [action.is_system for action in saved] == [True]
+
+
+async def test_renaming_an_action_to_the_reserved_word_is_refused_too(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}",
         data={
-            "name": "Request",
+            "name": "REQUEST",
             "download_client_id": "5",
-            "quality_profile_id": str(profile.id),
+            "quality_profile_id": str(action.quality_profile_id),
         },
     )
-    assert taken.status_code == 409
-    assert "already exists" in taken.json()["detail"]
+    assert response.status_code == 409
 
-    # Free the name on the built-in action, and it is available like any other.
-    system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
-    ).scalar_one()
-    await client.post(
-        f"/admin/actions/{system.id}", data={"name": "Ask the household"}
-    )
-    freed = await client.post(
+    await db.refresh(action)
+    assert action.name == "Stream Now"
+
+
+async def test_the_reserved_word_is_the_whole_label_not_a_substring(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # "Request" is the claim being reserved. "Request in 4K" is an admin's own
+    # words about their own button, and none of our business.
+    await signed_in(client, db)
+    profile = QualityProfile(name="P", rules=[])
+    db.add(profile)
+    await db.commit()
+
+    response = await client.post(
         "/admin/actions",
         data={
-            "name": "Request",
+            "name": "Request in 4K",
+            "display_title": "Requested by me",
             "download_client_id": "5",
             "quality_profile_id": str(profile.id),
         },
         follow_redirects=False,
     )
-    assert freed.status_code == 303
+    assert response.status_code == 303
+
+
+async def test_the_built_in_action_keeps_the_word_it_is_named_after(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # It is the action the word describes, so the guard cannot apply to it —
+    # including when an admin renames it back after trying something else.
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+
+    await client.post(f"/admin/actions/{system.id}", data={"name": "Ask the household"})
+    response = await client.post(
+        f"/admin/actions/{system.id}",
+        data={"name": "Request", "display_title": "Request"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await db.refresh(system)
+    assert system.name == "Request"
+    assert system.display_title == "Request"
 
 
 async def test_the_built_in_action_can_be_renamed(

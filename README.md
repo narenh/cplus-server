@@ -800,7 +800,8 @@ Seeded idempotently on startup, marked `is_system`, and carrying neither a
 download client nor a quality profile — a CHECK constraint allows those nulls
 only for a system action. Granted per user through the normal `permissions`
 table like any other action. Its name and button title are the admin's to
-change like any other action's; it cannot be deleted, and it takes no download
+change like any other action's — and it is the only action allowed to use the
+word `Request` for either. It cannot be deleted, and it takes no download
 client or quality profile.
 
 It is the one part of the service that is **not** movies-only, and the one that
@@ -891,10 +892,14 @@ and says so rather than erroring.
 
 ### Guards worth knowing about
 
-* **No action name is reserved, and no name identifies anything.** The
-  built-in Request action can be renamed like any other: the server finds it by
+* **No name identifies anything, but one word is held back.** The built-in
+  Request action can be renamed like any other: the server finds it by
   `is_system` and clients tell a request button from a grab button by the
-  `kind` field, so a name is a label and nothing else. What the built-in one
+  `kind` field, so a name is a label. The exception is about meaning rather
+  than machinery — only the built-in action may be named or titled `Request`
+  (any capitalisation, whole label, not a substring), because that word is what
+  this service calls filing a request in Seerr and a grab button wearing it
+  would promise a user the one thing it cannot do. What the built-in one
   refuses is a download client or a quality profile — it never touches
   Prowlarr, so neither could mean anything — and deletion, since it is the only
   route to `POST /request` and the next startup would seed it again anyway.

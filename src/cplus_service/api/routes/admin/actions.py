@@ -7,6 +7,13 @@ from a grab button by the ``kind`` field in the actions payload. So a name is a
 label and nothing else, and an admin who wants their Request button filed as
 "Ask the household" may have it.
 
+One word is held back, and for a reason about meaning rather than machinery:
+"Request" is what this service calls filing a request in Seerr, so only the
+built-in action may be named or titled it. A grab button labelled *Request*
+would tell a user it was going to do the one thing it cannot. Nothing breaks if
+it happens — no lookup consults the word — it is simply a lie to whoever is
+holding the remote, so the admin UI declines to write it.
+
 What the built-in action still refuses is a download client or a quality
 profile — it never touches Prowlarr, so there is nothing for either to mean —
 and deletion, because it is the only route to ``POST /request`` and the next
@@ -22,6 +29,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from ....bootstrap import REQUEST_ACTION_NAME
 from ....db.models import Action, QualityProfile
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
@@ -63,6 +71,23 @@ def _clean_display_title(raw: str) -> str | None:
             f"A button title can be at most {MAX_DISPLAY_TITLE} characters.",
         )
     return clean
+
+
+def _reject_reserved_word(value: str | None, *, field: str) -> None:
+    """Keep "Request", however capitalised, to the built-in action.
+
+    Matched on the whole label rather than as a substring: "Request" is the
+    claim being reserved, while "Request in 4K" or "Requested" are an admin's
+    own words and none of our business.
+    """
+    if value is None or value.casefold() != REQUEST_ACTION_NAME.casefold():
+        return
+    raise HTTPException(
+        status.HTTP_409_CONFLICT,
+        f"'{REQUEST_ACTION_NAME}' belongs to the built-in action — it means"
+        " filing a request in Seerr, which this action cannot do. Pick another"
+        f" {field}.",
+    )
 
 
 async def _load(db: DbDep, action_id: int) -> Action:
@@ -117,13 +142,16 @@ async def create_action(
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
+    clean_title = _clean_display_title(display_title)
+    _reject_reserved_word(clean, field="name")
+    _reject_reserved_word(clean_title, field="button title")
     if await db.get(QualityProfile, quality_profile_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
 
     db.add(
         Action(
             name=clean,
-            display_title=_clean_display_title(display_title),
+            display_title=clean_title,
             download_client_id=download_client_id,
             quality_profile_id=quality_profile_id,
         )
@@ -160,8 +188,10 @@ async def update_action(
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
+    clean_title = _clean_display_title(display_title)
 
     if action.is_system:
+        # The reserved word is its own — this is the action the word describes.
         if download_client_id is not None or quality_profile_id is not None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
@@ -169,6 +199,8 @@ async def update_action(
                 " Prowlarr, so it takes no download client or quality profile.",
             )
     else:
+        _reject_reserved_word(clean, field="name")
+        _reject_reserved_word(clean_title, field="button title")
         # Guaranteed by ck_action_targets_required_unless_system, and worth a
         # readable error rather than an IntegrityError from the flush.
         if download_client_id is None or quality_profile_id is None:
@@ -183,7 +215,7 @@ async def update_action(
     # request's transaction back anyway, but a half-applied action is not a
     # state worth being able to reason about.
     action.name = clean
-    action.display_title = _clean_display_title(display_title)
+    action.display_title = clean_title
     if not action.is_system:
         action.download_client_id = download_client_id
         action.quality_profile_id = quality_profile_id

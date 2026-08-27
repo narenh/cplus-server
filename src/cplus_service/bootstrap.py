@@ -21,10 +21,12 @@ from .quality.models import default_profile
 
 logger = logging.getLogger(__name__)
 
-#: What the built-in action is *called when seeded*, and nothing more. It is an
-#: ordinary label an admin may change: the server finds this action by
-#: ``is_system`` and clients tell it apart by the ``kind`` field in the actions
-#: payload, so no lookup anywhere goes through the name.
+#: What the built-in action is called when seeded, and the one word the admin
+#: UI keeps for it. Nothing *looks it up* by name — the server finds this action
+#: by ``is_system`` and clients tell it apart by the ``kind`` field in the
+#: actions payload — so an admin may rename it freely. The word is reserved for
+#: a different reason: it names what this service does when it files a request
+#: in Seerr, so no other action may wear it and mislead whoever presses it.
 REQUEST_ACTION_NAME = "Request"
 
 #: The starter profile's name. Like every other name here it is a label and not
