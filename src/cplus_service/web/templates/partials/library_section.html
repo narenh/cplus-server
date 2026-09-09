@@ -46,8 +46,8 @@
           {% endif %}
           {# Hidden until the field actually differs from data-original — see
              static/library-editor.js. Submits the same rename form above. #}
-          <button form="rename-{{ library.id }}" type="submit" class="link"
-                  data-save-for="library-name-{{ library.id }}" hidden>Save</button>
+          <button form="rename-{{ library.id }}" type="submit" class="link hidden"
+                  data-save-for="library-name-{{ library.id }}">Save</button>
 
           <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
 
@@ -55,7 +55,14 @@
                 hx-post="/admin/libraries/{{ library.id }}/remove"
                 hx-target="#default-libraries" hx-swap="outerHTML">
             <button type="submit" class="icon danger" title="Remove {{ library.name }}"
-                    aria-label="Remove {{ library.name }}">&#128465;</button>
+                    aria-label="Remove {{ library.name }}">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h18"/>
+                <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              </svg>
+            </button>
           </form>
         </div>
       {% endfor %}

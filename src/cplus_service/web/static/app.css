@@ -394,7 +394,10 @@ table.preview .dropped-by { color: var(--err); }
    remove buttons. The <form> wrapping it is display:contents so it takes no
    layout space of its own — the button reads as a direct row child. */
 .reorder-row form.remove-form { display: contents; }
-.reorder-row button.icon { font-size: 13px; }
+.reorder-row button.icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px 7px;
+}
 
 /* A shelf carries a small grid of fields rather than one line, so it drops
    the row's flex layout in favour of stacking the grid above its own actions. */
