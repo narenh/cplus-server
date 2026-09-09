@@ -146,11 +146,12 @@ async def test_adding_a_library_stores_it_in_the_canopyplus_shape(
 ) -> None:
     await signed_in(client, db)
 
-    response = await client.post(
-        "/admin/libraries", data={"library_id": "1"}, follow_redirects=False
-    )
+    response = await client.post("/admin/libraries", data={"library_id": "1"})
 
-    assert response.status_code == 303
+    # No redirect: the response is the updated card itself, swapped in place.
+    assert response.status_code == 200
+    assert 'id="default-libraries"' in response.text
+    assert "Movies (4K HDR)" in response.text
     config = await current_config(db)
     assert config.default_libraries == [
         {
@@ -201,11 +202,11 @@ async def test_renaming_a_library_leaves_its_server_title_untouched(
     await default_library(db, library_id="1", server_title="Movies (4K HDR)")
     await signed_in(client, db)
 
-    response = await client.post(
-        "/admin/libraries/1/rename", data={"name": "Movies"}, follow_redirects=False
-    )
+    response = await client.post("/admin/libraries/1/rename", data={"name": "Movies"})
 
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert 'value="Movies"' in response.text
+    assert "Plex: Movies (4K HDR)" in response.text
     config = await current_config(db)
     assert config.default_libraries[0]["name"] == "Movies"
     assert config.default_libraries[0]["serverTitle"] == "Movies (4K HDR)"
@@ -236,9 +237,11 @@ async def test_removing_a_library(client: httpx.AsyncClient, db: AsyncSession) -
     await default_library(db, library_id="2", server_title="TV")
     await signed_in(client, db)
 
-    response = await client.post("/admin/libraries/1/remove", follow_redirects=False)
+    response = await client.post("/admin/libraries/1/remove")
 
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert 'data-reorder-id="1"' not in response.text
+    assert 'data-reorder-id="2"' in response.text
     config = await current_config(db)
     assert [library["id"] for library in config.default_libraries] == ["2"]
 
@@ -250,12 +253,10 @@ async def test_reordering_libraries(client: httpx.AsyncClient, db: AsyncSession)
     await signed_in(client, db)
 
     response = await client.post(
-        "/admin/libraries/reorder",
-        data={"order": ["3", "1", "2"]},
-        follow_redirects=False,
+        "/admin/libraries/reorder", data={"order": ["3", "1", "2"]}
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
     config = await current_config(db)
     assert [library["id"] for library in config.default_libraries] == ["3", "1", "2"]
 

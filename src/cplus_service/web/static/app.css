@@ -383,8 +383,18 @@ table.preview .dropped-by { color: var(--err); }
 }
 .reorder-row.dragging { opacity: .4; }
 .drag-handle { color: var(--muted); cursor: grab; line-height: 1; user-select: none; }
+/* The name field grows to fill the row, which is what pushes the trailing
+   controls (Save, the drag handle, the remove button) to the right without
+   a margin-left:auto trick — there is nothing else left to grow into. */
 .reorder-row input[type=text] { width: auto; flex: 1; min-width: 140px; }
 .row-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* A trash-can remove button, inline at the end of a row. Same box as any
+   other .icon button; .danger tints it red, same as the builder's own
+   remove buttons. The <form> wrapping it is display:contents so it takes no
+   layout space of its own — the button reads as a direct row child. */
+.reorder-row form.remove-form { display: contents; }
+.reorder-row button.icon { font-size: 13px; }
 
 /* A shelf carries a small grid of fields rather than one line, so it drops
    the row's flex layout in favour of stacking the grid above its own actions. */

@@ -16,13 +16,22 @@ nothing to translate:
   its Home tab, built from the same "content source" menu CanopyPlus itself
   offers when editing a shelf. See :mod:`.home_sources`.
 
-Every write here is an ordinary form post that redirects back to the page,
-the same style as ``actions.py`` and ``permissions.py`` — reordering included:
-the drag-and-drop list (``static/reorder.js``) is live while dragging, and
-commits by submitting a hidden form on drop. The one exception is the
-carousel's two on/off switches, which write through immediately like the
-Notifications tab's switches, and "Reconnect", which mirrors the "Verify
-Prowlarr connection" button.
+**Default Libraries writes in place, with no page reload.** Every add, rename,
+remove and reorder posts via htmx and gets back the whole card
+(``partials/library_section.html``), swapped in by id — the same pattern
+``partials/notification_panel.html`` uses, and for the same reason: the list
+and the "add" dropdown's available-libraries set are two views of one piece of
+state, so they are re-rendered together or not at all. Dragging is live
+(``static/reorder.js`` moves rows as you drag); dropping posts the new order.
+A field's Save control only shows once it actually differs from what it
+started at (``static/library-editor.js``).
+
+Home shelves are simpler and still an ordinary form post that redirects back to
+the page, the same style as ``actions.py`` and ``permissions.py`` — reordering
+included, via the same drag list but committing through a hidden form instead
+of htmx. The carousel's two on/off switches write through immediately like the
+Notifications tab's switches. "Reconnect" mirrors the "Verify Prowlarr
+connection" button.
 """
 
 from __future__ import annotations
@@ -90,7 +99,13 @@ async def _live_sections(config: Config, state: AppState) -> tuple[list[dict], s
     ], None
 
 
-async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
+async def _library_context(db: DbDep, state: AppState) -> dict[str, object]:
+    """Everything ``partials/library_section.html`` renders from.
+
+    Shared by the full page and every write to Default Libraries, so the list
+    and the "add" dropdown's available set can never drift apart — an add or
+    remove is only ever seen in the same response that also updates the other.
+    """
     config = await get_config(db)
     sections, plex_error = await _live_sections(config, state)
 
@@ -105,6 +120,12 @@ async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
         "plex_server_name": config.plex_server_name,
         "max_default_libraries": MAX_DEFAULT_LIBRARIES,
         "at_max": len(config.default_libraries) >= MAX_DEFAULT_LIBRARIES,
+    }
+
+
+def _home_context(config: Config) -> dict[str, object]:
+    """Everything the Home section (shelves and carousel) renders from."""
+    return {
         "home_shelves": config.home_shelves,
         "home_carousel": config.home_carousel,
         "home_carousel_enabled": config.home_carousel_enabled,
@@ -117,6 +138,19 @@ async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
         ),
         "source_of": source_of,
     }
+
+
+async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
+    library_ctx = await _library_context(db, state)
+    config = await get_config(db)
+    return {**library_ctx, **_home_context(config)}
+
+
+async def _library_section(request: Request, db: DbDep, state: AppState) -> Response:
+    """The Default Libraries card alone, for every htmx write to it."""
+    return templates.TemplateResponse(
+        request, "partials/library_section.html", await _library_context(db, state)
+    )
 
 
 def _reordered(items: list[dict], order: list[str]) -> list[dict]:
@@ -188,9 +222,13 @@ async def reconnect(request: Request, db: DbDep, state: StateDep, admin: AdminPa
 # --------------------------------------------------------------------------- #
 
 
-@router.post("")
+@router.post("", response_class=HTMLResponse)
 async def add_library(
-    db: DbDep, state: StateDep, admin: AdminPageDep, library_id: str = Form(...)
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    library_id: str = Form(...),
 ) -> Response:
     config = await get_config(db)
     if len(config.default_libraries) >= MAX_DEFAULT_LIBRARIES:
@@ -216,12 +254,17 @@ async def add_library(
             "name": section["name"],
         },
     ]
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _library_section(request, db, state)
 
 
-@router.post("/{library_id}/rename")
+@router.post("/{library_id}/rename", response_class=HTMLResponse)
 async def rename_library(
-    db: DbDep, admin: AdminPageDep, library_id: str, name: str = Form(default="")
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    library_id: str,
+    name: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
     updated = []
@@ -236,25 +279,29 @@ async def rename_library(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such default library")
 
     config.default_libraries = updated
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _library_section(request, db, state)
 
 
-@router.post("/{library_id}/remove")
-async def remove_library(db: DbDep, admin: AdminPageDep, library_id: str) -> Response:
+@router.post("/{library_id}/remove", response_class=HTMLResponse)
+async def remove_library(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep, library_id: str
+) -> Response:
     config = await get_config(db)
     config.default_libraries = [
         library for library in config.default_libraries if library["id"] != library_id
     ]
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _library_section(request, db, state)
 
 
-@router.post("/reorder")
-async def reorder_libraries(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+@router.post("/reorder", response_class=HTMLResponse)
+async def reorder_libraries(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep
+) -> Response:
     form = await request.form()
     order = [str(value) for value in form.getlist("order")]
     config = await get_config(db)
     config.default_libraries = _reordered(config.default_libraries, order)
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _library_section(request, db, state)
 
 
 # --------------------------------------------------------------------------- #

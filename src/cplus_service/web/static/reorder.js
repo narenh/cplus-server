@@ -2,13 +2,18 @@
 // container image with no outbound access assumed, same reasoning as vendoring
 // htmx.min.js instead of pulling it from a CDN.
 //
-// Usage: a container with [data-reorder-list] and [data-reorder-form="<id>"]
-// (a <form method=post> already on the page, pointed at the reorder endpoint)
-// holding direct children with [draggable=true] and [data-reorder-id]. On
-// drop, the row order in the DOM is written into that form as one hidden
-// "order" input per id and the form is submitted for real — a normal page
-// reload that comes back with the new order persisted, the same way every
-// other write on this page works.
+// A container needs [data-reorder-list] and its direct children need
+// [draggable=true] and [data-reorder-id]. Dragging live-reorders the DOM;
+// on drop, the new order is read back from the DOM and sent one of two ways:
+//
+// * [data-reorder-url] + [data-reorder-target] — an in-place write with no
+//   page reload: the order posts via htmx, and the response (expected to be
+//   the whole reorderable section, id and all) replaces the element matched
+//   by [data-reorder-target].
+// * [data-reorder-form="<id>"] — a plain <form method=post> already on the
+//   page, pointed at the reorder endpoint. The order is written into it as
+//   one hidden "order" input per id and the form is submitted for real: a
+//   normal page reload that comes back with the new order persisted.
 (function () {
   function rowsOf(list) {
     return Array.from(list.querySelectorAll("[data-reorder-id]"));
@@ -48,16 +53,28 @@
     if (!list) return;
     event.preventDefault();
 
+    var order = rowsOf(list).map(function (row) {
+      return row.getAttribute("data-reorder-id");
+    });
+
+    var url = list.getAttribute("data-reorder-url");
+    var targetSelector = list.getAttribute("data-reorder-target");
+    var target = targetSelector && document.querySelector(targetSelector);
+    if (url && target) {
+      htmx.ajax("POST", url, { target: target, swap: "outerHTML", values: { order: order } });
+      return;
+    }
+
     var formId = list.getAttribute("data-reorder-form");
     var form = formId && document.getElementById(formId);
     if (!form) return;
 
     form.innerHTML = "";
-    rowsOf(list).forEach(function (row) {
+    order.forEach(function (id) {
       var input = document.createElement("input");
       input.type = "hidden";
       input.name = "order";
-      input.value = row.getAttribute("data-reorder-id");
+      input.value = id;
       form.appendChild(input);
     });
     form.requestSubmit();
