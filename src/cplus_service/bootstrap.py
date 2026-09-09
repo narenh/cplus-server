@@ -7,16 +7,22 @@ it on upgrade without anyone running anything.
 The starter quality profile is seeded the same way, for a different reason:
 every Prowlarr-backed action needs a profile, so an install with none has a
 dead end on the Actions page. See :func:`ensure_default_quality_profile`.
+
+The default home shelf is seeded for a third reason: it is what the app itself
+falls back to when it has no shelves of its own, so a fresh install's Home tab
+starts showing the same thing rather than an empty list. See
+:func:`ensure_default_home_shelf`.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db.models import Action, QualityProfile
+from .db.models import Action, Config, QualityProfile
 from .quality.models import default_profile
 
 logger = logging.getLogger(__name__)
@@ -114,3 +120,39 @@ async def ensure_default_quality_profile(session: AsyncSession) -> QualityProfil
         "seeded the starter quality profile %r (id=%s)", profile.name, profile.id
     )
     return profile
+
+
+def upnext_shelf() -> dict[str, object]:
+    """A fresh "Continue Watching" shelf, in ``HomeShelfDataModel``'s own shape.
+
+    Mirrors ``HomeShelfDataModel.upNext()`` in CanopyPlus exactly — same path,
+    same style — since this is the seed a fresh install and the app's own
+    built-in fallback agree on.
+    """
+    return {
+        "id": str(uuid.uuid4()),
+        "title": "Continue Watching",
+        "description": "Continue Watching / On Deck",
+        "path": "/library/onDeck",
+        "discoverHubKey": None,
+        "style": "card",
+        "titleOnly": False,
+    }
+
+
+async def ensure_default_home_shelf(session: AsyncSession, config: Config) -> bool:
+    """Seed one "Continue Watching" shelf when the Home tab has none.
+
+    Mirrors ``AppSettings``'s own fallback, so a fresh install's Home tab is
+    never an empty list an admin has to fill from nothing. Seeded only while
+    ``home_shelves`` is empty — the same rule :func:`ensure_default_quality_profile`
+    uses for profiles: an admin who removes every shelf is back in exactly the
+    dead end seeding exists to prevent, so the next startup seeds the default
+    one again rather than leaving the tab empty.
+    """
+    if config.home_shelves:
+        return False
+
+    config.home_shelves = [upnext_shelf()]
+    logger.info("seeded the default \"Continue Watching\" home shelf")
+    return True

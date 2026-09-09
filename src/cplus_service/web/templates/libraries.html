@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+  <h2>Default Libraries</h2>
+  <p class="lede">
+    The libraries a fresh Canopy+ install starts with, in the order it shows
+    them. Renaming here only changes what Canopy+ displays — Plex's own
+    library name is never touched, and stays visible underneath so it is
+    always clear what you renamed.
+  </p>
+
+  <div class="row">
+    {% if plex_error %}
+      <span class="hint warn">{{ plex_error }}</span>
+    {% elif plex_server_name %}
+      <span class="hint">Connected to <strong>{{ plex_server_name }}</strong>.</span>
+    {% endif %}
+    <button type="button" class="secondary"
+            hx-post="/admin/libraries/reconnect"
+            hx-target="#plex-connection" hx-swap="innerHTML">Reconnect</button>
+    <span id="plex-connection" class="inline-result"></span>
+  </div>
+
+  {% if not default_libraries %}
+    <p class="empty">No default libraries yet — add one below.</p>
+  {% else %}
+    <div class="reorder-list" data-reorder-list data-reorder-form="reorder-libraries-form">
+      {% for library in default_libraries %}
+        <div class="reorder-row" draggable="true" data-reorder-id="{{ library.id }}">
+          <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+          <span class="badge nowrap">{{ library_type_labels.get(library.type, library.type) }}</span>
+
+          <form method="post" action="/admin/libraries/{{ library.id }}/rename"
+                id="rename-{{ library.id }}" class="row rename-row"></form>
+          <input form="rename-{{ library.id }}" type="text" name="name"
+                 value="{{ library.name }}" aria-label="Display name for {{ library.serverTitle }}">
+          {% if library.name != library.serverTitle %}
+            <span class="muted nowrap">Plex: {{ library.serverTitle }}</span>
+          {% endif %}
+
+          <span class="row-actions nowrap">
+            <button form="rename-{{ library.id }}" type="submit" class="link">Save</button>
+            <form method="post" action="/admin/libraries/{{ library.id }}/remove" class="inline">
+              <button type="submit" class="link danger">Remove</button>
+            </form>
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+    <form method="post" action="/admin/libraries/reorder" id="reorder-libraries-form" class="hidden"></form>
+  {% endif %}
+
+  <form method="post" action="/admin/libraries" class="row add-rule">
+    <select name="library_id" aria-label="Library to add"
+            {% if at_max or not available_sections %}disabled{% endif %}>
+      {% for section in available_sections %}
+        <option value="{{ section.id }}">
+          {{ section.name }} ({{ library_type_labels.get(section.type, section.type) }})
+        </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="secondary" {% if at_max or not available_sections %}disabled{% endif %}>
+      Add library
+    </button>
+  </form>
+  {% if at_max %}
+    <p class="hint">
+      Canopy+ shows at most {{ max_default_libraries }} libraries at once —
+      remove one to add another.
+    </p>
+  {% elif not plex_error and not available_sections and default_libraries %}
+    <p class="hint">Every library on the server is already in this list.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Home</h2>
+  <p class="lede">
+    The shelves — and the one hero carousel — a fresh install's Home tab
+    shows, and what each is built from.
+  </p>
+
+  <h2>Carousel</h2>
+  <div class="carousel-toggle">
+    <span class="carousel-switch">
+      {% with checked = home_carousel_enabled, url = "/admin/libraries/home/carousel-enabled", label = "Enable Home Carousel" %}
+        {% include "partials/carousel_switch.html" %}
+      {% endwith %}
+    </span>
+    <span>Enable Home Carousel</span>
+  </div>
+
+  {% if home_carousel_enabled %}
+    <form method="post" action="/admin/libraries/home/carousel" class="row">
+      <select name="source" aria-label="Carousel content source">
+        <option value="off" {% if not home_carousel %}selected{% endif %}>Off</option>
+        {% set current = source_of(home_carousel) if home_carousel else "" %}
+        {% for group_label, opts in carousel_source_groups %}
+          {% if group_label %}
+            <optgroup label="{{ group_label }}">
+          {% endif %}
+          {% for opt in opts %}
+            <option value="{{ opt.value }}" {% if opt.value == current %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+          {% if group_label %}</optgroup>{% endif %}
+        {% endfor %}
+      </select>
+      <button type="submit" class="secondary">Save</button>
+    </form>
+
+    {% if home_carousel and not (home_carousel.path == "/library/onDeck") %}
+      <div class="carousel-toggle">
+        <span class="carousel-switch">
+          {% with checked = home_carousel_include_on_deck, url = "/admin/libraries/home/carousel-include-on-deck", label = 'Include "Continue Watching" items' %}
+            {% include "partials/carousel_switch.html" %}
+          {% endwith %}
+        </span>
+        <span>Include "Continue Watching" items</span>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <h2>Shelves</h2>
+  <div class="reorder-list" data-reorder-list data-reorder-form="reorder-shelves-form">
+    {% for shelf in home_shelves %}
+      <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ shelf.id }}">
+        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+
+        <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}"
+              id="shelf-{{ shelf.id }}" class="shelf-form">
+          <div class="shelf-grid">
+            <div>
+              <label>Content</label>
+              <select name="source" form="shelf-{{ shelf.id }}" aria-label="Shelf content source">
+                {% set current = source_of(shelf) %}
+                {% for group_label, opts in shelf_source_groups %}
+                  {% if group_label %}<optgroup label="{{ group_label }}">{% endif %}
+                  {% for opt in opts %}
+                    <option value="{{ opt.value }}" {% if opt.value == current %}selected{% endif %}>{{ opt.label }}</option>
+                  {% endfor %}
+                  {% if group_label %}</optgroup>{% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label>Title</label>
+              <input type="text" name="title" form="shelf-{{ shelf.id }}" value="{{ shelf.title }}">
+            </div>
+            <div>
+              <label>Style</label>
+              <select name="style" form="shelf-{{ shelf.id }}">
+                <option value="poster" {% if shelf.style == "poster" %}selected{% endif %}>Poster</option>
+                <option value="card" {% if shelf.style == "card" %}selected{% endif %}>Card</option>
+              </select>
+            </div>
+            <div class="shelf-toggle">
+              <label class="check">
+                <input type="checkbox" name="title_only" form="shelf-{{ shelf.id }}" {% if shelf.titleOnly %}checked{% endif %}>
+                Hide release year
+              </label>
+            </div>
+          </div>
+          <p class="hint">{{ shelf.description }}</p>
+        </form>
+
+        <span class="row-actions nowrap">
+          <button form="shelf-{{ shelf.id }}" type="submit" class="link">Save</button>
+          <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}/remove" class="inline">
+            <button type="submit" class="link danger" {% if home_shelves|length < 2 %}disabled{% endif %}>Remove</button>
+          </form>
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+  <form method="post" action="/admin/libraries/home/shelves/reorder" id="reorder-shelves-form" class="hidden"></form>
+
+  <form method="post" action="/admin/libraries/home/shelves" class="row">
+    <button type="submit" class="secondary">New Shelf</button>
+  </form>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/reorder.js" defer></script>
+{% endblock %}

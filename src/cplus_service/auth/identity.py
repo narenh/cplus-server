@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Config, User
+from ..plex.client import PlexError, best_connection, discover_resources
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
 from ..settings import seerr_url_fingerprint
@@ -96,4 +98,46 @@ async def sync_seerr_instance(session: AsyncSession, config: Config) -> bool:
     config.seerr_url_fingerprint = fingerprint
     await forget_all_tokens(session)
     await destroy_all_sessions(session)
+    return True
+
+
+async def refresh_plex_server(
+    config: Config, token: str, client_identifier: str, http: httpx.AsyncClient
+) -> bool:
+    """Rediscover the admin's Plex Media Server and remember how to reach it.
+
+    Called once after every successful admin sign-in, and again on demand from
+    the Libraries & Home page's "Reconnect" button. Best-effort and silent on
+    failure: Prowlarr, Seerr and every other tab stay fully usable without a
+    Plex server connection, so a plex.tv hiccup here must never fail the sign-in
+    it rides along with — it only leaves the Default Libraries picker showing
+    "not connected" until the next attempt.
+
+    Picks the account's own server when there is one (falling back to the
+    first server resource plex.tv lists, for a Home-user admin signing in on a
+    server they do not own), and the best reachable connection to it. Returns
+    whether a server was found and stored.
+    """
+    try:
+        resources = await discover_resources(token, client_identifier, client=http)
+    except PlexError as exc:
+        logger.warning("could not discover the Plex server: %s", exc)
+        return False
+
+    servers = [resource for resource in resources if resource.is_server]
+    if not servers:
+        logger.warning("signed-in Plex account has no server plex.tv will list")
+        return False
+    server = next((s for s in servers if s.owned), servers[0])
+
+    connection = best_connection(server.connections)
+    if connection is None:
+        logger.warning("Plex server %r has no usable connection", server.name)
+        return False
+
+    config.plex_admin_token = server.access_token or token
+    config.plex_server_base_url = connection.uri
+    config.plex_server_client_identifier = server.client_identifier
+    config.plex_server_name = server.name
+    logger.info("connected to Plex server %r via %s", server.name, connection.uri)
     return True
