@@ -184,15 +184,73 @@ async def test_an_unknown_library_id_is_rejected(
     assert response.status_code == 400
 
 
-async def test_a_sixth_library_is_rejected(
-    client: httpx.AsyncClient, db: AsyncSession
+async def test_there_is_no_cap_on_how_many_libraries_can_be_added(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
 ) -> None:
-    # Caught before ever asking Plex — the cap is on the stored list's own size.
-    for i in range(6):
-        await default_library(db, library_id=str(i), server_title=f"Library {i}")
-    await signed_in(client, db)
+    # The app enforces its own client-side display limit (SwiftUI's tab bar
+    # caps out); the admin's own ordered, named list is not bound by that.
+    with respx.mock:
+        respx.get(f"{PLEX_SERVER_URL}/library/sections").mock(
+            return_value=httpx.Response(
+                200,
+                json=sections_payload(
+                    *(movies_section(key=str(i), title=f"Library {i}") for i in range(8))
+                ),
+            )
+        )
+        for i in range(7):
+            await default_library(db, library_id=str(i), server_title=f"Library {i}")
+        await signed_in(client, db)
 
-    response = await client.post("/admin/libraries", data={"library_id": "999"})
+        response = await client.post("/admin/libraries", data={"library_id": "7"})
+
+    assert response.status_code == 200
+    config = await current_config(db)
+    assert len(config.default_libraries) == 8
+
+
+async def test_music_and_photo_libraries_are_not_offered(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    with respx.mock:
+        respx.get(f"{PLEX_SERVER_URL}/library/sections").mock(
+            return_value=httpx.Response(
+                200,
+                json=sections_payload(
+                    movies_section(),
+                    {"key": "3", "title": "Music", "type": "artist", "hidden": 0},
+                    {"key": "4", "title": "Photos", "type": "photo", "hidden": 0},
+                ),
+            )
+        )
+        await signed_in(client, db)
+        response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    assert '<option value="1">' in response.text
+    assert '<option value="3">' not in response.text
+    assert '<option value="4">' not in response.text
+    assert "Music" not in response.text
+    assert "Photos" not in response.text
+
+
+async def test_a_music_library_id_cannot_be_added_directly(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    # Not just hidden from the dropdown — the server itself never learns
+    # about it, so posting the id by hand doesn't work either.
+    with respx.mock:
+        respx.get(f"{PLEX_SERVER_URL}/library/sections").mock(
+            return_value=httpx.Response(
+                200,
+                json=sections_payload(
+                    {"key": "3", "title": "Music", "type": "artist", "hidden": 0}
+                ),
+            )
+        )
+        await signed_in(client, db)
+        response = await client.post("/admin/libraries", data={"library_id": "3"})
+
     assert response.status_code == 400
 
 
@@ -292,9 +350,11 @@ async def test_adding_a_shelf(client: httpx.AsyncClient, db: AsyncSession) -> No
     await signed_in(client, db)
     before = len((await get_config(db)).home_shelves)
 
-    response = await client.post("/admin/libraries/home/shelves", follow_redirects=False)
+    response = await client.post("/admin/libraries/home/shelves")
 
-    assert response.status_code == 303
+    # No redirect: the response is the updated shelf list, swapped in place.
+    assert response.status_code == 200
+    assert 'id="home-shelves"' in response.text
     config = await current_config(db)
     assert len(config.home_shelves) == before + 1
 
@@ -321,11 +381,9 @@ async def test_removing_a_shelf_when_more_than_one_remains(
     config = await current_config(db)
     first_id = config.home_shelves[0]["id"]
 
-    response = await client.post(
-        f"/admin/libraries/home/shelves/{first_id}/remove", follow_redirects=False
-    )
+    response = await client.post(f"/admin/libraries/home/shelves/{first_id}/remove")
 
-    assert response.status_code == 303
+    assert response.status_code == 200
     remaining = (await current_config(db)).home_shelves
     assert len(remaining) == 1
     assert all(shelf["id"] != first_id for shelf in remaining)
@@ -357,10 +415,9 @@ async def test_changing_a_shelfs_source_resets_title_style_and_title_only(
     response = await client.post(
         f"/admin/libraries/home/shelves/{shelf_id}",
         data={"source": "lib:1:newest", "title": "ignored", "style": "card"},
-        follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
     shelf = (await current_config(db)).home_shelves[0]
     assert shelf["path"] == "/library/sections/1/newest"
     assert shelf["title"] == "Recently Released Movies"
@@ -379,10 +436,9 @@ async def test_editing_a_shelf_without_changing_its_source(
     response = await client.post(
         f"/admin/libraries/home/shelves/{shelf_id}",
         data={"source": "ondeck", "title": "My Shelf", "style": "poster", "title_only": "on"},
-        follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
     shelf = (await current_config(db)).home_shelves[0]
     assert shelf["title"] == "My Shelf"
     assert shelf["style"] == "poster"

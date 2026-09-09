@@ -45,9 +45,9 @@
             <span class="muted nowrap">Plex: {{ library.serverTitle }}</span>
           {% endif %}
           {# Hidden until the field actually differs from data-original — see
-             static/library-editor.js. Submits the same rename form above. #}
+             static/dirty-save.js. Submits the same rename form above. #}
           <button form="rename-{{ library.id }}" type="submit" class="link hidden"
-                  data-save-for="library-name-{{ library.id }}">Save</button>
+                  data-save-for="rename-{{ library.id }}">Save</button>
 
           <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
 
@@ -71,24 +71,18 @@
 
   <form method="post" action="/admin/libraries" class="row add-rule"
         hx-post="/admin/libraries" hx-target="#default-libraries" hx-swap="outerHTML">
-    <select name="library_id" aria-label="Library to add"
-            {% if at_max or not available_sections %}disabled{% endif %}>
+    <select name="library_id" aria-label="Library to add" {% if not available_sections %}disabled{% endif %}>
       {% for section in available_sections %}
         <option value="{{ section.id }}">
           {{ section.name }} ({{ library_type_labels.get(section.type, section.type) }})
         </option>
       {% endfor %}
     </select>
-    <button type="submit" class="secondary" {% if at_max or not available_sections %}disabled{% endif %}>
+    <button type="submit" class="secondary" {% if not available_sections %}disabled{% endif %}>
       Add library
     </button>
   </form>
-  {% if at_max %}
-    <p class="hint">
-      Canopy+ shows at most {{ max_default_libraries }} libraries at once —
-      remove one to add another.
-    </p>
-  {% elif not plex_error and not available_sections and default_libraries %}
-    <p class="hint">Every library on the server is already in this list.</p>
+  {% if not plex_error and not available_sections and default_libraries %}
+    <p class="hint">Every supported library on the server is already in this list.</p>
   {% endif %}
 </section>

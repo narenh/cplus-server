@@ -1,0 +1,86 @@
+{# The Shelves list alone (not the Carousel above it, which lives in
+   libraries.html and does not need to change alongside this).
+
+   Rendered by GET /admin/libraries and returned whole by every write here
+   (add, remove, reorder, edit) via #home-shelves, the same way
+   partials/library_section.html covers Default Libraries. #}
+<div id="home-shelves">
+  <h2>Shelves</h2>
+  <div class="reorder-list" data-reorder-list
+       data-reorder-url="/admin/libraries/home/shelves/reorder"
+       data-reorder-target="#home-shelves">
+    {% for shelf in home_shelves %}
+      <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ shelf.id }}">
+        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+
+        <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}"
+              id="shelf-{{ shelf.id }}"
+              hx-post="/admin/libraries/home/shelves/{{ shelf.id }}"
+              hx-target="#home-shelves" hx-swap="outerHTML">
+          <div class="shelf-grid">
+            <div>
+              <label>Content</label>
+              <select name="source" form="shelf-{{ shelf.id }}" aria-label="Shelf content source"
+                      data-original="{{ source_of(shelf) }}">
+                {% set current = source_of(shelf) %}
+                {% for group_label, opts in shelf_source_groups %}
+                  {% if group_label %}<optgroup label="{{ group_label }}">{% endif %}
+                  {% for opt in opts %}
+                    <option value="{{ opt.value }}" {% if opt.value == current %}selected{% endif %}>{{ opt.label }}</option>
+                  {% endfor %}
+                  {% if group_label %}</optgroup>{% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label>Title</label>
+              <input type="text" name="title" form="shelf-{{ shelf.id }}" value="{{ shelf.title }}"
+                     data-original="{{ shelf.title }}">
+            </div>
+            <div>
+              <label>Style</label>
+              <select name="style" form="shelf-{{ shelf.id }}" data-original="{{ shelf.style }}">
+                <option value="poster" {% if shelf.style == "poster" %}selected{% endif %}>Poster</option>
+                <option value="card" {% if shelf.style == "card" %}selected{% endif %}>Card</option>
+              </select>
+            </div>
+            <div class="shelf-toggle">
+              <label class="check">
+                <input type="checkbox" name="title_only" form="shelf-{{ shelf.id }}"
+                       data-original="{{ 'true' if shelf.titleOnly else 'false' }}"
+                       {% if shelf.titleOnly %}checked{% endif %}>
+                Hide release year
+              </label>
+            </div>
+          </div>
+          <p class="hint">{{ shelf.description }}</p>
+        </form>
+
+        <span class="row-actions nowrap">
+          {# Hidden until one of the form's fields actually differs from its
+             data-original — see static/dirty-save.js. #}
+          <button form="shelf-{{ shelf.id }}" type="submit" class="link hidden"
+                  data-save-for="shelf-{{ shelf.id }}">Save</button>
+          <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}/remove" class="remove-form"
+                hx-post="/admin/libraries/home/shelves/{{ shelf.id }}/remove"
+                hx-target="#home-shelves" hx-swap="outerHTML">
+            <button type="submit" class="icon danger" title="Remove shelf" aria-label="Remove shelf"
+                    {% if home_shelves|length < 2 %}disabled{% endif %}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h18"/>
+                <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              </svg>
+            </button>
+          </form>
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <form method="post" action="/admin/libraries/home/shelves" class="row"
+        hx-post="/admin/libraries/home/shelves" hx-target="#home-shelves" hx-swap="outerHTML">
+    <button type="submit" class="secondary">New Shelf</button>
+  </form>
+</div>

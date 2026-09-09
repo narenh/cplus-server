@@ -50,68 +50,12 @@
     {% endif %}
   {% endif %}
 
-  <h2>Shelves</h2>
-  <div class="reorder-list" data-reorder-list data-reorder-form="reorder-shelves-form">
-    {% for shelf in home_shelves %}
-      <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ shelf.id }}">
-        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
-
-        <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}"
-              id="shelf-{{ shelf.id }}" class="shelf-form">
-          <div class="shelf-grid">
-            <div>
-              <label>Content</label>
-              <select name="source" form="shelf-{{ shelf.id }}" aria-label="Shelf content source">
-                {% set current = source_of(shelf) %}
-                {% for group_label, opts in shelf_source_groups %}
-                  {% if group_label %}<optgroup label="{{ group_label }}">{% endif %}
-                  {% for opt in opts %}
-                    <option value="{{ opt.value }}" {% if opt.value == current %}selected{% endif %}>{{ opt.label }}</option>
-                  {% endfor %}
-                  {% if group_label %}</optgroup>{% endif %}
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label>Title</label>
-              <input type="text" name="title" form="shelf-{{ shelf.id }}" value="{{ shelf.title }}">
-            </div>
-            <div>
-              <label>Style</label>
-              <select name="style" form="shelf-{{ shelf.id }}">
-                <option value="poster" {% if shelf.style == "poster" %}selected{% endif %}>Poster</option>
-                <option value="card" {% if shelf.style == "card" %}selected{% endif %}>Card</option>
-              </select>
-            </div>
-            <div class="shelf-toggle">
-              <label class="check">
-                <input type="checkbox" name="title_only" form="shelf-{{ shelf.id }}" {% if shelf.titleOnly %}checked{% endif %}>
-                Hide release year
-              </label>
-            </div>
-          </div>
-          <p class="hint">{{ shelf.description }}</p>
-        </form>
-
-        <span class="row-actions nowrap">
-          <button form="shelf-{{ shelf.id }}" type="submit" class="link">Save</button>
-          <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}/remove" class="inline">
-            <button type="submit" class="link danger" {% if home_shelves|length < 2 %}disabled{% endif %}>Remove</button>
-          </form>
-        </span>
-      </div>
-    {% endfor %}
-  </div>
-  <form method="post" action="/admin/libraries/home/shelves/reorder" id="reorder-shelves-form" class="hidden"></form>
-
-  <form method="post" action="/admin/libraries/home/shelves" class="row">
-    <button type="submit" class="secondary">New Shelf</button>
-  </form>
+  {% include "partials/home_shelves.html" %}
 </section>
 
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/reorder.js" defer></script>
-<script src="/static/library-editor.js" defer></script>
+<script src="/static/dirty-save.js" defer></script>
 {% endblock %}

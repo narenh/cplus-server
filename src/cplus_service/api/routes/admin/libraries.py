@@ -16,22 +16,24 @@ nothing to translate:
   its Home tab, built from the same "content source" menu CanopyPlus itself
   offers when editing a shelf. See :mod:`.home_sources`.
 
-**Default Libraries writes in place, with no page reload.** Every add, rename,
-remove and reorder posts via htmx and gets back the whole card
-(``partials/library_section.html``), swapped in by id — the same pattern
-``partials/notification_panel.html`` uses, and for the same reason: the list
-and the "add" dropdown's available-libraries set are two views of one piece of
-state, so they are re-rendered together or not at all. Dragging is live
-(``static/reorder.js`` moves rows as you drag); dropping posts the new order.
-A field's Save control only shows once it actually differs from what it
-started at (``static/library-editor.js``).
+**Both Default Libraries and Home shelves write in place, with no page
+reload.** Every add, rename, remove and reorder posts via htmx and gets back
+the whole card or list (``partials/library_section.html``,
+``partials/home_shelves.html``), swapped in by id — the same pattern
+``partials/notification_panel.html`` uses, and for the same reason: a list and
+whatever depends on its current contents (the "add" dropdown's available set,
+for libraries) are two views of one piece of state, so they are re-rendered
+together or not at all. Dragging is live (``static/reorder.js`` moves rows as
+you drag); dropping posts the new order. A row's Save control only shows once
+one of its own fields actually differs from what it started at
+(``static/dirty-save.js``).
 
-Home shelves are simpler and still an ordinary form post that redirects back to
-the page, the same style as ``actions.py`` and ``permissions.py`` — reordering
-included, via the same drag list but committing through a hidden form instead
-of htmx. The carousel's two on/off switches write through immediately like the
-Notifications tab's switches. "Reconnect" mirrors the "Verify Prowlarr
-connection" button.
+The carousel is simpler still: its two on/off switches write through
+immediately like the Notifications tab's switches, and its content-source
+picker is an ordinary form post that redirects back to the page, the same
+style as ``actions.py`` and ``permissions.py`` — there is exactly one of it,
+so there is no list to keep in sync and no reload worth avoiding. "Reconnect"
+mirrors the "Verify Prowlarr connection" button.
 """
 
 from __future__ import annotations
@@ -57,15 +59,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/libraries", tags=["admin"])
 
-#: Mirrors CanopyPlus's own ``maxLibraryCount`` — the app only ever shows this
-#: many at once, so a longer default list would just hide the tail forever.
-MAX_DEFAULT_LIBRARIES = 6
+#: CanopyPlus itself only ever fetches these three — see ``PlexServer.fetchLibraries()``,
+#: which filters to exactly this set. Music and photo libraries are excluded from
+#: the "add" dropdown for the same reason: there is nothing in the app that
+#: would ever show one, so offering them here would just be a way to configure
+#: something Canopy+ silently ignores.
+SUPPORTED_LIBRARY_TYPES = {"movie", "show", "video"}
 
 LIBRARY_TYPE_LABELS = {
     "movie": "Movies",
     "show": "TV",
-    "artist": "Music",
-    "photo": "Photos",
     "video": "Videos",
 }
 
@@ -78,11 +81,13 @@ PAGE_URL = "/admin/libraries"
 
 
 async def _live_sections(config: Config, state: AppState) -> tuple[list[dict], str | None]:
-    """The admin's Plex library sections, live — for the "add" dropdown.
+    """The admin's Plex library sections Canopy+ can show, live — for the "add" dropdown.
 
     Returns an error message instead of raising: this page must still show
     the admin's already-configured libraries even when the server cannot be
-    reached right now.
+    reached right now. Filtered to :data:`SUPPORTED_LIBRARY_TYPES` — a music
+    or photo library is never offered, so the only way one ends up in
+    ``default_libraries`` is a row from before this filter existed.
     """
     if not config.plex_server_base_url or not config.plex_admin_token:
         return [], "Not connected to a Plex server yet. Sign out and back in with Plex."
@@ -95,7 +100,9 @@ async def _live_sections(config: Config, state: AppState) -> tuple[list[dict], s
         return [], f"Could not reach the Plex server: {exc}"
 
     return [
-        {"id": section.id, "name": section.name, "type": section.type} for section in sections
+        {"id": section.id, "name": section.name, "type": section.type}
+        for section in sections
+        if section.type in SUPPORTED_LIBRARY_TYPES
     ], None
 
 
@@ -118,26 +125,36 @@ async def _library_context(db: DbDep, state: AppState) -> dict[str, object]:
         "library_type_labels": LIBRARY_TYPE_LABELS,
         "plex_error": plex_error,
         "plex_server_name": config.plex_server_name,
-        "max_default_libraries": MAX_DEFAULT_LIBRARIES,
-        "at_max": len(config.default_libraries) >= MAX_DEFAULT_LIBRARIES,
     }
 
 
-def _home_context(config: Config) -> dict[str, object]:
-    """Everything the Home section (shelves and carousel) renders from."""
+def _shelves_context(config: Config) -> dict[str, object]:
+    """Everything ``partials/home_shelves.html`` renders from."""
     return {
         "home_shelves": config.home_shelves,
-        "home_carousel": config.home_carousel,
-        "home_carousel_enabled": config.home_carousel_enabled,
-        "home_carousel_include_on_deck": config.home_carousel_include_on_deck,
         "shelf_source_groups": grouped_options(
             source_options(config.default_libraries, allow_discover=True)
         ),
+        "source_of": source_of,
+    }
+
+
+def _carousel_context(config: Config) -> dict[str, object]:
+    """Everything the carousel controls render from."""
+    return {
+        "home_carousel": config.home_carousel,
+        "home_carousel_enabled": config.home_carousel_enabled,
+        "home_carousel_include_on_deck": config.home_carousel_include_on_deck,
         "carousel_source_groups": grouped_options(
             source_options(config.default_libraries, allow_discover=False)
         ),
         "source_of": source_of,
     }
+
+
+def _home_context(config: Config) -> dict[str, object]:
+    """Everything the Home section (shelves and carousel) renders from."""
+    return {**_shelves_context(config), **_carousel_context(config)}
 
 
 async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
@@ -150,6 +167,14 @@ async def _library_section(request: Request, db: DbDep, state: AppState) -> Resp
     """The Default Libraries card alone, for every htmx write to it."""
     return templates.TemplateResponse(
         request, "partials/library_section.html", await _library_context(db, state)
+    )
+
+
+async def _home_shelves_section(request: Request, db: DbDep) -> Response:
+    """The Shelves list alone, for every htmx write to it."""
+    config = await get_config(db)
+    return templates.TemplateResponse(
+        request, "partials/home_shelves.html", _shelves_context(config)
     )
 
 
@@ -231,11 +256,6 @@ async def add_library(
     library_id: str = Form(...),
 ) -> Response:
     config = await get_config(db)
-    if len(config.default_libraries) >= MAX_DEFAULT_LIBRARIES:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Canopy+ shows at most {MAX_DEFAULT_LIBRARIES} libraries at once.",
-        )
     if any(library["id"] == library_id for library in config.default_libraries):
         raise HTTPException(status.HTTP_409_CONFLICT, "That library is already on the list.")
 
@@ -309,24 +329,24 @@ async def reorder_libraries(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/home/shelves")
-async def add_shelf(db: DbDep, admin: AdminPageDep) -> Response:
+@router.post("/home/shelves", response_class=HTMLResponse)
+async def add_shelf(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
     config = await get_config(db)
     config.home_shelves = [*config.home_shelves, upnext_shelf()]
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _home_shelves_section(request, db)
 
 
-@router.post("/home/shelves/reorder")
+@router.post("/home/shelves/reorder", response_class=HTMLResponse)
 async def reorder_shelves(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
     form = await request.form()
     order = [str(value) for value in form.getlist("order")]
     config = await get_config(db)
     config.home_shelves = _reordered(config.home_shelves, order)
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _home_shelves_section(request, db)
 
 
-@router.post("/home/shelves/{shelf_id}/remove")
-async def remove_shelf(db: DbDep, admin: AdminPageDep, shelf_id: str) -> Response:
+@router.post("/home/shelves/{shelf_id}/remove", response_class=HTMLResponse)
+async def remove_shelf(request: Request, db: DbDep, admin: AdminPageDep, shelf_id: str) -> Response:
     config = await get_config(db)
     if len(config.home_shelves) <= 1:
         # Unreachable through the page — the button is disabled — but the app
@@ -334,11 +354,12 @@ async def remove_shelf(db: DbDep, admin: AdminPageDep, shelf_id: str) -> Respons
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one home shelf.")
 
     config.home_shelves = [shelf for shelf in config.home_shelves if shelf["id"] != shelf_id]
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _home_shelves_section(request, db)
 
 
-@router.post("/home/shelves/{shelf_id}")
+@router.post("/home/shelves/{shelf_id}", response_class=HTMLResponse)
 async def update_shelf(
+    request: Request,
     db: DbDep,
     admin: AdminPageDep,
     shelf_id: str,
@@ -387,7 +408,7 @@ async def update_shelf(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such home shelf")
 
     config.home_shelves = updated
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    return await _home_shelves_section(request, db)
 
 
 # --------------------------------------------------------------------------- #
