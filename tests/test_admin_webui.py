@@ -35,7 +35,7 @@ from cplus_service.db.models import (
 from cplus_service.quality.models import QualityProfile as ProfileSchema
 from cplus_service.settings import SEERR_URL_ENV
 
-from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, make_action
+from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, make_action, mock_plex_no_server
 
 GB = 1024**3
 PLEX_API = "https://plex.tv/api/v2"
@@ -84,6 +84,7 @@ def ticked_resolutions(html: str) -> list[str]:
     "path",
     [
         "/admin/config",
+        "/admin/libraries",
         "/admin/quality-profiles",
         "/admin/quality-profiles/new",
         "/admin/actions",
@@ -161,6 +162,7 @@ async def test_the_pin_flow_signs_in_a_seerr_admin(
             200, json={"id": 1, "permissions": 2, "plexUsername": "owner"}
         )
     )
+    mock_plex_no_server()
 
     start = await client.post("/admin/plex/pin")
     assert start.status_code == 200
@@ -1509,6 +1511,7 @@ async def test_the_session_cookie_is_secure_over_https(app: FastAPI) -> None:
             200, json={"id": 1, "permissions": 2, "plexUsername": "owner"}
         )
     )
+    mock_plex_no_server()
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="https://test") as tls:
@@ -1536,6 +1539,7 @@ async def test_the_session_cookie_is_not_secure_over_plain_http(
             200, json={"id": 1, "permissions": 2, "plexUsername": "owner"}
         )
     )
+    mock_plex_no_server()
 
     await client.post("/admin/plex/pin")
     response = await client.get("/admin/plex/pin/32")

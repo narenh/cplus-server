@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+import respx
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,6 +151,21 @@ async def grant(db: AsyncSession, user: User, action: Action) -> None:
 @pytest.fixture
 def plex_headers() -> dict[str, str]:
     return {"X-Plex-Token": PLEX_TOKEN}
+
+
+PLEX_RESOURCES_URL = "https://plex.tv/api/v2/resources"
+
+
+def mock_plex_no_server() -> None:
+    """Answer plex.tv's resource discovery with "no server found".
+
+    Every successful webui sign-in now triggers this call too (see
+    ``refresh_plex_server``, run right after the admin check passes) — tests
+    that are not themselves about Plex server discovery just need it answered
+    so the sign-in completes; the empty list means no server is found and
+    stored, which is exactly the pre-existing state those tests expect.
+    """
+    respx.get(PLEX_RESOURCES_URL).mock(return_value=httpx.Response(200, json=[]))
 
 
 # --------------------------------------------------------------------------- #

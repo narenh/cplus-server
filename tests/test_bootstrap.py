@@ -15,11 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.bootstrap import (
     DEFAULT_PROFILE_NAME,
+    ensure_default_home_shelf,
     ensure_default_quality_profile,
     ensure_request_action,
 )
 from cplus_service.db.models import QualityProfile
-from cplus_service.db.session import create_all, create_engine, create_session_factory
+from cplus_service.db.session import create_all, create_engine, create_session_factory, get_config
 from cplus_service.quality.engine import recommend
 from cplus_service.quality.models import FILTER_RULE_TYPES
 from cplus_service.quality.models import QualityProfile as ProfileSchema
@@ -131,3 +132,58 @@ async def test_the_request_action_and_the_starter_profile_are_independent(
     # The system action deliberately has no profile: it never touches Prowlarr,
     # so seeding one does not give it something to score against.
     assert action.quality_profile_id is None
+
+
+# --------------------------------------------------------------------------- #
+# The default home shelf
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_fresh_install_gets_a_continue_watching_shelf(
+    session: AsyncSession,
+) -> None:
+    config = await get_config(session)
+    assert await ensure_default_home_shelf(session, config) is True
+
+    assert len(config.home_shelves) == 1
+    shelf = config.home_shelves[0]
+    assert shelf["title"] == "Continue Watching"
+    assert shelf["path"] == "/library/onDeck"
+    assert shelf["style"] == "card"
+    assert shelf["titleOnly"] is False
+    assert shelf["discoverHubKey"] is None
+    # Same shape CanopyPlus's own HomeShelfDataModel encodes to.
+    assert set(shelf) == {
+        "id",
+        "title",
+        "description",
+        "path",
+        "discoverHubKey",
+        "style",
+        "titleOnly",
+    }
+
+
+async def test_seeding_the_default_shelf_twice_does_nothing_the_second_time(
+    session: AsyncSession,
+) -> None:
+    config = await get_config(session)
+    assert await ensure_default_home_shelf(session, config) is True
+    first_shelf_id = config.home_shelves[0]["id"]
+
+    assert await ensure_default_home_shelf(session, config) is False
+    assert len(config.home_shelves) == 1
+    assert config.home_shelves[0]["id"] == first_shelf_id
+
+
+async def test_removing_every_shelf_gets_the_default_back_on_the_next_startup(
+    session: AsyncSession,
+) -> None:
+    # Same rule as the starter quality profile: an install with none is back
+    # in the dead end seeding exists to prevent, not a state to leave alone.
+    config = await get_config(session)
+    await ensure_default_home_shelf(session, config)
+    config.home_shelves = []
+
+    assert await ensure_default_home_shelf(session, config) is True
+    assert len(config.home_shelves) == 1

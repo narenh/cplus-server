@@ -21,7 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..auth.identity import sync_seerr_instance
 from ..auth.sessions import purge_expired_sessions
-from ..bootstrap import ensure_default_quality_profile, ensure_request_action
+from ..bootstrap import (
+    ensure_default_home_shelf,
+    ensure_default_quality_profile,
+    ensure_request_action,
+)
 from ..db.session import (
     create_all,
     create_engine,
@@ -108,6 +112,7 @@ def create_app(
         async with session_scope(sessionmaker) as session:
             await ensure_request_action(session)
             await ensure_default_quality_profile(session)
+            await ensure_default_home_shelf(session, await get_config(session))
             # Before anything is served: if the deployment was repointed at a
             # different Seerr, every cached identity was resolved against an
             # instance that no longer decides anything here.

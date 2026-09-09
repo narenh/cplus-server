@@ -126,6 +126,72 @@ class Config(Base):
     #: replaced by enrolling again rather than looked up.
     notification_relay_api_key: Mapped[str | None] = mapped_column(String(256))
 
+    #: The admin's own Plex auth token, kept from their most recent sign-in.
+    #:
+    #: Every other admin-facing use of Plex in this service resolves through
+    #: Seerr or plex.tv's PIN flow without ever holding a token past the
+    #: request that needed it — see :mod:`cplus_service.plex.client`. The
+    #: Libraries & Home tab is a deliberate exception: it has to ask the Plex
+    #: Media Server itself what libraries exist, on a page that otherwise
+    #: carries only this service's own session cookie, never a live Plex
+    #: credential. So the token obtained during the last successful admin
+    #: sign-in is kept for that purpose, refreshed on every sign-in and by the
+    #: Libraries page's "Reconnect" button. Plaintext, like
+    #: ``prowlarr_api_key`` — never rendered back into a page.
+    plex_admin_token: Mapped[str | None] = mapped_column(String(256))
+
+    #: Where ``plex_admin_token`` currently reaches the Plex Media Server —
+    #: one connection URI out of the several plex.tv might offer, picked by
+    #: :func:`~cplus_service.plex.client.best_connection`. Not assumed stable:
+    #: an admin's server can change address, which is exactly what
+    #: "Reconnect" re-resolves.
+    plex_server_base_url: Mapped[str | None] = mapped_column(String(512))
+
+    #: The chosen server's own machine identifier, shown on the Libraries page
+    #: so an admin with more than one server can tell which one this is.
+    plex_server_client_identifier: Mapped[str | None] = mapped_column(String(64))
+
+    #: The chosen server's friendly name, for the same reason.
+    plex_server_name: Mapped[str | None] = mapped_column(String(256))
+
+    #: The admin's curated, ordered set of Plex libraries — the "Default
+    #: Libraries" section of the Libraries & Home tab, and what should seed a
+    #: fresh Canopy+ install before a user has customised anything of their
+    #: own. Each entry is stored in exactly the shape CanopyPlus's own
+    #: ``MediaLibrary`` Codable struct encodes to (``id``, ``serverTitle``,
+    #: ``type``, ``hidden``, ``name``) so the two sides can eventually be
+    #: connected directly. List order is display order.
+    default_libraries: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+
+    #: Ordered home shelves, in exactly the shape CanopyPlus's own
+    #: ``HomeShelfDataModel`` Codable struct encodes to (``id``, ``title``,
+    #: ``description``, ``path``, ``discoverHubKey``, ``style``,
+    #: ``titleOnly``). Same reasoning as ``default_libraries``: this is the
+    #: seed for a fresh install, in the app's own format.
+    home_shelves: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+
+    #: The single hero carousel, same shape as one entry of ``home_shelves``,
+    #: or ``None`` when there isn't one configured yet.
+    home_carousel: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    #: Whether the carousel shows at all. Mirrors the app's own
+    #: ``homeCarouselEnabled`` default of on.
+    home_carousel_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
+
+    #: Whether "Continue Watching" items are mixed into the carousel. Inert
+    #: when the carousel's own source *is* Continue Watching — mirrors the
+    #: app's own rule that the toggle only means something for any other
+    #: source.
+    home_carousel_include_on_deck: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+
 
 class User(Base):
     """A Seerr user permitted to use this service.

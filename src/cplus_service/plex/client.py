@@ -1,22 +1,32 @@
-"""Plex OAuth PIN flow, proxied server-side.
+"""Talking to plex.tv, and — for the Libraries & Home tab — to the admin's own
+Plex Media Server.
 
-The admin webui has no Plex token of its own, so it runs the standard PIN flow:
-ask plex.tv for a short code, send the browser to Plex to claim it, then poll
-until Plex hands back an auth token.
-
-We proxy both halves rather than doing it from browser JavaScript. That keeps
-the flow working regardless of plex.tv's CORS policy, keeps the resulting Plex
+:class:`PlexPinClient` is the OAuth PIN flow: the admin webui has no Plex token
+of its own to start with, so it asks plex.tv for a short code, sends the
+browser to Plex to claim it, then polls until Plex hands back an auth token. We
+proxy both halves rather than doing it from browser JavaScript, which keeps the
+flow working regardless of plex.tv's CORS policy, keeps the resulting Plex
 token out of page scripts entirely, and leaves the browser with nothing to do
 but poll one URL.
 
-This is the **only** place cplus-service talks to plex.tv, and it is only ever
-used by the webui sign-in. tvOS arrives with a token already in hand, and user
-identity is always resolved through Seerr, never here.
+:func:`discover_resources` and :class:`PlexServerClient` are what the token from
+that flow is kept for afterwards (see ``Config.plex_admin_token``): plex.tv is
+the only place that knows which server currently answers to the admin's account
+and how to reach it, and the server itself is the only place that knows what
+libraries it holds — the same two calls CanopyPlus itself makes from
+``PlexServer``.
+
+Everything here talks either to plex.tv or to the admin's own server, never to
+another user's. tvOS arrives with its own token already in hand and never
+routes through this module; user identity there and everywhere else is always
+resolved through Seerr.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlencode
@@ -139,3 +149,236 @@ class PlexPinClient:
         payload = await self._request("GET", f"{PLEX_API}/pins/{pin_id}")
         token = payload.get("authToken")
         return str(token) if token else None
+
+
+# --------------------------------------------------------------------------- #
+# Server discovery and library sections
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class PlexConnection:
+    """One way to reach a Plex resource, as plex.tv's resources list gives it."""
+
+    protocol: str
+    address: str
+    port: int
+    uri: str
+    local: bool
+    relay: bool
+
+
+@dataclass(frozen=True)
+class PlexResource:
+    """One entry from plex.tv's ``/resources`` — a server, a player, or a client.
+
+    Only servers matter here (:attr:`is_server`); the rest are listed too but
+    the caller filters them out.
+    """
+
+    name: str
+    client_identifier: str
+    provides: str
+    owned: bool
+    access_token: str | None
+    connections: tuple[PlexConnection, ...] = field(default_factory=tuple)
+
+    @property
+    def is_server(self) -> bool:
+        return "server" in (part.strip() for part in self.provides.split(","))
+
+
+@dataclass(frozen=True)
+class PlexLibrarySection:
+    """One Plex library section, straight off ``GET /library/sections``.
+
+    Same fields CanopyPlus's own ``PlexLibrary`` decodes — ``key`` as ``id``,
+    ``title`` as ``name`` — so the admin webui and the app agree on what a
+    library is.
+    """
+
+    id: str
+    name: str
+    type: str
+    hidden: bool
+
+
+def best_connection(connections: Sequence[PlexConnection]) -> PlexConnection | None:
+    """Prefer a local, direct connection; fall back to remote, then relay.
+
+    A relay connection works but is slower and routes through Plex's own
+    infrastructure, so it is the last resort rather than whichever plex.tv
+    happened to list first. ``None`` only when there is nothing to try at all.
+    """
+    if not connections:
+        return None
+    return min(connections, key=lambda c: (c.relay, not c.local))
+
+
+async def discover_resources(
+    token: str,
+    client_identifier: str,
+    *,
+    client: httpx.AsyncClient,
+    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+) -> list[PlexResource]:
+    """The Plex resources (servers included) reachable with ``token``.
+
+    Called once after a successful admin sign-in (see
+    :func:`cplus_service.auth.identity.refresh_plex_server`) and again from the
+    Libraries page's "Reconnect" button — plex.tv is the only place that knows
+    which machine currently answers to this account and how to reach it, so
+    there is no way to ask the server itself without asking plex.tv first.
+    """
+    headers = {
+        "Accept": "application/json",
+        "X-Plex-Product": PRODUCT_NAME,
+        "X-Plex-Client-Identifier": client_identifier,
+        "X-Plex-Token": token,
+    }
+    url = f"{PLEX_API}/resources"
+    try:
+        response = await client.get(
+            url,
+            headers=headers,
+            params={"includeHttps": "1", "includeRelay": "1"},
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        raise PlexError(f"GET {url} failed: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise PlexError(
+            f"plex.tv returned {response.status_code}", status_code=response.status_code
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise PlexError("plex.tv returned a non-JSON body") from exc
+
+    if not isinstance(payload, list):
+        return []
+
+    resources: list[PlexResource] = []
+    for raw in payload:
+        if not isinstance(raw, dict):
+            continue
+        connections = tuple(
+            PlexConnection(
+                protocol=str(conn.get("protocol", "")),
+                address=str(conn.get("address", "")),
+                port=int(conn.get("port") or 0),
+                uri=str(conn.get("uri", "")),
+                local=bool(conn.get("local", False)),
+                relay=bool(conn.get("relay", False)),
+            )
+            for conn in raw.get("connections", [])
+            if isinstance(conn, dict)
+        )
+        resources.append(
+            PlexResource(
+                name=str(raw.get("name", "")),
+                client_identifier=str(raw.get("clientIdentifier", "")),
+                provides=str(raw.get("provides", "")),
+                owned=bool(raw.get("owned", False)),
+                access_token=raw.get("accessToken") or None,
+                connections=connections,
+            )
+        )
+    return resources
+
+
+class PlexServerError(PlexError):
+    """Talking to the Plex Media Server itself (not plex.tv) failed."""
+
+
+class PlexServerClient:
+    """Direct client for the admin's own Plex Media Server.
+
+    Unlike :class:`PlexPinClient`, which only ever talks to plex.tv, this talks
+    straight to the server — the same request CanopyPlus itself makes from
+    ``PlexServer.fetchLibraries()`` — so the Default Libraries picker shows
+    exactly what is on the server, not a stale copy.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+        timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self._timeout = timeout
+        self._client = client
+        self._owns_client = client is None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+            self._owns_client = True
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and self._owns_client:
+            await self._client.aclose()
+            self._client = None
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
+    async def list_library_sections(self) -> list[PlexLibrarySection]:
+        """``GET /library/sections`` — every library the server holds.
+
+        Includes every type Plex has (movie, show, artist, photo, video); it is
+        up to the caller to filter to what Canopy+ can actually show.
+        """
+        url = f"{self.base_url}/library/sections"
+        headers = {"Accept": "application/json", "X-Plex-Token": self.token}
+        try:
+            response = await self.client.get(url, headers=headers, timeout=self._timeout)
+        except httpx.HTTPError as exc:
+            raise PlexServerError(f"GET {url} failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise PlexServerError(
+                f"Plex server returned {response.status_code}",
+                status_code=response.status_code,
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PlexServerError("Plex server returned a non-JSON body") from exc
+
+        container = payload.get("MediaContainer", {}) if isinstance(payload, dict) else {}
+        directory = container.get("Directory", []) if isinstance(container, dict) else []
+
+        sections: list[PlexLibrarySection] = []
+        for raw in directory:
+            if not isinstance(raw, dict):
+                continue
+            key, title, kind = raw.get("key"), raw.get("title"), raw.get("type")
+            if not key or not title or not kind:
+                continue
+            sections.append(
+                PlexLibrarySection(
+                    id=str(key),
+                    name=str(title),
+                    type=str(kind),
+                    hidden=bool(int(raw.get("hidden", 0) or 0)),
+                )
+            )
+        return sections

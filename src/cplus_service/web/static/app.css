@@ -372,3 +372,35 @@ table.preview .tag {
 }
 table.preview .verdict { display: block; }
 table.preview .dropped-by { color: var(--err); }
+
+/* Libraries & Home ---------------------------------------------------------- */
+
+.reorder-list { margin: 10px 0; }
+.reorder-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  margin-bottom: 8px; background: var(--bg);
+}
+.reorder-row.dragging { opacity: .4; }
+.drag-handle { color: var(--muted); cursor: grab; line-height: 1; user-select: none; }
+.reorder-row input[type=text] { width: auto; flex: 1; min-width: 140px; }
+.row-actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* A shelf carries a small grid of fields rather than one line, so it drops
+   the row's flex layout in favour of stacking the grid above its own actions. */
+.shelf-row { flex-direction: column; align-items: stretch; }
+.shelf-row .drag-handle { align-self: flex-start; }
+.shelf-grid {
+  display: grid; gap: 12px; margin: 6px 0;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.shelf-grid label { font-size: 12px; margin-bottom: 2px; }
+.shelf-toggle { display: flex; align-items: flex-end; }
+.shelf-row .row-actions { margin-left: 0; justify-content: flex-end; }
+
+/* Same shape as .notify-master, but the switch itself sits in its own span
+   (.carousel-switch) with nothing else inside it — that span is what each
+   switch's hx-target="closest .carousel-switch" swaps, and swapping in a
+   replacement checkbox must never carry the label text away with it. */
+.carousel-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
+.carousel-toggle input { width: 17px; height: 17px; margin: 0; cursor: pointer; }

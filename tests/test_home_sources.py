@@ -1,0 +1,163 @@
+"""The content-source encoding shared by home shelves and the carousel.
+
+The two functions that matter are inverses of each other on every path
+:func:`source_options` actually offers — ``source_of(resolve_source(v, libs))
+== v`` — which is what lets the dropdown pre-select whatever a shelf is
+already set to.
+"""
+
+from __future__ import annotations
+
+from cplus_service.api.routes.admin.home_sources import (
+    DISCOVER_TRENDING,
+    DISCOVER_WATCHLIST,
+    ON_DECK,
+    grouped_options,
+    resolve_source,
+    source_of,
+    source_options,
+)
+
+MOVIE_LIBRARY = {
+    "id": "1",
+    "serverTitle": "Movies (4K HDR)",
+    "type": "movie",
+    "hidden": False,
+    "name": "Movies",
+}
+SHOW_LIBRARY = {
+    "id": "2",
+    "serverTitle": "TV Shows",
+    "type": "show",
+    "hidden": False,
+    "name": "TV Shows",
+}
+LIBRARIES_BY_ID = {"1": MOVIE_LIBRARY, "2": SHOW_LIBRARY}
+
+
+# --------------------------------------------------------------------------- #
+# resolve_source
+# --------------------------------------------------------------------------- #
+
+
+def test_on_deck_resolves_to_the_apps_own_continue_watching_shelf() -> None:
+    fields = resolve_source(ON_DECK, LIBRARIES_BY_ID)
+    assert fields == {
+        "path": "/library/onDeck",
+        "discoverHubKey": None,
+        "description": "Continue Watching / On Deck",
+        "title": "Continue Watching",
+        "style": "card",
+        "titleOnly": False,
+    }
+
+
+def test_a_movie_librarys_newest_defaults_to_poster_and_title_only() -> None:
+    fields = resolve_source("lib:1:newest", LIBRARIES_BY_ID)
+    assert fields["path"] == "/library/sections/1/newest"
+    assert fields["description"] == "Movies (4K HDR): Recently Released"
+    assert fields["title"] == "Recently Released Movies"
+    assert fields["style"] == "poster"
+    assert fields["titleOnly"] is True
+
+
+def test_a_show_librarys_newest_defaults_to_card() -> None:
+    # Only a movie library's Recently Released defaults to poster — everything
+    # else about a non-movie library's cards is unaffected.
+    fields = resolve_source("lib:2:newest", LIBRARIES_BY_ID)
+    assert fields["style"] == "card"
+
+
+def test_recently_added_is_never_title_only() -> None:
+    fields = resolve_source("lib:1:recentlyAdded", LIBRARIES_BY_ID)
+    assert fields["titleOnly"] is False
+    assert fields["title"] == "Recently Added Movies"
+
+
+def test_all_collections_and_all_items_use_the_librarys_own_name() -> None:
+    assert resolve_source("lib:1:collections", LIBRARIES_BY_ID)["title"] == "Collections in Movies"
+    assert resolve_source("lib:1:all", LIBRARIES_BY_ID)["title"] == "All Movies"
+
+
+def test_discover_watchlist_and_trending() -> None:
+    watchlist = resolve_source(DISCOVER_WATCHLIST, LIBRARIES_BY_ID)
+    assert watchlist["discoverHubKey"] == "/library/sections/watchlist/all"
+    assert watchlist["path"] == ""
+
+    trending = resolve_source(DISCOVER_TRENDING, LIBRARIES_BY_ID)
+    assert trending["discoverHubKey"] == "/hubs/sections/home/trending-plex"
+    assert trending["title"] == "Trending"
+
+
+def test_an_unknown_library_id_is_unresolvable() -> None:
+    assert resolve_source("lib:999:all", LIBRARIES_BY_ID) is None
+
+
+def test_an_unknown_kind_is_unresolvable() -> None:
+    assert resolve_source("lib:1:nonsense", LIBRARIES_BY_ID) is None
+
+
+def test_a_malformed_source_is_unresolvable() -> None:
+    assert resolve_source("not-a-source", LIBRARIES_BY_ID) is None
+    assert resolve_source("lib:only-two-parts", LIBRARIES_BY_ID) is None
+
+
+# --------------------------------------------------------------------------- #
+# source_of / resolve_source round-trip
+# --------------------------------------------------------------------------- #
+
+
+def test_source_of_and_resolve_source_round_trip_every_offered_option() -> None:
+    for option in source_options([MOVIE_LIBRARY, SHOW_LIBRARY], allow_discover=True):
+        fields = resolve_source(option.value, LIBRARIES_BY_ID)
+        assert fields is not None, option.value
+        assert source_of(fields) == option.value
+
+
+def test_source_of_a_shelf_with_no_recognisable_path_is_blank() -> None:
+    assert source_of({"path": "/library/collections/9/children", "discoverHubKey": None}) == ""
+
+
+# --------------------------------------------------------------------------- #
+# source_options / grouped_options
+# --------------------------------------------------------------------------- #
+
+
+def test_source_options_leads_with_continue_watching() -> None:
+    options = source_options([], allow_discover=True)
+    assert options[0].value == ON_DECK
+    assert options[0].group is None
+
+
+def test_source_options_offers_four_entries_per_library() -> None:
+    options = source_options([MOVIE_LIBRARY], allow_discover=False)
+    per_library = [o for o in options if o.group == "Movies"]
+    assert {o.value for o in per_library} == {
+        "lib:1:newest",
+        "lib:1:recentlyAdded",
+        "lib:1:collections",
+        "lib:1:all",
+    }
+
+
+def test_discover_hubs_are_withheld_from_the_carousel() -> None:
+    shelf_options = source_options([], allow_discover=True)
+    carousel_options = source_options([], allow_discover=False)
+
+    assert any(o.value == DISCOVER_WATCHLIST for o in shelf_options)
+    assert not any(o.value == DISCOVER_WATCHLIST for o in carousel_options)
+
+
+def test_grouped_options_buckets_contiguous_runs_without_sorting() -> None:
+    # None mixed with library-name groups would blow up Jinja's own groupby
+    # (it sorts by the key first, and None can't be compared to a str).
+    options = source_options([MOVIE_LIBRARY, SHOW_LIBRARY], allow_discover=True)
+    groups = grouped_options(options)
+
+    labels = [label for label, _ in groups]
+    assert labels[0] is None  # Continue Watching, ungrouped
+    assert "Movies" in labels
+    assert "TV Shows" in labels
+    assert "Discover Hubs" in labels
+    # Each library's four options land in one bucket, not split across several.
+    assert len([label for label in labels if label == "Movies"]) == 1

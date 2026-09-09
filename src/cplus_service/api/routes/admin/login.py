@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from ....auth.identity import upsert_user
+from ....auth.identity import refresh_plex_server, upsert_user
 from ....auth.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -187,6 +187,11 @@ async def poll_pin(
             status.HTTP_403_FORBIDDEN,
             "That account is not the Seerr admin. The cplus-service web UI is admin-only.",
         )
+
+    # Best-effort: a Plex server this admin's account cannot currently reach
+    # must not block signing in to everything else. See refresh_plex_server.
+    config = await get_config(db)
+    await refresh_plex_server(config, plex_token, plex.client_identifier, state.http)
 
     user = await upsert_user(db, auth)
     token = await create_session(db, user.id)

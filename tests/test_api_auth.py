@@ -27,6 +27,7 @@ from .conftest import (
     SEERR_URL,
     grant,
     make_action,
+    mock_plex_no_server,
     seerr_user_payload,
 )
 
@@ -341,6 +342,9 @@ async def pin_sign_in(
         return_value=httpx.Response(200, json={"authToken": PLEX_TOKEN})
     )
     mock_seerr_auth(user_id=user_id, permissions=permissions)
+    if permissions & ADMIN_PERMISSIONS:
+        # Only a successful sign-in reaches Plex server discovery.
+        mock_plex_no_server()
 
     await client.post("/admin/plex/pin")
     return await client.get(f"/admin/plex/pin/{pin_id}")
