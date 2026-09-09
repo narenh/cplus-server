@@ -17,7 +17,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     CPLUS_DB_PATH=/data/cplus.db \
     CPLUS_HOST=0.0.0.0 \
-    CPLUS_PORT=8080
+    CPLUS_PORT=8080 \
+    CPLUS_LOG_LEVEL=info \
+    TZ=UTC
 
 WORKDIR /app
 

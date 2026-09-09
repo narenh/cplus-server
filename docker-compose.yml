@@ -7,9 +7,17 @@
 # own machine, docker-compose.override.yml adds the host port binding; Compose
 # merges it automatically, and Coolify never sees it because Coolify invokes
 # compose with an explicit `-f docker-compose.yml`.
+#
+# The service is named `cplus`, matching the identifier in
+# `SERVICE_FQDN_CPLUS_8080` below. Coolify auto-generates its own
+# `SERVICE_FQDN_<SERVICE_NAME>` / `SERVICE_URL_<SERVICE_NAME>` pair per
+# compose service in addition to whatever a service's own environment names
+# explicitly, so a mismatched name (this used to be `cplus-service`) doubles
+# up into two unrelated-looking identifiers for the one port. Keeping them
+# the same collapses that back down to one.
 
 services:
-  cplus-service:
+  cplus:
     build: .
     restart: unless-stopped
 
@@ -27,14 +35,16 @@ services:
       # Changing it signs out every device and browser on the next start.
       CPLUS_SEERR_URL: ${CPLUS_SEERR_URL:?set CPLUS_SEERR_URL to your Seerr base URL}
 
-      # Everything else — Prowlarr connection, actions, quality profiles,
-      # permissions — is configured in the web UI after first launch, not here.
-      # These are only what must exist before the UI does.
-      CPLUS_PORT: "8080"
-      CPLUS_HOST: 0.0.0.0
-      CPLUS_DB_PATH: /data/cplus.db
-      CPLUS_LOG_LEVEL: info
-      TZ: UTC
+      # Everything else this needs before the web UI exists (listen port and
+      # address, the SQLite path, log level, timezone) is baked into the image
+      # itself — see the Dockerfile's own `ENV` — rather than repeated here.
+      # None of it is a real per-deployment choice: two installs of this image
+      # have no reason to disagree about where inside the container it listens
+      # or where the SQLite file lives, and restating fixed values as
+      # "environment variables" only grows the list Coolify asks you to review
+      # on every deploy. If you genuinely need to override one (a non-default
+      # `CPLUS_LOG_LEVEL` while debugging, say), add it here as an ordinary
+      # `KEY: value` line same as the two above.
 
     # `expose`, not `ports`. Coolify's proxy reaches the container over the
     # Docker network, so publishing a host port is both unnecessary and

@@ -100,6 +100,13 @@ Only the handful that must exist before the UI does:
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
 
+Every default above is baked into the image itself (the Dockerfile's own `ENV`),
+not restated in `docker-compose.yml`, which sets only `CPLUS_SEERR_URL` and the
+Coolify domain-assignment variable. `CPLUS_SEERR_URL` is the only one that
+actually needs setting for an ordinary deploy — override any other one only if
+you have a real reason to (a non-default log level while debugging, say), as
+an ordinary line in `environment:`.
+
 There is no secret key to set. Admin sessions are opaque random tokens stored in
 the database, so there is nothing to sign, rotate or leak — revoking a session
 is a row delete, and the sessions live on the same volume as everything else.
@@ -974,5 +981,14 @@ in its value.
 Coolify never applies `docker-compose.override.yml` — it invokes compose with
 an explicit `-f`, which disables the automatic override merge — so the
 `CPLUS_HOST_PORT` note under "Running it" doesn't apply to a Coolify deploy.
+
+**Running a staging deployment alongside production.** Both are ordinary,
+independent Coolify resources built from the same `docker-compose.yml` — there
+is nothing compose-specific to duplicate. Create a second resource the same
+way, pointed at branch `staging` instead of `master`, and give it its own
+domain and its own `CPLUS_SEERR_URL` (point it at a test Seerr instance, or
+the same one, as you prefer). Coolify keeps each resource's container, volume
+and environment variables separate, so the two never share a database or a
+Plex/Seerr session even though they run identical code.
 
 </details>
