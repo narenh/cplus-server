@@ -8,16 +8,8 @@
 # merges it automatically, and Coolify never sees it because Coolify invokes
 # compose with an explicit `-f docker-compose.yml`.
 #
-# The service is named `cplus`, matching the identifier in
-# `SERVICE_FQDN_CPLUS_8080` below. Coolify auto-generates its own
-# `SERVICE_FQDN_<SERVICE_NAME>` / `SERVICE_URL_<SERVICE_NAME>` pair per
-# compose service in addition to whatever a service's own environment names
-# explicitly, so a mismatched name (this used to be `cplus-service`) doubles
-# up into two unrelated-looking identifiers for the one port. Keeping them
-# the same collapses that back down to one.
-
 services:
-  cplus:
+  cplus-service:
     build: .
     restart: unless-stopped
 
