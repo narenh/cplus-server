@@ -188,9 +188,8 @@ async def list_download_clients(
     try:
         clients = await prowlarr.list_download_clients()
     except ProwlarrError as exc:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Prowlarr: {exc}"
-        ) from exc
+        logger.warning("listing download clients failed: %s", exc)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, exc.summary) from exc
 
     return {
         "download_clients": [

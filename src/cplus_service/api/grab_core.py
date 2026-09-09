@@ -69,7 +69,7 @@ async def execute_grab(
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content=GrabResponse(
-                success=False, message=f"Prowlarr rejected the grab: {exc}"
+                success=False, message=f"Prowlarr rejected the grab. {exc.summary}"
             ).model_dump(),
         )
 

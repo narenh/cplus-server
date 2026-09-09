@@ -13,7 +13,7 @@ This is the only place raw Prowlarr release dicts exist.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from types import TracebackType
 from typing import Any, Self
 
@@ -34,11 +34,26 @@ class ProwlarrError(RuntimeError):
 
     Wraps transport errors and non-2xx responses alike so callers have one thing
     to catch.  ``status_code`` is ``None`` when the request never got a response.
+
+    Carries two messages, for two audiences.  ``str(exc)`` is the diagnostic
+    one — it names the URL and quotes Prowlarr's own body — and belongs in the
+    log and on the admin settings page, where the reader configured that URL and
+    can act on what it said.  :attr:`summary` is the one an end user gets: the
+    same failure with the internal host, the path and Prowlarr's body left out.
+    Neither the app nor its user has any business seeing where this service
+    keeps Prowlarr, and none of that detail is theirs to act on.
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        summary: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.summary = summary or "Prowlarr could not be reached."
 
 
 class ProwlarrClient:
@@ -112,11 +127,15 @@ class ProwlarrClient:
                 method, url, params=params, json=json, headers=headers, timeout=self._timeout
             )
         except httpx.HTTPError as exc:
-            raise ProwlarrError(f"{method} {url} failed: {exc}") from exc
+            raise ProwlarrError(
+                f"{method} {url} failed: {exc}",
+                summary="Could not reach Prowlarr.",
+            ) from exc
 
         if response.status_code >= 400:
             raise ProwlarrError(
                 f"{method} {url} returned {response.status_code}: {response.text[:500]}",
+                summary=f"Prowlarr returned HTTP {response.status_code}.",
                 status_code=response.status_code,
             )
         if not response.content:
@@ -124,7 +143,49 @@ class ProwlarrClient:
         try:
             return response.json()
         except ValueError as exc:
-            raise ProwlarrError(f"{method} {url} returned a non-JSON body") from exc
+            raise ProwlarrError(
+                f"{method} {url} returned a non-JSON body",
+                summary="Prowlarr returned a response this service could not read.",
+            ) from exc
+
+    async def _request_list(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+    ) -> list[Any]:
+        """:meth:`_request` for the endpoints whose answer is a JSON array.
+
+        Prowlarr answers these with an array, but not unconditionally: an
+        indexer failure, a misrouted request or a proxy sitting in front of it
+        can put an object — or a bare string — there instead, still under a
+        200.  Iterating that yields something the callers below are not written
+        for (a dict iterates as its *keys*), and they fail somewhere further
+        down with an ``AttributeError`` nobody catches, which is how a search
+        that simply found nothing turned into a 500.
+
+        Rejecting the shape here instead puts every such case on the one path
+        callers already handle, and a genuinely empty result — ``[]``, ``null``
+        or an empty body — stays the empty list it should be.
+        """
+        payload = await self._request(method, path, params=params, json=json)
+        if payload is None:
+            return []
+        url = f"{self.base_url}/api/v1/{path.lstrip('/')}"
+        if not isinstance(payload, list):
+            raise ProwlarrError(
+                f"{method} {url} returned a JSON {type(payload).__name__}, "
+                f"expected an array",
+                summary="Prowlarr returned a response this service could not read.",
+            )
+        if not all(isinstance(item, Mapping) for item in payload):
+            raise ProwlarrError(
+                f"{method} {url} returned an array holding something other than objects",
+                summary="Prowlarr returned a response this service could not read.",
+            )
+        return payload
 
     # ----------------------------------------------------------------- #
     # API surface
@@ -140,12 +201,12 @@ class ProwlarrClient:
         return SystemStatus.model_validate(payload or {})
 
     async def list_indexers(self) -> list[Indexer]:
-        payload = await self._request("GET", "indexer")
-        return [Indexer.model_validate(item) for item in payload or []]
+        payload = await self._request_list("GET", "indexer")
+        return [Indexer.model_validate(item) for item in payload]
 
     async def list_download_clients(self) -> list[DownloadClient]:
-        payload = await self._request("GET", "downloadclient")
-        return [DownloadClient.model_validate(item) for item in payload or []]
+        payload = await self._request_list("GET", "downloadclient")
+        return [DownloadClient.model_validate(item) for item in payload]
 
     async def search_movie(
         self, imdb_id: str, *, indexer_ids: Sequence[int] | None = None
@@ -170,8 +231,7 @@ class ProwlarrClient:
         if indexer_ids:
             params["indexerIds"] = list(indexer_ids)
 
-        payload = await self._request("GET", "search", params=params)
-        raw_results = payload or []
+        raw_results = await self._request_list("GET", "search", params=params)
         releases = parse_prowlarr_results(raw_results)
         logger.debug(
             "prowlarr search imdb=%s raw=%d parsed=%d (full discs dropped=%d)",
@@ -202,8 +262,7 @@ class ProwlarrClient:
         if indexer_ids:
             params["indexerIds"] = list(indexer_ids)
 
-        payload = await self._request("GET", "search", params=params)
-        raw_results = payload or []
+        raw_results = await self._request_list("GET", "search", params=params)
         releases = parse_prowlarr_results(raw_results)
         logger.debug(
             "prowlarr text search %r raw=%d parsed=%d (full discs dropped=%d)",
