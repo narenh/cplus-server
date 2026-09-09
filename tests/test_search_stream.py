@@ -284,7 +284,12 @@ async def test_a_failing_preferred_search_degrades_to_one_phase() -> None:
 
 
 async def test_a_failing_all_search_reports_in_band_so_the_client_can_stop_loading() -> None:
-    prowlarr = StubProwlarr(everything=ProwlarrError("prowlarr exploded"))
+    prowlarr = StubProwlarr(
+        everything=ProwlarrError(
+            "GET http://prowlarr.internal:9696/api/v1/search returned 500: stack trace",
+            summary="Prowlarr returned HTTP 500.",
+        )
+    )
 
     (everything,) = await collect(
         prowlarr=prowlarr, imdb_id="tt1", actions=[action(1)], preferred_indexer_id=None
@@ -293,8 +298,10 @@ async def test_a_failing_all_search_reports_in_band_so_the_client_can_stop_loadi
     assert everything.phase == "all"
     assert everything.releases == []
     assert everything.recommendations == {"1": None}
-    assert everything.error is not None
-    assert "exploded" in everything.error
+    # The client is told the search failed, and nothing more: this field is
+    # shown to a user who has no business knowing where Prowlarr lives and
+    # nothing to do with its response body.
+    assert everything.error == "Prowlarr returned HTTP 500."
 
 
 async def test_both_searches_failing_still_terminates_the_stream() -> None:
@@ -417,7 +424,12 @@ async def test_a_text_query_is_a_single_phase_even_with_a_preferred_indexer() ->
 
 
 async def test_a_failing_text_query_still_terminates_the_stream() -> None:
-    prowlarr = StubProwlarr(everything=ProwlarrError("prowlarr exploded"))
+    prowlarr = StubProwlarr(
+        everything=ProwlarrError(
+            "GET http://prowlarr.internal:9696/api/v1/search failed: connect refused",
+            summary="Could not reach Prowlarr.",
+        )
+    )
 
     (everything,) = await collect(
         prowlarr=prowlarr, query="dune", actions=[], preferred_indexer_id=None
@@ -425,7 +437,8 @@ async def test_a_failing_text_query_still_terminates_the_stream() -> None:
 
     assert everything.phase == "all"
     assert everything.releases == []
-    assert everything.error is not None
+    assert everything.error == "Could not reach Prowlarr."
+    assert "prowlarr.internal" not in everything.error
 
 
 async def test_a_text_query_with_no_results_still_sends_the_all_phase() -> None:

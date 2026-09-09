@@ -45,7 +45,10 @@ every action falls back to the full set.
 The ``all`` line is always emitted, including when a search yields nothing and
 including when Prowlarr errors, so the client can always leave its loading
 state. Because the response has already committed to 200 by then, a late failure
-is reported in-band as an ``error`` field rather than as a status code.
+is reported in-band as an ``error`` field rather than as a status code. That
+field carries :attr:`~cplus_service.prowlarr.client.ProwlarrError.summary`, not
+the diagnostic message — it is rendered in an app whose user neither knows nor
+should know where this service keeps Prowlarr. The log keeps the full text.
 """
 
 from __future__ import annotations
@@ -166,7 +169,10 @@ async def stream_search(
             releases = await fetch(scope)
         except ProwlarrError as exc:
             logger.warning("search failed: %s", exc)
-            error = str(exc)
+            # `summary`, not `str(exc)`: this field is rendered in the app, and
+            # the diagnostic message names the Prowlarr host and quotes its
+            # body. The log above keeps the whole thing.
+            error = exc.summary
 
         yield SearchPhase(
             phase=PHASE_ALL,
@@ -205,7 +211,7 @@ async def stream_search(
         all_releases = await all_task
     except ProwlarrError as exc:
         logger.warning("all-indexer search failed: %s", exc)
-        error = str(exc)
+        error = exc.summary
 
     already_sent = {release.guid for release in preferred_releases if release.guid}
     fresh = [

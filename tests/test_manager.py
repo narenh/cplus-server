@@ -434,6 +434,86 @@ async def test_manager_search_is_logged_to_the_activity_log(
     assert entry.detail["preferred_only"] is True
 
 
+@respx.mock
+async def test_a_search_that_finds_nothing_is_an_empty_200_not_a_500(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    """Prowlarr's "nothing here" is an empty array, and it stays a 200.
+
+    It does not always send one, though: an indexer failure or a proxy in front
+    of it can answer with a JSON object under the same 200, which used to reach
+    the release parser and raise out of the streaming body as a 500. Both
+    shapes belong on the same path — the client is told, in band, that the
+    search found nothing.
+    """
+    mock_seerr_auth(permissions=2)
+    mock_prowlarr_search([])
+
+    response = await client.get(
+        "/manager/search", params={"query": "nothing matches this"}, headers=plex_headers
+    )
+
+    assert response.status_code == 200
+    lines = ndjson(response)
+    assert [line["phase"] for line in lines] == ["all"]
+    assert lines[0]["releases"] == []
+    assert "error" not in lines[0]
+
+
+@respx.mock
+async def test_a_search_answered_with_a_json_object_is_reported_in_band_not_as_a_500(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(200, json={"message": "no results"})
+    )
+
+    response = await client.get(
+        "/manager/search", params={"query": "nothing matches this"}, headers=plex_headers
+    )
+
+    assert response.status_code == 200
+    (line,) = ndjson(response)
+    assert line["phase"] == "all"
+    assert line["releases"] == []
+    assert line["error"] == "Prowlarr returned a response this service could not read."
+
+
+@respx.mock
+async def test_a_prowlarr_failure_does_not_tell_the_app_where_prowlarr_lives(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(500, text="System.NullReferenceException at Prowlarr...")
+    )
+
+    response = await client.get(
+        "/manager/search", params={"query": "dune"}, headers=plex_headers
+    )
+
+    (line,) = ndjson(response)
+    assert line["error"] == "Prowlarr returned HTTP 500."
+    assert "prowlarr.test" not in response.text
+    assert "NullReferenceException" not in response.text
+
+
+@respx.mock
+async def test_an_unreachable_prowlarr_is_502_without_the_url_on_download_clients(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+        side_effect=httpx.ConnectError("[Errno 111] Connection refused")
+    )
+
+    response = await client.get("/manager/download-clients", headers=plex_headers)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Could not reach Prowlarr."
+
+
 async def test_manager_search_before_prowlarr_is_configured_is_503(
     client: httpx.AsyncClient, plex_headers: dict
 ) -> None:

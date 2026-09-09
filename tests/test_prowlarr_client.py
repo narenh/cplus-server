@@ -224,3 +224,98 @@ async def test_trailing_slash_on_the_base_url_does_not_double_up() -> None:
         await prowlarr.verify_connection()
 
     assert route.called
+
+
+# --------------------------------------------------------------------------- #
+# Response shape
+#
+# Prowlarr answers a search with a JSON array, but not unconditionally: an
+# indexer failure or a proxy in front of it can put an object there instead,
+# still under a 200. That used to reach the parser, which iterated the dict as
+# its keys and died on a `str` where it wanted a mapping — a search that found
+# nothing coming back to the app as a 500.
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_search_answered_with_an_object_is_a_prowlarr_error_not_a_crash() -> None:
+    respx.get(f"{BASE_URL}/api/v1/search").mock(
+        return_value=httpx.Response(200, json={"message": "no results"})
+    )
+
+    async with client() as prowlarr:
+        with pytest.raises(ProwlarrError) as excinfo:
+            await prowlarr.search_query("nothing matches this")
+
+    assert "expected an array" in str(excinfo.value)
+
+
+@respx.mock
+async def test_a_search_array_holding_something_other_than_objects_is_rejected() -> None:
+    respx.get(f"{BASE_URL}/api/v1/search").mock(
+        return_value=httpx.Response(200, json=["Movie.2024.1080p.WEB-DL-GRP"])
+    )
+
+    async with client() as prowlarr:
+        with pytest.raises(ProwlarrError):
+            await prowlarr.search_movie("tt0111161")
+
+
+@pytest.mark.parametrize(
+    "body", [{"json": []}, {"json": None}, {"content": b""}], ids=["array", "null", "empty"]
+)
+@respx.mock
+async def test_a_genuinely_empty_search_is_an_empty_list(body: dict) -> None:
+    respx.get(f"{BASE_URL}/api/v1/search").mock(return_value=httpx.Response(200, **body))
+
+    async with client() as prowlarr:
+        assert await prowlarr.search_query("nothing matches this") == []
+
+
+@respx.mock
+async def test_an_indexer_list_answered_with_an_object_is_a_prowlarr_error() -> None:
+    respx.get(f"{BASE_URL}/api/v1/indexer").mock(
+        return_value=httpx.Response(200, json={"message": "nope"})
+    )
+
+    async with client() as prowlarr:
+        with pytest.raises(ProwlarrError):
+            await prowlarr.list_indexers()
+
+
+# --------------------------------------------------------------------------- #
+# Two messages, two audiences
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_the_diagnostic_message_keeps_the_url_and_body_and_the_summary_drops_them() -> None:
+    respx.get(f"{BASE_URL}/api/v1/search").mock(
+        return_value=httpx.Response(500, text="System.NullReferenceException at Prowlarr...")
+    )
+
+    async with client() as prowlarr:
+        with pytest.raises(ProwlarrError) as excinfo:
+            await prowlarr.search_query("dune")
+
+    exc = excinfo.value
+    # For the log and the admin settings page, where the reader configured
+    # this URL and can act on what came back.
+    assert BASE_URL in str(exc)
+    assert "NullReferenceException" in str(exc)
+    # For the app. Neither the host nor the body is the user's to see.
+    assert exc.summary == "Prowlarr returned HTTP 500."
+
+
+@respx.mock
+async def test_an_unreachable_prowlarr_summarises_without_naming_the_host() -> None:
+    respx.get(f"{BASE_URL}/api/v1/search").mock(
+        side_effect=httpx.ConnectError("[Errno 111] Connection refused")
+    )
+
+    async with client() as prowlarr:
+        with pytest.raises(ProwlarrError) as excinfo:
+            await prowlarr.search_query("dune")
+
+    assert excinfo.value.summary == "Could not reach Prowlarr."
+    assert "prowlarr.test" not in excinfo.value.summary
