@@ -5,10 +5,13 @@ a shelf's ``path``, ``discoverHubKey`` and ``description`` — none of which are
 otherwise editable — plus starting values for ``title``, ``style`` and
 ``titleOnly``, which an admin can still change afterwards, same as in the app.
 
-One entry from that menu is deliberately not offered here: "Collection
-Items…", which lists Plex collections by name within a library. That is a
-second live Plex call and a second-level dropdown for a single row in a
-picker most admins will not need; there is no substitute for it today.
+"Collection Items…" is the one entry that needs a second, per-library picker
+(the actual collections, fetched live) rather than resolving straight from its
+value — see :data:`COLLECTIONS_PREFIX` and :func:`parse_collection_source`.
+It is deliberately not handled by :func:`resolve_source`: applying it needs a
+collection's title, which nothing here has, and needs it to come from the
+client (which just fetched the list) rather than a second live Plex call on
+every save. See ``libraries.update_shelf``.
 """
 
 from __future__ import annotations
@@ -20,6 +23,16 @@ from typing import Any
 ON_DECK = "ondeck"
 DISCOVER_WATCHLIST = "discover:watchlist"
 DISCOVER_TRENDING = "discover:trending"
+
+#: A per-library placeholder, not a real source: picking one in the main
+#: dropdown reveals a second picker of that library's own collections rather
+#: than applying anything by itself. See ``static/shelf-source.js``.
+COLLECTIONS_PREFIX = "collections:"
+
+#: A specific collection, chosen from that second picker. Carries the
+#: library id too — Plex collection ids are not scoped to a library, but
+#: the description text still needs the library's own display name.
+COLLECTION_PREFIX = "col:"
 
 WATCHLIST_HUB_KEY = "/library/sections/watchlist/all"
 TRENDING_HUB_KEY = "/hubs/sections/home/trending-plex"
@@ -57,6 +70,7 @@ def source_options(
                 SourceOption(f"lib:{library_id}:recentlyAdded", "Recently Added", group),
                 SourceOption(f"lib:{library_id}:collections", "All Collections", group),
                 SourceOption(f"lib:{library_id}:all", "All Items", group),
+                SourceOption(f"{COLLECTIONS_PREFIX}{library_id}", "Collection Items…", group),
             ]
         )
     if allow_discover:
@@ -165,6 +179,42 @@ def resolve_source(
             "titleOnly": False,
         }
     return None
+
+
+def resolve_collection_source(
+    source: str, title: str, libraries_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The shelf fields a specific chosen collection sets.
+
+    Mirrors the "Collection Items…" branch of ``HomeShelfPathMenu`` exactly:
+    ``path`` is ``/library/collections/{id}/children``, and the description
+    names the collection the way every other library-scoped source does.
+    ``title`` comes from the caller (the option text in the collections
+    picker the client just fetched) rather than a second live lookup here.
+    """
+    if not source.startswith(COLLECTION_PREFIX):
+        return None
+    try:
+        _, library_id, collection_id = source.split(":", 2)
+    except ValueError:
+        return None
+    if not collection_id or not title.strip():
+        return None
+
+    library = libraries_by_id.get(library_id)
+    server_title = str(library["serverTitle"]) if library else ""
+    clean_title = title.strip()
+
+    return {
+        "path": f"/library/collections/{collection_id}/children",
+        "discoverHubKey": None,
+        "description": (
+            f"{server_title}: Items in {clean_title}" if server_title else f"Items in {clean_title}"
+        ),
+        "title": clean_title,
+        "style": "poster",
+        "titleOnly": False,
+    }
 
 
 def source_of(shelf: dict[str, Any]) -> str:

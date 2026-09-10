@@ -471,6 +471,89 @@ async def test_an_unresolvable_source_is_rejected(
 
 
 # --------------------------------------------------------------------------- #
+# Home shelves: "Collection Items…"
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_collections_picker_lists_a_librarys_collections(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)")
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    with respx.mock:
+        respx.get(f"{PLEX_SERVER_URL}/library/sections/1/collections").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "MediaContainer": {
+                        "Metadata": [{"ratingKey": "99", "title": "Best of 2026"}]
+                    }
+                },
+            )
+        )
+        response = await client.get(
+            f"/admin/libraries/home/shelves/{shelf_id}/collections",
+            params={"library_id": "1"},
+        )
+
+    assert response.status_code == 200
+    assert '<option value="col:1:99">Best of 2026</option>' in response.text
+
+
+async def test_the_collections_picker_reports_when_not_connected(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    response = await client.get(
+        f"/admin/libraries/home/shelves/{shelf_id}/collections",
+        params={"library_id": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "Not connected" in response.text
+
+
+async def test_choosing_a_collection_applies_it(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)", name="Movies")
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    response = await client.post(
+        f"/admin/libraries/home/shelves/{shelf_id}",
+        data={"source": "col:1:99", "collection_title": "Best of 2026"},
+    )
+
+    assert response.status_code == 200
+    shelf = (await current_config(db)).home_shelves[0]
+    assert shelf["path"] == "/library/collections/99/children"
+    assert shelf["discoverHubKey"] is None
+    assert shelf["description"] == "Movies (4K HDR): Items in Best of 2026"
+    assert shelf["title"] == "Best of 2026"
+    assert shelf["style"] == "poster"
+    assert shelf["titleOnly"] is False
+
+
+async def test_choosing_a_collection_without_a_title_is_rejected(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    response = await client.post(
+        f"/admin/libraries/home/shelves/{shelf_id}",
+        data={"source": "col:1:99", "collection_title": ""},
+    )
+
+    assert response.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
 # Carousel
 # --------------------------------------------------------------------------- #
 

@@ -203,6 +203,19 @@ class PlexLibrarySection:
     hidden: bool
 
 
+@dataclass(frozen=True)
+class PlexCollection:
+    """One collection within a library, straight off ``GET /library/sections/{id}/collections``.
+
+    ``id`` is Plex's ``ratingKey`` — unique server-wide, not scoped to the
+    library it was fetched from, but the caller always already knows which
+    library it asked about.
+    """
+
+    id: str
+    title: str
+
+
 def best_connection(connections: Sequence[PlexConnection]) -> PlexConnection | None:
     """Prefer a local, direct connection; fall back to remote, then relay.
 
@@ -382,3 +395,41 @@ class PlexServerClient:
                 )
             )
         return sections
+
+    async def list_collections(self, library_id: str) -> list[PlexCollection]:
+        """``GET /library/sections/{library_id}/collections`` — that library's collections.
+
+        Backs the Home shelf editor's "Collection Items…" picker — the same
+        request CanopyPlus's own ``PlexServer.items(path: .libraryItems(_,
+        .collections))`` makes.
+        """
+        url = f"{self.base_url}/library/sections/{library_id}/collections"
+        headers = {"Accept": "application/json", "X-Plex-Token": self.token}
+        try:
+            response = await self.client.get(url, headers=headers, timeout=self._timeout)
+        except httpx.HTTPError as exc:
+            raise PlexServerError(f"GET {url} failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise PlexServerError(
+                f"Plex server returned {response.status_code}",
+                status_code=response.status_code,
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PlexServerError("Plex server returned a non-JSON body") from exc
+
+        container = payload.get("MediaContainer", {}) if isinstance(payload, dict) else {}
+        items = container.get("Metadata", []) if isinstance(container, dict) else []
+
+        collections: list[PlexCollection] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            rating_key, title = raw.get("ratingKey"), raw.get("title")
+            if not rating_key or not title:
+                continue
+            collections.append(PlexCollection(id=str(rating_key), title=str(title)))
+        return collections

@@ -13,6 +13,7 @@ from cplus_service.api.routes.admin.home_sources import (
     DISCOVER_WATCHLIST,
     ON_DECK,
     grouped_options,
+    resolve_collection_source,
     resolve_source,
     source_of,
     source_options,
@@ -109,6 +110,10 @@ def test_a_malformed_source_is_unresolvable() -> None:
 
 def test_source_of_and_resolve_source_round_trip_every_offered_option() -> None:
     for option in source_options([MOVIE_LIBRARY, SHOW_LIBRARY], allow_discover=True):
+        if option.value.startswith("collections:"):
+            # A placeholder that reveals a second, live picker — not a real,
+            # resolvable source. See resolve_collection_source instead.
+            continue
         fields = resolve_source(option.value, LIBRARIES_BY_ID)
         assert fields is not None, option.value
         assert source_of(fields) == option.value
@@ -129,7 +134,7 @@ def test_source_options_leads_with_continue_watching() -> None:
     assert options[0].group is None
 
 
-def test_source_options_offers_four_entries_per_library() -> None:
+def test_source_options_offers_five_entries_per_library() -> None:
     options = source_options([MOVIE_LIBRARY], allow_discover=False)
     per_library = [o for o in options if o.group == "Movies"]
     assert {o.value for o in per_library} == {
@@ -137,6 +142,7 @@ def test_source_options_offers_four_entries_per_library() -> None:
         "lib:1:recentlyAdded",
         "lib:1:collections",
         "lib:1:all",
+        "collections:1",
     }
 
 
@@ -159,5 +165,46 @@ def test_grouped_options_buckets_contiguous_runs_without_sorting() -> None:
     assert "Movies" in labels
     assert "TV Shows" in labels
     assert "Discover Hubs" in labels
-    # Each library's four options land in one bucket, not split across several.
+    # Each library's five options land in one bucket, not split across several.
     assert len([label for label in labels if label == "Movies"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# resolve_collection_source
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_collection_source_names_the_library_and_the_collection() -> None:
+    fields = resolve_collection_source("col:1:99", "Best of 2026", LIBRARIES_BY_ID)
+    assert fields == {
+        "path": "/library/collections/99/children",
+        "discoverHubKey": None,
+        "description": "Movies (4K HDR): Items in Best of 2026",
+        "title": "Best of 2026",
+        "style": "poster",
+        "titleOnly": False,
+    }
+
+
+def test_resolve_collection_source_without_a_known_library_drops_the_prefix() -> None:
+    fields = resolve_collection_source("col:999:99", "Best of 2026", {})
+    assert fields is not None
+    assert fields["description"] == "Items in Best of 2026"
+
+
+def test_resolve_collection_source_rejects_a_blank_title() -> None:
+    assert resolve_collection_source("col:1:99", "   ", LIBRARIES_BY_ID) is None
+
+
+def test_resolve_collection_source_rejects_a_malformed_value() -> None:
+    assert resolve_collection_source("col:1", "Title", LIBRARIES_BY_ID) is None
+    assert resolve_collection_source("lib:1:all", "Title", LIBRARIES_BY_ID) is None
+
+
+def test_a_collection_shelf_has_no_recognisable_source() -> None:
+    # Plex collection ids are not scoped to a library, so there is no way to
+    # reconstruct which library's "Collection Items…" entry it came from —
+    # the main dropdown falls back to its own description-only placeholder.
+    fields = resolve_collection_source("col:1:99", "Best of 2026", LIBRARIES_BY_ID)
+    assert fields is not None
+    assert source_of(fields) == ""

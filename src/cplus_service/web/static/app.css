@@ -399,17 +399,28 @@ table.preview .dropped-by { color: var(--err); }
   padding: 4px 7px;
 }
 
-/* A shelf carries a small grid of fields rather than one line, so it drops
-   the row's flex layout in favour of stacking the grid above its own actions. */
-.shelf-row { flex-direction: column; align-items: stretch; }
-.shelf-row .drag-handle { align-self: flex-start; }
-.shelf-grid {
-  display: grid; gap: 12px; margin: 6px 0;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+/* A shelf is two tight rows — Content+Title, then Style+"Hide release
+   year"+Remove — rather than one grid of labelled fields; that's what the
+   old layout's height was actually going to, and none of it is information
+   the controls don't already carry themselves. */
+.shelf-row { flex-direction: column; align-items: stretch; padding: 8px 12px; }
+.shelf-row .drag-handle { align-self: flex-start; margin-bottom: 2px; }
+.shelf-fields { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+/* A form with no visible content of its own — every real field lives outside
+   it via form="<id>". display:none, not visibility:hidden, so it costs zero
+   height and no flex gap in the column above. */
+.shelf-form-anchor { display: none; }
+.shelf-row-1, .shelf-row-2 { display: flex; align-items: center; gap: 8px; }
+.shelf-row-1 select[name=source] { flex: 2 1 200px; width: auto; min-width: 0; }
+.shelf-row-1 input[name=title] { flex: 1 1 140px; width: auto; min-width: 0; }
+.shelf-row-2 select[name=style] { flex: 0 0 auto; width: auto; }
+.shelf-row-2 label.check { flex: 1; margin: 0; }
+/* .remove-form is display:contents (see above), so the button — its only
+   child — is what actually needs pushing to the row's end. */
+.shelf-row-2 form.remove-form button { margin-left: auto; }
+@media (max-width: 640px) {
+  .shelf-row-1, .shelf-row-2 { flex-wrap: wrap; }
 }
-.shelf-grid label { font-size: 12px; margin-bottom: 2px; }
-.shelf-toggle { display: flex; align-items: flex-end; }
-.shelf-row .row-actions { margin-left: 0; justify-content: flex-end; }
 
 /* Same shape as .notify-master, but the switch itself sits in its own span
    (.carousel-switch) with nothing else inside it — that span is what each

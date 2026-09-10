@@ -53,7 +53,14 @@ from ....web import templates
 from ...deps import DbDep, StateDep
 from ...state import AppState
 from .deps import AdminPageDep
-from .home_sources import grouped_options, resolve_source, source_of, source_options
+from .home_sources import (
+    COLLECTION_PREFIX,
+    grouped_options,
+    resolve_collection_source,
+    resolve_source,
+    source_of,
+    source_options,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +352,49 @@ async def reorder_shelves(request: Request, db: DbDep, admin: AdminPageDep) -> R
     return await _home_shelves_section(request, db)
 
 
+@router.get("/home/shelves/{shelf_id}/collections", response_class=HTMLResponse)
+async def shelf_collections(
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    shelf_id: str,
+    library_id: str,
+) -> Response:
+    """The picker of one library's own collections, for "Collection Items…".
+
+    ``shelf_id`` names nothing here beyond which shelf's picker to wire the
+    result up to — this is a read, not a write to that shelf.
+    """
+    config = await get_config(db)
+    collections: list[dict[str, str]] = []
+    error: str | None = None
+    if not config.plex_server_base_url or not config.plex_admin_token:
+        error = "Not connected to a Plex server."
+    else:
+        plex = PlexServerClient(
+            config.plex_server_base_url, config.plex_admin_token, client=state.http
+        )
+        try:
+            collections = [
+                {"id": c.id, "title": c.title} for c in await plex.list_collections(library_id)
+            ]
+        except PlexServerError as exc:
+            logger.warning("could not list collections for library %s: %s", library_id, exc)
+            error = f"Could not reach the Plex server: {exc}"
+
+    return templates.TemplateResponse(
+        request,
+        "partials/collections_picker.html",
+        {
+            "shelf_id": shelf_id,
+            "library_id": library_id,
+            "collections": collections,
+            "error": error,
+        },
+    )
+
+
 @router.post("/home/shelves/{shelf_id}/remove", response_class=HTMLResponse)
 async def remove_shelf(request: Request, db: DbDep, admin: AdminPageDep, shelf_id: str) -> Response:
     config = await get_config(db)
@@ -367,15 +417,18 @@ async def update_shelf(
     title: str = Form(default=""),
     style: str = Form(default="poster"),
     title_only: str = Form(default=""),
+    collection_title: str = Form(default=""),
 ) -> Response:
     """Save one shelf's edits.
 
     Changing ``source`` mirrors tapping an entry in CanopyPlus's own content
     menu: it always resets title, style and titleOnly to that source's
     defaults, discarding whatever was typed here — the same behaviour the app
-    itself has. Leaving the source alone applies the other three fields as
-    ordinary edits, same as the app's separate Title field, Style picker and
-    "Hide Release Year" toggle.
+    itself has. A specific collection (``source`` starting with ``col:``) is
+    the same case with a title the server has no other way to learn — see
+    :func:`~.home_sources.resolve_collection_source`. Leaving the source alone
+    applies the other three fields as ordinary edits, same as the app's
+    separate Title field, Style picker and "Hide Release Year" toggle.
     """
     config = await get_config(db)
     libraries_by_id = {library["id"]: library for library in config.default_libraries}
@@ -387,6 +440,13 @@ async def update_shelf(
             updated.append(shelf)
             continue
         found = True
+
+        if source.startswith(COLLECTION_PREFIX):
+            defaults = resolve_collection_source(source, collection_title, libraries_by_id)
+            if defaults is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
+            updated.append({**shelf, **defaults})
+            continue
 
         if source != source_of(shelf):
             defaults = resolve_source(source, libraries_by_id)

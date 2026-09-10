@@ -450,3 +450,88 @@ async def test_list_library_sections_a_transport_failure_is_wrapped() -> None:
     async with PlexServerClient(SERVER_URL, "server-tok") as plex:
         with pytest.raises(PlexServerError):
             await plex.list_library_sections()
+
+
+# --------------------------------------------------------------------------- #
+# PlexServerClient.list_collections
+# --------------------------------------------------------------------------- #
+
+
+def collections_payload(*metadata: dict) -> dict:
+    return {"MediaContainer": {"Metadata": list(metadata)}}
+
+
+@respx.mock
+async def test_list_collections_parses_the_metadata() -> None:
+    respx.get(f"{SERVER_URL}/library/sections/1/collections").mock(
+        return_value=httpx.Response(
+            200,
+            json=collections_payload(
+                {"ratingKey": "99", "title": "Best of 2026"},
+                {"ratingKey": "100", "title": "Award Winners"},
+            ),
+        )
+    )
+
+    async with PlexServerClient(SERVER_URL, "server-tok") as plex:
+        collections = await plex.list_collections("1")
+
+    assert [(c.id, c.title) for c in collections] == [
+        ("99", "Best of 2026"),
+        ("100", "Award Winners"),
+    ]
+
+
+@respx.mock
+async def test_list_collections_sends_the_token() -> None:
+    route = respx.get(f"{SERVER_URL}/library/sections/1/collections").mock(
+        return_value=httpx.Response(200, json=collections_payload())
+    )
+
+    async with PlexServerClient(SERVER_URL, "server-tok") as plex:
+        await plex.list_collections("1")
+
+    assert route.calls[0].request.headers["X-Plex-Token"] == "server-tok"
+
+
+@respx.mock
+async def test_list_collections_skips_entries_missing_required_fields() -> None:
+    respx.get(f"{SERVER_URL}/library/sections/1/collections").mock(
+        return_value=httpx.Response(
+            200,
+            json=collections_payload(
+                {"ratingKey": "99", "title": "Best of 2026"},
+                {"title": "No rating key"},
+                "garbage",
+            ),
+        )
+    )
+
+    async with PlexServerClient(SERVER_URL, "server-tok") as plex:
+        collections = await plex.list_collections("1")
+
+    assert [c.id for c in collections] == ["99"]
+
+
+@respx.mock
+async def test_list_collections_error_status_raises() -> None:
+    respx.get(f"{SERVER_URL}/library/sections/1/collections").mock(
+        return_value=httpx.Response(401, text="nope")
+    )
+
+    async with PlexServerClient(SERVER_URL, "server-tok") as plex:
+        with pytest.raises(PlexServerError) as excinfo:
+            await plex.list_collections("1")
+
+    assert excinfo.value.status_code == 401
+
+
+@respx.mock
+async def test_list_collections_a_transport_failure_is_wrapped() -> None:
+    respx.get(f"{SERVER_URL}/library/sections/1/collections").mock(
+        side_effect=httpx.ConnectError("down")
+    )
+
+    async with PlexServerClient(SERVER_URL, "server-tok") as plex:
+        with pytest.raises(PlexServerError):
+            await plex.list_collections("1")
