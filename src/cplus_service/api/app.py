@@ -48,6 +48,7 @@ from .routes import (
     request,
     seerr,
     titles,
+    tmdb_actions,
 )
 from .state import AppState
 
@@ -159,6 +160,7 @@ def create_app(
     app.include_router(register.router)
     app.include_router(home.router)
     app.include_router(titles.router)
+    app.include_router(tmdb_actions.router)
     app.include_router(grab.router)
     app.include_router(manager.router)
     app.include_router(push_devices.router)

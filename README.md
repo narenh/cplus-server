@@ -158,7 +158,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 836 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 863 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -197,7 +197,8 @@ src/cplus_service/
   search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           register, home, titles, grab, manager, request, seerr
+  api/routes/           register, home, titles, tmdb_actions, grab, manager,
+                        request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
@@ -562,6 +563,8 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /home` | cache | The caller's whole home screen, in CanopyPlus's own `HomeSettings` shape |
 | `PUT /home` | cache | One `HomeSettings` document. 200 if it won, 409 if it lost — the winner is the body either way |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
+| `GET /movies/tmdb/{tmdb_id}/actions` | cache | A movie with no IMDB id: nothing to search with, so Request only. Plain JSON, one line's shape |
+| `GET /tv/tmdb/{tmdb_id}/actions` | cache | A TV title: grab actions undecided, so Request only. Plain JSON, one line's shape |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
@@ -802,6 +805,45 @@ no Prowlarr-backed action never triggers a Prowlarr call at all** — actions ar
 the only grant of indexer access a regular user has, so the response is a
 single `releases: []` line naming whatever they *are* permitted (Request, or
 nothing).
+
+### Titles the search path cannot serve
+
+`GET /titles/{imdb_id}/actions` answers the full question for a movie. Two
+reduced endpoints answer it for the cases where that is impossible, and today
+both give the same answer: **the built-in Request action if the caller holds it,
+and nothing else.**
+
+| | Why it exists | Will it ever grow? |
+|---|---|---|
+| `GET /movies/tmdb/{tmdb_id}/actions` | The film's metadata carries no IMDB id, and Prowlarr search here is IMDB-keyed — there is nothing to search *with* | No. The missing id is the thing preventing it |
+| `GET /tv/tmdb/{tmdb_id}/actions` | Grab actions for TV are undecided: seasons, packs and per-episode releases all want answering first | Probably, and it will diverge from the movie route rather than both drifting through a shared parameter |
+
+**Two routes rather than one, because TMDB ids are namespaced by media type.**
+Movie 550 and TV series 550 are unrelated titles, so a single
+`/{tmdb_id}/actions` would be ambiguous the moment anything here looked the id
+up. Nothing does yet — neither handler consults it — but a path that cannot
+express the difference would have to be *replaced* rather than extended, and
+older clients would be stranded on it. The split matches `POST /request`, which
+has always taken `type` alongside `tmdb_id` for exactly this reason.
+
+Requesting never needed IMDB anyway: Seerr is TMDB-keyed throughout, which is
+why an IMDB-less title can still be requested even though it can never be
+searched for.
+
+**Neither ever calls Prowlarr**, and that is the point of them existing rather
+than the movie endpoint growing a mode. A movie-category search for a show is
+guaranteed useless and an IMDB-less film has no query to make — either would
+mean an outbound search on every detail page a client opens, for nothing. Both
+also answer on an install where Prowlarr was never configured, where the movie
+endpoint 503s.
+
+A caller holding only Prowlarr-backed actions gets an empty list from both.
+Reporting a grab action would promise a recommendation these endpoints cannot
+produce, and the client would draw a button that cannot work.
+
+Responses are plain JSON in the exact shape of one line of the movie endpoint's
+stream — `phase` always `"all"`, `releases` always empty — so a client decodes
+all three with the same type and draws them with the same code.
 
 `GET /manager/search` is the admin app's unrestricted search, independent of
 holding any action: exactly one of `imdb_id` or `query`, giving both or
