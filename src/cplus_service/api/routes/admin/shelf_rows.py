@@ -14,7 +14,7 @@ shelf) come from whichever "home" object the caller passes in — ``Config``
 itself, or one user's ``UserHomeSettings``. The two share the same field
 names (``home_shelves``, ``home_carousel``, ``home_carousel_enabled``,
 ``home_carousel_include_on_deck``, ``home_top_shelf``) by design; see
-:class:`HomeSettingsLike` and ``db.models.UserHomeSettings``.
+``cplus_service.home.HomeSettingsLike`` and ``db.models.UserHomeSettings``.
 
 ``base_url`` is the one other thing that differs between callers —
 ``/admin/libraries/home`` for the global config, ``/admin/users/{id}/home``
@@ -25,20 +25,23 @@ rendering.
 
 Neither ``Config`` nor ``UserHomeSettings`` stamps a per-shelf ``modifiedAt``
 any more — CanopyPlus's own ``HomeSettings`` settled on one ``modifiedAt``
-for the whole document instead, merged whole-document last-write-wins. See
-:func:`touched`, which every mutating route in :mod:`.libraries` and
-:mod:`.user_home` calls once after actually changing something.
+for the whole document instead, merged whole-document last-write-wins. The
+stamp itself, the structural protocol above and the projection into
+CanopyPlus's own wire shape all live in :mod:`cplus_service.home` now, since
+``GET``/``PUT /home`` writes these same rows from the other side. Every
+mutating route in :mod:`.libraries` and :mod:`.user_home` still calls
+``touched`` once after actually changing something.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
 from fastapi import HTTPException, status
 
 from ....bootstrap import upnext_shelf
 from ....db.models import Config
+from ....home import HomeSettingsLike
 from ....plex.client import PlexServerClient, PlexServerError
 from ...state import AppState
 from .home_sources import (
@@ -53,38 +56,6 @@ from .home_sources import (
     source_of,
     source_options,
 )
-
-
-class HomeSettingsLike(Protocol):
-    """Structural shape shared by ``Config`` and ``UserHomeSettings``.
-
-    For type-checking only — both real classes already carry every one of
-    these fields with no shared base class, since ``Config`` carries a great
-    deal else that has nothing to do with Home. Together these six columns
-    are exactly what CanopyPlus's own ``HomeSettings`` document holds.
-    """
-
-    home_shelves: list[dict[str, Any]]
-    home_carousel: dict[str, Any] | None
-    home_carousel_enabled: bool
-    home_carousel_include_on_deck: bool
-    home_top_shelf: dict[str, Any] | None
-    home_modified_at: datetime | None
-
-
-def touched(home: HomeSettingsLike) -> None:
-    """Stamp ``home`` as just edited, for the whole document at once.
-
-    Every mutation below — a shelf added, removed, reordered or edited, the
-    Carousel's source or either of its switches, Top Shelf's source — calls
-    this exactly once after actually changing something, whether the target
-    is the admin's global ``Config`` or one user's own ``UserHomeSettings``.
-    Mirrors CanopyPlus's own ``HomeSettings.modifiedAt``: one timestamp for
-    the five fields together, not one per shelf — see
-    ``db.models.Config.home_modified_at`` for why.
-    """
-    home.home_modified_at = datetime.now(UTC)
-
 
 # --------------------------------------------------------------------------- #
 # List utilities — shared with Default Libraries' own reorder in .libraries
@@ -242,7 +213,7 @@ async def apply_shelf_update(
 
     Returns the shelf-shaped dict alone, in exactly ``HomeShelfDataModel``'s
     own shape — no ``modifiedAt`` here; the caller stamps one ``home_modified_at``
-    on the whole document via :func:`touched` after storing the result,
+    on the whole document via ``touched`` after storing the result,
     since every route this feeds into always changes something.
     """
     libraries_by_id = {library["id"]: library for library in config.default_libraries}

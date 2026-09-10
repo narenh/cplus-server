@@ -1,4 +1,5 @@
-"""``GET /register``'s ``first_run`` bundling.
+"""``GET /register`` — the always-on ``plex_server`` identity and the
+``first_run`` bundle.
 
 There used to be a separate ``GET /defaults`` endpoint; it was folded into
 ``GET /register`` entirely (see ``register.register``'s ``first_run``
@@ -7,10 +8,11 @@ second round trip. ``defaults_payload`` is what still builds the bundle.
 
 Checks the bundle is exactly what the admin has configured, in CanopyPlus's
 own Codable shapes with no extra fields (``MediaLibrary`` fields for
-``default_libraries``; ``id``/``title``/``description``/``path``/
-``discoverHubKey``/``style``/``titleOnly`` for every shelf-shaped entry).
-Auth rejection for ``/register`` itself (no token, a bad token) is covered
-in ``test_api_auth.py``, not repeated here.
+``default_libraries``; a whole ``HomeSettings`` document for ``home``). The
+Home document's own shape, and both directions of its sync, are covered in
+``test_home_sync.py``; what matters here is that the bundle carries the same
+one. Auth rejection for ``/register`` itself (no token, a bad token) is
+covered in ``test_api_auth.py``, not repeated here.
 """
 
 from __future__ import annotations
@@ -35,7 +37,13 @@ SHELF_KEYS = {
     "titleOnly",
 }
 LIBRARY_KEYS = {"id", "serverTitle", "type", "hidden", "name"}
-CAROUSEL_KEYS = {"enabled", "include_on_deck", "carousel", "top_shelf"}
+HOME_KEYS = {
+    "carouselEnabled",
+    "carouselIncludeOnDeck",
+    "carouselShelf",
+    "homeShelves",
+    "topShelf",
+}
 
 
 def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
@@ -63,21 +71,72 @@ async def default_library(db: AsyncSession, *, library_id: str = "1") -> None:
 
 
 def assert_well_formed_payload(body: dict) -> None:
-    assert set(body) == {"default_libraries", "default_home_shelves", "default_carousel"}
+    assert set(body) == {"default_libraries", "home"}
     for library in body["default_libraries"]:
         assert set(library) == LIBRARY_KEYS
 
-    assert isinstance(body["default_home_shelves"], list)
-    assert len(body["default_home_shelves"]) >= 1
-    for shelf in body["default_home_shelves"]:
+    home = body["home"]
+    # ``modifiedAt`` is the one optional key — absent means "never edited".
+    assert set(home) - {"modifiedAt"} == HOME_KEYS
+    assert isinstance(home["carouselEnabled"], bool)
+    assert isinstance(home["carouselIncludeOnDeck"], bool)
+    assert isinstance(home["homeShelves"], list)
+    assert len(home["homeShelves"]) >= 1
+    for shelf in [*home["homeShelves"], home["carouselShelf"], home["topShelf"]]:
         assert set(shelf) == SHELF_KEYS
 
-    carousel = body["default_carousel"]
-    assert set(carousel) == CAROUSEL_KEYS
-    assert isinstance(carousel["enabled"], bool)
-    assert isinstance(carousel["include_on_deck"], bool)
-    assert set(carousel["carousel"]) == SHELF_KEYS
-    assert set(carousel["top_shelf"]) == SHELF_KEYS
+
+# --------------------------------------------------------------------------- #
+# plex_server — on every call, not just the first run
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_plex_server_is_null_when_no_server_is_connected(
+    client: httpx.AsyncClient, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+
+    response = await client.get("/register", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "plex_server": None}
+
+
+@respx.mock
+async def test_plex_server_reports_the_connected_server(
+    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    config = await get_config(db)
+    config.plex_server_client_identifier = "abc123machine"
+    config.plex_server_name = "Tower"
+    await db.commit()
+
+    response = await client.get("/register", headers=plex_headers)
+
+    assert response.status_code == 200
+    assert response.json()["plex_server"] == {
+        "client_identifier": "abc123machine",
+        "name": "Tower",
+    }
+
+
+@respx.mock
+async def test_plex_server_never_leaks_the_base_url(
+    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict
+) -> None:
+    # The address *this service* reaches Plex on is frequently not one the
+    # client could use, and is none of its business either way.
+    mock_seerr_auth()
+    config = await get_config(db)
+    config.plex_server_client_identifier = "abc123machine"
+    config.plex_server_base_url = "http://192.168.1.50:32400"
+    await db.commit()
+
+    response = await first_run(client, plex_headers)
+
+    assert "192.168.1.50" not in response.text
 
 
 # --------------------------------------------------------------------------- #
@@ -94,7 +153,7 @@ async def test_register_omits_defaults_when_first_run_is_absent(
     response = await client.get("/register", headers=plex_headers)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert set(response.json()) == {"status", "plex_server"}
 
 
 @respx.mock
@@ -108,7 +167,7 @@ async def test_register_omits_defaults_when_first_run_is_false(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert set(response.json()) == {"status", "plex_server"}
 
 
 @respx.mock
@@ -124,7 +183,7 @@ async def test_register_bundles_defaults_when_first_run_is_true(
     assert response.headers["content-type"] == "application/json"
     body = response.json()
     assert body["status"] == "ok"
-    rest = {k: v for k, v in body.items() if k != "status"}
+    rest = {k: v for k, v in body.items() if k not in {"status", "plex_server"}}
     assert_well_formed_payload(rest)
     assert rest["default_libraries"] == [
         {
@@ -135,6 +194,32 @@ async def test_register_bundles_defaults_when_first_run_is_true(
             "name": "Movies",
         }
     ]
+
+
+@respx.mock
+async def test_default_libraries_are_not_capped(
+    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict
+) -> None:
+    # The client filters this down to what the signed-in user can actually see
+    # and takes the first few; an admin naming more than any one user can reach
+    # is the ordinary case, so nothing is trimmed here.
+    mock_seerr_auth()
+    config = await get_config(db)
+    config.default_libraries = [
+        {
+            "id": str(index),
+            "serverTitle": f"Library {index}",
+            "type": "movie",
+            "hidden": False,
+            "name": f"Library {index}",
+        }
+        for index in range(12)
+    ]
+    await db.commit()
+
+    response = await first_run(client, plex_headers)
+
+    assert len(response.json()["default_libraries"]) == 12
 
 
 @respx.mock
@@ -168,9 +253,9 @@ async def test_top_shelf_and_carousel_fall_back_when_unset(
     response = await first_run(client, plex_headers)
 
     assert response.status_code == 200
-    carousel = response.json()["default_carousel"]
-    assert carousel["top_shelf"]["path"] == "/library/onDeck"
-    assert carousel["carousel"]["path"] == "/library/onDeck"
+    home = response.json()["home"]
+    assert home["topShelf"]["path"] == "/library/onDeck"
+    assert home["carouselShelf"]["path"] == "/library/onDeck"
 
 
 @respx.mock
@@ -185,7 +270,7 @@ async def test_default_carousel_enabled_reflects_the_switch(
     response = await first_run(client, plex_headers)
 
     assert response.status_code == 200
-    assert response.json()["default_carousel"]["enabled"] is False
+    assert response.json()["home"]["carouselEnabled"] is False
 
 
 @respx.mock
@@ -203,7 +288,7 @@ async def test_a_custom_shelf_title_is_reflected(
     response = await first_run(client, plex_headers)
 
     assert response.status_code == 200
-    assert response.json()["default_home_shelves"][0]["title"] == "My Custom Shelf"
+    assert response.json()["home"]["homeShelves"][0]["title"] == "My Custom Shelf"
 
 
 @respx.mock

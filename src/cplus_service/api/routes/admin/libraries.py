@@ -57,6 +57,7 @@ from ....auth.identity import refresh_plex_server
 from ....bootstrap import upnext_shelf
 from ....db.models import Config
 from ....db.session import get_config
+from ....home import touched
 from ....plex.client import PlexServerClient, PlexServerError
 from ....web import templates
 from ...deps import DbDep, StateDep
@@ -70,7 +71,6 @@ from .shelf_rows import (
     reordered,
     shelves_context,
     top_shelf_context,
-    touched,
 )
 
 logger = logging.getLogger(__name__)

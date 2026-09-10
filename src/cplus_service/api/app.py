@@ -41,6 +41,7 @@ from .routes import (
     admin,
     capabilities,
     grab,
+    home,
     manager,
     push_devices,
     register,
@@ -156,6 +157,7 @@ def create_app(
 
     app.include_router(capabilities.router)
     app.include_router(register.router)
+    app.include_router(home.router)
     app.include_router(titles.router)
     app.include_router(grab.router)
     app.include_router(manager.router)

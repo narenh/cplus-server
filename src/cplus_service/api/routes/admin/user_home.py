@@ -14,13 +14,13 @@ full copy from the admin's current global defaults — after that, editing a
 user's shelf never touches ``Config``, and a later change to the global
 default never touches this user. Seeding itself leaves ``home_modified_at``
 unset (see :class:`~cplus_service.db.models.UserHomeSettings`); every
-mutating route below calls :func:`.shelf_rows.touched` once it has actually
+mutating route below calls ``cplus_service.home.touched`` once it has actually
 changed something, the same single whole-document stamp
 :mod:`.libraries` keeps on ``Config``. There is deliberately no "reset to
-default" here yet: once a client actually syncs against CanopyPlus's own
-per-user ``HomeSettings``, this row already speaks its exact shape — same
-five content fields, one ``modifiedAt`` for the document — so there is
-nothing left to translate when that day comes.
+default" here: this row already speaks CanopyPlus's own ``HomeSettings``
+exactly — same five content fields, one ``modifiedAt`` for the document — and
+``GET``/``PUT /home`` syncs it to the user's own devices as-is, so an edit
+made here is an edit they will see rather than a default they might.
 
 Default Libraries — which Plex libraries exist and what they're called — is
 not part of this: every user's shelves still pick from the admin's own
@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ....bootstrap import upnext_shelf
 from ....db.models import Config, User, UserHomeSettings
 from ....db.session import get_config
+from ....home import get_or_create_home, touched
 from ....web import templates
 from ...deps import DbDep, StateDep
 from ...state import AppState
@@ -53,7 +54,6 @@ from .shelf_rows import (
     reordered,
     shelves_context,
     top_shelf_context,
-    touched,
 )
 
 
@@ -87,32 +87,14 @@ async def _get_or_create_home(db: AsyncSession, user: User, config: Config) -> U
     """This user's own Home settings, seeded from the admin's current global
     defaults the first time anyone opens their editor.
 
-    Mirrors ``db.session.get_config``'s own get-or-create shape. Seeding
-    happens exactly once, at creation — see the module docstring for why
-    this deliberately never re-seeds from ``Config`` afterwards. The same
-    "fall back to a fresh Continue Watching shelf" rule ``defaults_payload``
-    already applies to the global config's own gaps covers a global config
-    that has never had a Carousel, Top Shelf or shelf list configured
-    either — the seed is never itself empty. ``home_modified_at`` is left
-    unset: seeding is not an edit, the same way CanopyPlus's own
-    ``HomeSettings()`` starts at ``.distantPast`` until a person actually
-    changes something.
+    A thin wrapper over :func:`cplus_service.home.get_or_create_home`, which is
+    shared with ``PUT /home`` — the client-side half of the same fork. Both
+    doors into a user's Home must seed it identically, so there is exactly one
+    seeder; see the module docstring for why the fork never re-seeds, and
+    ``cplus_service.home.seeded`` for why creation deliberately leaves
+    ``home_modified_at`` unset.
     """
-    home = await db.get(UserHomeSettings, user.id)
-    if home is not None:
-        return home
-
-    home = UserHomeSettings(
-        user_id=user.id,
-        home_shelves=[dict(shelf) for shelf in config.home_shelves] or [upnext_shelf()],
-        home_carousel=dict(config.home_carousel) if config.home_carousel else upnext_shelf(),
-        home_carousel_enabled=config.home_carousel_enabled,
-        home_carousel_include_on_deck=config.home_carousel_include_on_deck,
-        home_top_shelf=dict(config.home_top_shelf) if config.home_top_shelf else upnext_shelf(),
-    )
-    db.add(home)
-    await db.flush()
-    return home
+    return await get_or_create_home(db, user.id, config)
 
 
 async def _home_shelves_section(

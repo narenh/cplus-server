@@ -1,57 +1,47 @@
 """The fresh-install seed for Libraries & Home, bundled into ``GET /register``.
 
-There is no standalone route here any more — this used to be its own
-``GET /defaults`` endpoint, called once a caller's Plex token was already
-known good. It was folded entirely into ``GET /register`` instead (see
-:func:`defaults_payload` and ``register.register``'s ``first_run``
-parameter) rather than kept alongside it: an actual first run now needs
-exactly one round trip, not two, and a caller with no reason to fetch this
-never pays for a second endpoint that always agreed with the first anyway.
+There is no standalone route here — this used to be its own ``GET /defaults``
+endpoint, called once a caller's Plex token was already known good. It was
+folded entirely into ``GET /register`` instead (see :func:`defaults_payload`
+and ``register.register``'s ``first_run`` parameter) rather than kept
+alongside it: an actual first run now needs exactly one round trip, not two.
 
-Every shelf-shaped value here — ``default_home_shelves``, and
-``default_carousel``'s own ``carousel``/``top_shelf`` — is stored, and
-returned, in exactly the shape CanopyPlus's own ``HomeShelfDataModel``
-decodes: no extra fields. ``default_libraries`` is CanopyPlus's own
-``MediaLibrary`` shape, unchanged. See ``cplus_service.db.models.Config``
-for where each column's own docstring says so, and
-``cplus_service.api.routes.admin.libraries`` and ``.home_sources`` for what
-actually writes them.
+Two keys, and they are seeds for very different reasons:
 
-``Config.home_modified_at`` — one stamp for the whole Home document,
-matching CanopyPlus's own ``HomeSettings.modifiedAt`` — is not part of this
-bundle yet: this is still the fresh-install seed, not the sync endpoint a
-future ``HomeSettings`` sync will need, so nothing here reads or returns it
-today.
+``default_libraries``
+    A **one-shot seed, and only that.** The admin's ordered, curated set, in
+    CanopyPlus's own ``MediaLibrary`` shape. It is not synced and never pushed
+    back: a client applies it only when it has no library selection of its own,
+    and an existing install is never repointed by it. There is deliberately no
+    cap here — the admin may name as many as they like, because the client is
+    what filters the list down to the ones *this* user can actually see and
+    then takes the first few. An admin listing eight libraries and a user with
+    access to four is the ordinary case, not an error.
+
+``home``
+    A whole Home document, in exactly the shape ``GET /home`` returns and
+    ``PUT /home`` accepts — see :mod:`cplus_service.home`. Bundled purely to
+    save a round trip on the one launch where the client has nothing local to
+    show yet; unlike libraries, this one *is* synced from then on, in both
+    directions, and the bundle is not the authority on it. It resolves through
+    :func:`~cplus_service.home.effective_home`, so a user an admin has already
+    given a Home of their own gets theirs and not the global default.
 """
 
 from __future__ import annotations
 
-from ...bootstrap import upnext_shelf
 from ...db.session import get_config
+from ...home import document, effective_home
 from ..deps import DbDep
 
 
-async def defaults_payload(db: DbDep) -> dict[str, object]:
-    """The admin's current Library and Home configuration, as a plain dict.
+async def defaults_payload(db: DbDep, user_id: int) -> dict[str, object]:
+    """This user's Library seed and current Home, as a plain dict.
 
     The one caller is ``register.register``'s ``first_run`` bundling.
-    ``default_carousel``'s ``carousel`` and ``top_shelf`` fall back to the
-    same "Continue Watching" default the admin webui itself seeds at
-    startup (``bootstrap.ensure_default_carousel``, ``.ensure_default_top_shelf``)
-    if the database somehow still has neither on record — this should
-    never fail just because that seeding hasn't run yet. ``default_home_shelves``
-    has the same fallback for the same reason, though in practice
-    ``ensure_default_home_shelf`` and the admin UI's own "keep at least one"
-    rule mean it is never actually empty.
     """
     config = await get_config(db)
     return {
         "default_libraries": config.default_libraries,
-        "default_home_shelves": config.home_shelves or [upnext_shelf()],
-        "default_carousel": {
-            "enabled": config.home_carousel_enabled,
-            "include_on_deck": config.home_carousel_include_on_deck,
-            "carousel": config.home_carousel or upnext_shelf(),
-            "top_shelf": config.home_top_shelf or upnext_shelf(),
-        },
+        "home": document(await effective_home(db, user_id)),
     }
