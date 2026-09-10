@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p class="hint"><a href="/admin/users">&larr; Permissions</a></p>
+
+<section class="card">
+  <h2>Home</h2>
+  <p class="lede">
+    {{ target_user.plex_username }}'s own Carousel, Top Shelf and Shelves —
+    seeded from the admin's defaults the first time this page was opened,
+    and independent of them from then on. Changes here affect only this
+    user.
+  </p>
+
+  {% include "partials/carousel.html" %}
+  {% include "partials/top_shelf.html" %}
+  {% include "partials/home_shelves.html" %}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/reorder.js" defer></script>
+<script src="/static/dirty-save.js" defer></script>
+<script src="/static/shelf-source.js" defer></script>
+{% endblock %}

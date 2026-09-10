@@ -28,6 +28,7 @@
         </td>
       {% endfor %}
       <td class="right">
+        <a href="/admin/users/{{ user.id }}/home">Home</a>
         <form method="post" action="/admin/users/{{ user.id }}/delete"
               onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
           <button type="submit" class="link danger">Remove</button>

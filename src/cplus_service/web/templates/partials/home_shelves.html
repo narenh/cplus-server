@@ -1,15 +1,17 @@
 {# The Shelves list alone (not the Carousel or Top Shelf above it, which
    live in their own partials and do not need to change alongside this).
 
-   Rendered by GET /admin/libraries and returned whole by every write here
-   (add, remove, reorder, edit) via #home-shelves, the same way
-   partials/library_section.html covers Default Libraries. Each row's own
-   fields are partials/_shelf_row_fields.html — see there for how a row
-   applies its edits. #}
+   Rendered by GET /admin/libraries (or one user's own Home editor, GET
+   /admin/users/{id}/home — see admin.shelf_rows.shelves_context) and
+   returned whole by every write here (add, remove, reorder, edit) via
+   #home-shelves, the same way partials/library_section.html covers Default
+   Libraries. Each row's own fields are partials/_shelf_row_fields.html —
+   see there for how a row applies its edits. reorder_url and add_url are
+   rooted under whichever of the two this is. #}
 <div id="home-shelves">
   <h2>Shelves</h2>
   <div class="reorder-list" data-reorder-list
-       data-reorder-url="/admin/libraries/home/shelves/reorder"
+       data-reorder-url="{{ reorder_url }}"
        data-reorder-target="#home-shelves">
     {% for row in shelf_rows %}
       <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ row.row_id }}">
@@ -53,8 +55,8 @@
     {% endfor %}
   </div>
 
-  <form method="post" action="/admin/libraries/home/shelves" class="row"
-        hx-post="/admin/libraries/home/shelves" hx-target="#home-shelves" hx-swap="outerHTML">
+  <form method="post" action="{{ add_url }}" class="row"
+        hx-post="{{ add_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
     <button type="submit" class="secondary">New Shelf</button>
   </form>
 </div>

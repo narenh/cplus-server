@@ -5,7 +5,7 @@
 // the moment they change (data-auto-apply, submitted via the field's own
 // form) — and so does picking "Collection Items…" in the Content select
 // itself: the server resolves that straight to the library's own first
-// collection (see libraries._apply_shelf_update), so there is never a
+// collection (see admin.shelf_rows.apply_shelf_update), so there is never a
 // moment where the picker shows content but nothing has actually been
 // saved yet.
 //

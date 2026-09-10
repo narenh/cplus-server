@@ -5,14 +5,14 @@
    ``home_carousel`` itself, so whatever was configured is exactly what
    comes back once it's turned back on.
 
-   Expects: carousel (see libraries._carousel_context) — namespaced rather
-   than flattened into the page context, since Top Shelf (partials/
+   Expects: carousel (see admin.shelf_rows.carousel_context) — namespaced
+   rather than flattened into the page context, since Top Shelf (partials/
    top_shelf.html) is also one "shelf row" and shares every field name. #}
 <div id="carousel-section">
   <h2>Carousel</h2>
   <div class="carousel-toggle">
     <span class="carousel-switch">
-      {% with checked = carousel.home_carousel_enabled, url = "/admin/libraries/home/carousel-enabled", label = "Enable Home Carousel" %}
+      {% with checked = carousel.home_carousel_enabled, url = carousel.enabled_toggle_url, label = "Enable Home Carousel" %}
         {% include "partials/carousel_switch.html" %}
       {% endwith %}
     </span>

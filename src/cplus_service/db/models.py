@@ -218,6 +218,47 @@ class User(Base):
     actions: Mapped[list[Action]] = relationship(
         secondary="permissions", back_populates="users", lazy="selectin"
     )
+    home_settings: Mapped[UserHomeSettings | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class UserHomeSettings(Base):
+    """One user's own copy of the Home section — Carousel, Top Shelf and Shelves.
+
+    Mirrors the matching ``Config`` columns exactly (same field names, same
+    ``HomeShelfDataModel``-compatible shapes), for the same reason
+    ``default_libraries``/``home_shelves`` do there: a future connection to
+    CanopyPlus's own per-user ``HomeSettings`` has nothing to translate.
+
+    Absence of a row (rather than a row full of nulls) means this user has
+    never had their own Home edited — see
+    ``cplus_service.api.routes.admin.user_home``, the only place that ever
+    creates one. Creation seeds every field from the admin's current global
+    defaults at that moment; after that, this row is the user's own and no
+    longer tracks changes to ``Config``, the same "fork on first edit, then
+    independent" relationship a per-file override has to a shared default
+    elsewhere.
+    """
+
+    __tablename__ = "user_home_settings"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    home_shelves: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
+    home_carousel: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    home_carousel_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="1"
+    )
+    home_carousel_include_on_deck: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+    home_top_shelf: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    user: Mapped[User] = relationship(back_populates="home_settings")
 
 
 class QualityProfile(Base):

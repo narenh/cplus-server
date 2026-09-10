@@ -646,6 +646,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `POST /admin/quality-profiles/preview` | Ranks a candidate set through the **unsaved** draft in the form. Sample releases by default; a real Prowlarr search with `preview_source=prowlarr` |
 | `GET/POST /admin/actions`, `POST /admin/actions/{id}`, `/{id}/delete` | Action CRUD. The edit endpoint takes the built-in action too — its name and button title are editable, its Prowlarr targets are not, and delete refuses it |
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
+| `GET /admin/users/{id}/home`, `POST .../shelves`, `.../carousel`, `.../top-shelf` (and their move/remove/reorder/enabled variants) | One user's own Home — same Carousel/Top Shelf/Shelves editor as the Libraries & Home tab, but scoped to a single user's own copy rather than the install-wide default |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
