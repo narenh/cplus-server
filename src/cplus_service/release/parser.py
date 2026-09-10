@@ -69,14 +69,23 @@ _WEB_BARE = _tok(r"web(?:hd)?")
 
 # Disc-sourced provenance.  DVD is deliberately absent: there is no DVD member
 # on Source, and every DVD release we care about is a rip (handled below).
-_BLURAY_FAMILY = _tok(r"(?:blu[\s-]?ray|bd[\s-]?rip|br[\s-]?rip|bd(?:25|50|66|100)|bd|hd[\s-]?dvd)")
+_BLURAY_FAMILY = _tok(
+    r"(?:blu[\s-]?ray|bd[\s-]?rip|br[\s-]?rip|uhd[\s-]?bd|bd[\s-]?(?:25|50|66|100)|bd|hd[\s-]?dvd)"
+)
 
 # Evidence that the video was re-encoded, i.e. it is NOT an untouched disc.
 _ENCODE_CODEC = _tok(r"(?:[xh][\s-]?26[456]|hevc|av1|xvid|divx)")
 _RIP = _tok(r"(?:bd[\s-]?rip|br[\s-]?rip|dvd[\s-]?rip|hd[\s-]?rip|web[\s-]?rip|hdtv[\s-]?rip)")
 
+# The UHD generation of discs.  Every one of them carries HEVC natively, so on
+# a title like this ``HEVC`` describes the disc rather than proving a re-encode
+# — see `_has_encode_evidence`.
+_UHD_DISC = _tok(r"(?:2160[pi]?|4k|uhd|bd[\s-]?(?:66|100))")
+_DISC_NATIVE_CODEC = _tok(r"hevc")
+
 _DISC_MARKER = _tok(
-    r"(?:bdmv|video[\s-]?ts|m2ts|iso|bd(?:25|50|66|100)|untouched|full[\s-]?blu[\s-]?ray|disc)"
+    r"(?:bdmv|video[\s-]?ts|m2ts|iso|bd[\s-]?(?:25|50|66|100)|untouched"
+    r"|full[\s-]?blu[\s-]?ray|disc)"
 )
 _COMPLETE = _tok(r"complete")
 
@@ -178,6 +187,23 @@ def _parse_resolution(norm: str) -> Resolution:
     return Resolution.UNKNOWN
 
 
+def _has_encode_evidence(norm: str, *, uhd_disc: bool) -> bool:
+    """Whether ``norm`` proves the video was re-encoded.
+
+    ``uhd_disc`` marks a disc-sourced title from the UHD generation, where
+    ``HEVC`` is what the disc itself carries and so says nothing either way.
+    On those titles only a codec token no disc uses — ``x265``, ``x264``,
+    ``AV1`` — counts, which is the same reasoning that keeps AVC/VC-1/MPEG-2
+    out of the encode-codec set entirely.  Without this, the extremely common
+    ``...2160p.UHD.BluRay.HEVC.TrueHD.7.1.Atmos-GROUP`` full disc reads as an
+    encode and survives the parser boundary.
+    """
+    if _RIP.search(norm):
+        return True
+    haystack = _DISC_NATIVE_CODEC.sub(" ", norm) if uhd_disc else norm
+    return bool(_ENCODE_CODEC.search(haystack))
+
+
 def _parse_source(norm: str) -> tuple[Source, bool]:
     """Return ``(source, is_full_disc)``.
 
@@ -187,7 +213,8 @@ def _parse_source(norm: str) -> tuple[Source, bool]:
     disc source with no encode codec at all.  AVC/VC-1/MPEG-2 are deliberately
     absent from the encode-codec set for exactly this reason: they appear on
     untouched discs, so ``1080p.BluRay.AVC.DTS-HD.MA`` reads as a disc while
-    ``1080p.BluRay.x264`` reads as an encode.
+    ``1080p.BluRay.x264`` reads as an encode.  ``HEVC`` gets the same treatment,
+    but only on a UHD-generation disc title — see :func:`_has_encode_evidence`.
 
     Note the deliberate conservatism trade-off: a BluRay-tagged title carrying
     no codec token at all (``...1080p.BluRay.DTS-HD.MA.5.1-GROUP``) is treated
@@ -206,7 +233,7 @@ def _parse_source(norm: str) -> tuple[Source, bool]:
         return Source.WEB_DL, False
 
     bluray = bool(_BLURAY_FAMILY.search(norm))
-    encoded = bool(_ENCODE_CODEC.search(norm) or _RIP.search(norm))
+    encoded = _has_encode_evidence(norm, uhd_disc=bluray and bool(_UHD_DISC.search(norm)))
     disc_marker = bool(_DISC_MARKER.search(norm)) or (bluray and bool(_COMPLETE.search(norm)))
     is_full_disc = disc_marker or (bluray and not encoded)
 
@@ -246,10 +273,18 @@ def _parse_dv_profile(
         if _DV_HYBRID.search(norm) and not is_hdr10plus:
             return 8
         return 7
-    if is_encode:
-        return 8
     if source in (Source.WEB_DL, Source.WEBRIP):
+        # A WEB release is profile 8 only when it also carries an HDR10 base
+        # layer; DV on its own is profile 5.  This has to be decided before the
+        # `is_encode` fallback below, because practically every 2160p WEB-DL
+        # names its codec (`HEVC`, `H.265`) — letting that answer first turned
+        # every profile 5 WEB-DL into a profile 8, while the same release from
+        # an indexer that omitted the codec came back correct.
         return 8 if is_hdr else 5
+    if is_encode:
+        # A disc-sourced encode: the DV layer survives re-encoding only as the
+        # single-layer profile 8.
+        return 8
     # Neither remux, encode nor WEB: single-layer profile 5 is the safer guess.
     return 5
 

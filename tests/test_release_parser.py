@@ -118,10 +118,34 @@ def test_encode_detection_covers_more_than_x264_and_x265() -> None:
         "Movie.2024.1080p.BluRay.AVC.DTS-HD.MA.5.1-GRP",
         "Movie.2024.UHD.BD66.Blu-ray.Untouched-GRP",
         "Movie.2024.1080p.Blu-ray.VC-1.TrueHD.5.1-GRP",
+        # HEVC is the native codec of every UHD disc, so on a disc-sourced
+        # 2160p title it is not evidence of a re-encode — these are the
+        # everyday full-disc names that used to survive the filter.
+        "Movie.2024.2160p.UHD.Blu-ray.HEVC.TrueHD.7.1.Atmos-GRP",
+        "Movie.2024.MULTi.2160p.UHD.BluRay.HDR.HEVC.TrueHD.7.1.Atmos-Slay3R",
+        "Movie 2024 2160p UHD BluRay HEVC DTS-HD MA 7 1-GRP",
+        "Movie.2024.2160p.UHDBD.HEVC.TrueHD.Atmos-GRP",
+        # Disc-size markers with a separator.
+        "Movie.2024.UHD.BD-50.Blu-ray.Untouched-GRP",
     ],
 )
 def test_full_disc_detected(title: str) -> None:
     assert parse_title(title).is_full_disc is True
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        # `HEVC` is only excused on a *disc-sourced UHD* title: with an actual
+        # encode codec present the release is an encode, disc or not.
+        "Movie.2024.2160p.UHD.BluRay.HEVC.x265.HDR-GRP",
+        # A 1080p disc carries AVC/VC-1, never HEVC, so HEVC there still reads
+        # as a re-encode.
+        "Movie.2024.1080p.BluRay.HEVC.DTS-HD.MA.5.1-GRP",
+    ],
+)
+def test_hevc_is_only_excused_on_a_uhd_disc(title: str) -> None:
+    assert parse_title(title).is_full_disc is False
 
 
 @pytest.mark.parametrize(
@@ -224,6 +248,24 @@ def test_hdr10plus_long_form_is_not_clipped_to_the_short_one() -> None:
 )
 def test_dv_profile(title: str, expected: int) -> None:
     assert parse_title(title).dv_profile == expected
+
+
+@pytest.mark.parametrize(
+    "codec",
+    ["", ".HEVC", ".H.265", ".x265"],
+)
+def test_a_web_dv_profile_does_not_depend_on_whether_the_codec_is_named(codec: str) -> None:
+    # Practically every 2160p WEB-DL names its codec, and an encode-codec token
+    # used to short-circuit the WEB heuristic and force profile 8 — so the same
+    # profile 5 release came back P5 or P8 depending on the indexer's spelling.
+    assert parse_title(f"Movie.2024.2160p.NF.WEB-DL.DV.DDP5.1.Atmos{codec}-FLUX").dv_profile == 5
+    assert parse_title(f"Movie.2024.2160p.NF.WEB-DL.DV.HDR.DDP5.1{codec}-FLUX").dv_profile == 8
+
+
+def test_a_disc_sourced_encode_is_still_profile_8() -> None:
+    # The `is_encode` fallback still answers for everything that is not WEB.
+    assert parse_title("Movie.2024.2160p.UHD.BluRay.DV.HDR.x265.Atmos-GRP").dv_profile == 8
+    assert parse_title("Movie.2024.2160p.BluRay.DV.x265-GRP").dv_profile == 8
 
 
 def test_dv_tags_expose_both_the_precise_and_coarse_token() -> None:
