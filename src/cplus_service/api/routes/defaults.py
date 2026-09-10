@@ -1,14 +1,12 @@
-"""``GET /defaults`` — the fresh-install seed for Libraries & Home.
+"""The fresh-install seed for Libraries & Home, bundled into ``GET /register``.
 
-A companion to ``GET /register``, called once a caller's Plex token is known
-good: a device signing in for the first time can seed its local Library and
-Home state from whatever the admin has already configured on the
-:doc:`Libraries & Home admin tab <cplus_service.api.routes.admin.libraries>`,
-rather than starting from the app's own hardcoded fallbacks. ``GET /register``
-can also fold this same payload into its own response — see
-:func:`defaults_payload` and ``register.register``'s ``first_run`` parameter
-— which is the path an actual first run should prefer, since it needs no
-second round trip.
+There is no standalone route here any more — this used to be its own
+``GET /defaults`` endpoint, called once a caller's Plex token was already
+known good. It was folded entirely into ``GET /register`` instead (see
+:func:`defaults_payload` and ``register.register``'s ``first_run``
+parameter) rather than kept alongside it: an actual first run now needs
+exactly one round trip, not two, and a caller with no reason to fetch this
+never pays for a second endpoint that always agreed with the first anyway.
 
 Every shelf-shaped value here — ``default_home_shelves``, and
 ``default_carousel``'s own ``carousel``/``top_shelf`` — is stored, and
@@ -21,38 +19,27 @@ actually writes them.
 
 ``Config.home_modified_at`` — one stamp for the whole Home document,
 matching CanopyPlus's own ``HomeSettings.modifiedAt`` — is not part of this
-payload yet: this endpoint is the fresh-install seed, not the sync
-endpoint a future ``HomeSettings`` sync will need, so nothing here reads or
-returns it today.
-
-Cache-only auth, same as ``GET /titles/{imdb_id}/actions`` and
-``GET /search``: no outbound Plex or Seerr call.
+bundle yet: this is still the fresh-install seed, not the sync endpoint a
+future ``HomeSettings`` sync will need, so nothing here reads or returns it
+today.
 """
 
 from __future__ import annotations
 
-import json
-
-from fastapi import APIRouter
-from fastapi.responses import Response
-
 from ...bootstrap import upnext_shelf
 from ...db.session import get_config
-from ..deps import CachedUserDep, DbDep
-
-router = APIRouter(tags=["client"])
+from ..deps import DbDep
 
 
 async def defaults_payload(db: DbDep) -> dict[str, object]:
     """The admin's current Library and Home configuration, as a plain dict.
 
-    Shared by ``GET /defaults`` and ``GET /register``'s ``first_run``
-    bundling, so the two never drift apart. ``default_carousel``'s
-    ``carousel`` and ``top_shelf`` fall back to the same "Continue Watching"
-    default the admin webui itself seeds at startup
-    (``bootstrap.ensure_default_carousel``, ``.ensure_default_top_shelf``) if
-    the database somehow still has neither on record — this should never
-    500 just because that seeding hasn't run yet. ``default_home_shelves``
+    The one caller is ``register.register``'s ``first_run`` bundling.
+    ``default_carousel``'s ``carousel`` and ``top_shelf`` fall back to the
+    same "Continue Watching" default the admin webui itself seeds at
+    startup (``bootstrap.ensure_default_carousel``, ``.ensure_default_top_shelf``)
+    if the database somehow still has neither on record — this should
+    never fail just because that seeding hasn't run yet. ``default_home_shelves``
     has the same fallback for the same reason, though in practice
     ``ensure_default_home_shelf`` and the admin UI's own "keep at least one"
     rule mean it is never actually empty.
@@ -68,15 +55,3 @@ async def defaults_payload(db: DbDep) -> dict[str, object]:
             "top_shelf": config.home_top_shelf or upnext_shelf(),
         },
     }
-
-
-@router.get("/defaults")
-async def defaults(db: DbDep, user: CachedUserDep) -> Response:
-    """The admin's current Library and Home configuration.
-
-    Indented for now so it is easy to read by eye while this is still being
-    built out; a later pass will switch this to FastAPI's own compact
-    default rather than hand-rolling the response.
-    """
-    payload = await defaults_payload(db)
-    return Response(content=json.dumps(payload, indent=2), media_type="application/json")
