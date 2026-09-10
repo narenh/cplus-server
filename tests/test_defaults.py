@@ -203,7 +203,7 @@ async def test_a_custom_shelf_title_is_reflected(
 
 
 @respx.mock
-async def test_register_bundles_defaults_when_first_run_is_absent(
+async def test_register_omits_defaults_when_first_run_is_absent(
     client: httpx.AsyncClient, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
@@ -211,13 +211,11 @@ async def test_register_bundles_defaults_when_first_run_is_absent(
     response = await client.get("/register", headers=plex_headers)
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "ok"
-    assert_well_formed_payload({k: v for k, v in body.items() if k != "status"})
+    assert response.json() == {"status": "ok"}
 
 
 @respx.mock
-async def test_register_bundles_defaults_when_first_run_is_false(
+async def test_register_omits_defaults_when_first_run_is_false(
     client: httpx.AsyncClient, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
@@ -227,11 +225,11 @@ async def test_register_bundles_defaults_when_first_run_is_false(
     )
 
     assert response.status_code == 200
-    assert "default_libraries" in response.json()
+    assert response.json() == {"status": "ok"}
 
 
 @respx.mock
-async def test_register_omits_defaults_when_first_run_is_true(
+async def test_register_bundles_defaults_when_first_run_is_true(
     client: httpx.AsyncClient, plex_headers: dict
 ) -> None:
     mock_seerr_auth()
@@ -241,7 +239,9 @@ async def test_register_omits_defaults_when_first_run_is_true(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert_well_formed_payload({k: v for k, v in body.items() if k != "status"})
 
 
 @respx.mock

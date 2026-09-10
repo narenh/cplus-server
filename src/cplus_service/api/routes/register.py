@@ -16,11 +16,11 @@ There is no session token: either this returns 200 or it 401s, and the
 client's only recovery is to call it again.
 
 **``first_run``** folds ``GET /defaults``'s own payload into this response,
-so an actual first run needs no second round trip: it is included whenever
-``first_run`` is anything other than exactly ``true`` — absent (today's
-client, which has never heard of this parameter) or ``false`` both mean
-"seed me". Pass ``first_run=true`` once local state already exists to skip
-the extra payload on every ordinary launch after that.
+so an actual first run needs no second round trip: it is included only
+when ``first_run`` is present and ``true``. Absent (today's client, which
+has never heard of this parameter) or ``false`` both mean "ordinary
+launch, no bundle" — a client passes ``first_run=true`` exactly once, on
+the call that has nothing local to seed from yet.
 """
 
 from __future__ import annotations
@@ -71,6 +71,6 @@ async def register(
         ) from exc
 
     body: dict[str, object] = {"status": "ok"}
-    if first_run is not True:
+    if first_run is True:
         body.update(await defaults_payload(db))
     return Response(content=json.dumps(body, indent=2), media_type="application/json")
