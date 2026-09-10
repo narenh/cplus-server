@@ -23,7 +23,10 @@ or row group it changed (``partials/library_section.html``,
 ``partials/top_shelf.html``), swapped in by id — the same pattern
 ``partials/notification_panel.html`` uses. Dragging is live
 (``static/reorder.js`` moves rows as you drag); dropping posts the new
-order. A row's Save control only shows once its Title actually differs from
+order. Shelves also get plain Move Up/Move Down buttons alongside dragging
+(see :func:`_moved`) — a form POST needs no native HTML5 drag-and-drop
+support, which not every browser or input device offers. A row's Save
+control only shows once its Title actually differs from
 what it started at (``static/dirty-save.js``) — every other field applies
 the moment it changes (``static/shelf-source.js``), the same way a switch
 elsewhere in this admin UI does.
@@ -162,6 +165,28 @@ def _reordered(items: list[dict], order: list[str]) -> list[dict]:
     return [by_id[i] for i in order if i in by_id] + [
         item for item in items if item["id"] not in wanted
     ]
+
+
+def _moved(items: list[dict], item_id: str, delta: int) -> list[dict]:
+    """``items`` with ``item_id`` swapped with its neighbour ``delta`` away.
+
+    ``delta`` of ``-1`` moves it earlier, ``+1`` later. A move already at
+    that end (or an unknown id) is a no-op rather than an error — the
+    button that posts here is disabled in that case, but a stale click
+    should do nothing, not raise. The up/down buttons this powers exist
+    alongside dragging (``static/reorder.js``) rather than instead of it:
+    a plain form POST needs no native HTML5 drag-and-drop support, which
+    not every browser or input device offers.
+    """
+    index = next((i for i, item in enumerate(items) if item["id"] == item_id), None)
+    if index is None:
+        return items
+    target = index + delta
+    if not 0 <= target < len(items):
+        return items
+    reordered = list(items)
+    reordered[index], reordered[target] = reordered[target], reordered[index]
+    return reordered
 
 
 # --------------------------------------------------------------------------- #
@@ -342,16 +367,21 @@ async def _row_context(
 async def _shelves_context(config: Config, state: AppState) -> dict[str, object]:
     """Everything ``partials/home_shelves.html`` renders from."""
     rows = []
-    for shelf in config.home_shelves:
+    total = len(config.home_shelves)
+    for index, shelf in enumerate(config.home_shelves):
         row = await _row_context(shelf, config, state, allow_discover=True)
         row.update(
             {
                 "row_id": shelf["id"],
                 "post_url": f"/admin/libraries/home/shelves/{shelf['id']}",
                 "remove_url": f"/admin/libraries/home/shelves/{shelf['id']}/remove",
+                "move_up_url": f"/admin/libraries/home/shelves/{shelf['id']}/move-up",
+                "move_down_url": f"/admin/libraries/home/shelves/{shelf['id']}/move-down",
                 "swap_target": "#home-shelves",
                 "show_remove": True,
-                "disable_remove": len(config.home_shelves) < 2,
+                "disable_remove": total < 2,
+                "is_first": index == 0,
+                "is_last": index == total - 1,
             }
         )
         rows.append(row)
@@ -605,6 +635,26 @@ async def reorder_shelves(
     return await _home_shelves_section(request, db, state)
 
 
+@router.post("/home/shelves/{shelf_id}/move-up", response_class=HTMLResponse)
+async def move_shelf_up(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep, shelf_id: str
+) -> Response:
+    """Swap this shelf with the one before it. See :func:`_moved`."""
+    config = await get_config(db)
+    config.home_shelves = _moved(config.home_shelves, shelf_id, -1)
+    return await _home_shelves_section(request, db, state)
+
+
+@router.post("/home/shelves/{shelf_id}/move-down", response_class=HTMLResponse)
+async def move_shelf_down(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep, shelf_id: str
+) -> Response:
+    """Swap this shelf with the one after it. See :func:`_moved`."""
+    config = await get_config(db)
+    config.home_shelves = _moved(config.home_shelves, shelf_id, 1)
+    return await _home_shelves_section(request, db, state)
+
+
 @router.post("/home/shelves/{shelf_id}/remove", response_class=HTMLResponse)
 async def remove_shelf(
     request: Request, db: DbDep, state: StateDep, admin: AdminPageDep, shelf_id: str
@@ -696,36 +746,33 @@ async def update_carousel(
 
 @router.post("/home/carousel-enabled", response_class=HTMLResponse)
 async def toggle_carousel_enabled(
-    request: Request, db: DbDep, admin: AdminPageDep, enabled: str = Form(default="")
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    enabled: str = Form(default=""),
 ) -> Response:
+    """Show or hide the Carousel row. Never touches ``home_carousel`` itself.
+
+    Swaps in the whole Carousel section, not just the switch: whether the
+    row below renders at all depends on this same flag.
+    """
     config = await get_config(db)
     config.home_carousel_enabled = enabled == "on"
-    return templates.TemplateResponse(
-        request,
-        "partials/carousel_switch.html",
-        {
-            "checked": config.home_carousel_enabled,
-            "url": "/admin/libraries/home/carousel-enabled",
-            "label": "Enable Home Carousel",
-        },
-    )
+    return await _carousel_section(request, db, state)
 
 
 @router.post("/home/carousel-include-on-deck", response_class=HTMLResponse)
 async def toggle_carousel_include_on_deck(
-    request: Request, db: DbDep, admin: AdminPageDep, enabled: str = Form(default="")
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    enabled: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
     config.home_carousel_include_on_deck = enabled == "on"
-    return templates.TemplateResponse(
-        request,
-        "partials/carousel_switch.html",
-        {
-            "checked": config.home_carousel_include_on_deck,
-            "url": "/admin/libraries/home/carousel-include-on-deck",
-            "label": 'Include "Continue Watching" items',
-        },
-    )
+    return await _carousel_section(request, db, state)
 
 
 # --------------------------------------------------------------------------- #

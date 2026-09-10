@@ -13,7 +13,32 @@
        data-reorder-target="#home-shelves">
     {% for row in shelf_rows %}
       <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ row.row_id }}">
-        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+        <div class="reorder-controls">
+          <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+          {# Alongside dragging, not instead of it — a plain form POST that
+             needs no native HTML5 drag-and-drop support from the browser or
+             input device. #}
+          <form method="post" action="{{ row.move_up_url }}" class="move-form"
+                hx-post="{{ row.move_up_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
+            <button type="submit" class="icon" title="Move up" aria-label="Move shelf up"
+                    {% if row.is_first %}disabled{% endif %}>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 15l6-6 6 6"/>
+              </svg>
+            </button>
+          </form>
+          <form method="post" action="{{ row.move_down_url }}" class="move-form"
+                hx-post="{{ row.move_down_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
+            <button type="submit" class="icon" title="Move down" aria-label="Move shelf down"
+                    {% if row.is_last %}disabled{% endif %}>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </button>
+          </form>
+        </div>
         <div class="shelf-fields">
           {% with id = row.row_id, post_url = row.post_url, swap_target = row.swap_target,
                   current = row.current, current_source = row.current_source,

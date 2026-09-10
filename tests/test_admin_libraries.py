@@ -404,6 +404,77 @@ async def test_reordering_shelves(client: httpx.AsyncClient, db: AsyncSession) -
     assert [shelf["id"] for shelf in reordered] == [second_id, first_id]
 
 
+async def test_moving_a_shelf_up(client: httpx.AsyncClient, db: AsyncSession) -> None:
+    # Alongside dragging (test_reordering_shelves above), not instead of it:
+    # a plain form POST that needs no native HTML5 drag-and-drop support.
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/shelves")
+    await client.post("/admin/libraries/home/shelves")
+    config = await current_config(db)
+    first_id, second_id, third_id = (shelf["id"] for shelf in config.home_shelves)
+
+    response = await client.post(f"/admin/libraries/home/shelves/{third_id}/move-up")
+
+    assert response.status_code == 200
+    reordered = (await current_config(db)).home_shelves
+    assert [shelf["id"] for shelf in reordered] == [first_id, third_id, second_id]
+
+
+async def test_moving_a_shelf_down(client: httpx.AsyncClient, db: AsyncSession) -> None:
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/shelves")
+    config = await current_config(db)
+    first_id, second_id = (shelf["id"] for shelf in config.home_shelves)
+
+    response = await client.post(f"/admin/libraries/home/shelves/{first_id}/move-down")
+
+    assert response.status_code == 200
+    reordered = (await current_config(db)).home_shelves
+    assert [shelf["id"] for shelf in reordered] == [second_id, first_id]
+
+
+async def test_moving_the_first_shelf_up_is_a_no_op(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Unreachable through the page — the button is disabled — but a stale
+    # click should do nothing rather than raise or shuffle anything.
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/shelves")
+    config = await current_config(db)
+    first_id, second_id = (shelf["id"] for shelf in config.home_shelves)
+
+    response = await client.post(f"/admin/libraries/home/shelves/{first_id}/move-up")
+
+    assert response.status_code == 200
+    reordered = (await current_config(db)).home_shelves
+    assert [shelf["id"] for shelf in reordered] == [first_id, second_id]
+
+
+async def test_moving_the_last_shelf_down_is_a_no_op(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/shelves")
+    config = await current_config(db)
+    first_id, second_id = (shelf["id"] for shelf in config.home_shelves)
+
+    response = await client.post(f"/admin/libraries/home/shelves/{second_id}/move-down")
+
+    assert response.status_code == 200
+    reordered = (await current_config(db)).home_shelves
+    assert [shelf["id"] for shelf in reordered] == [first_id, second_id]
+
+
+async def test_moving_an_unknown_shelf_is_a_no_op(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.post("/admin/libraries/home/shelves/nope/move-up")
+
+    assert response.status_code == 200
+
+
 async def test_changing_a_shelfs_source_resets_title_style_and_title_only(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
@@ -708,20 +779,41 @@ async def test_disabling_the_carousel_switch_keeps_its_configured_content(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
     # There is no longer an "off" source — the enabled switch is the only
-    # on/off control, and it never clears what's actually configured, only
-    # dims it (see partials/carousel.html) so an admin can tell the
-    # difference between "off" and "never set up".
+    # on/off control, and it never clears what's actually configured: it
+    # just hides the row (see partials/carousel.html), so turning it back on
+    # brings back exactly what was there.
     await default_library(db, library_id="1", server_title="Movies")
     await signed_in(client, db)
     await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
 
+    response = await client.post("/admin/libraries/home/carousel-enabled", data={})
+
+    assert response.status_code == 200
+    # The row itself is gone from the response, not just visually dimmed —
+    # the switch's own toggle now swaps the whole Carousel section, so a
+    # narrower swap can no longer leave it stale.
+    assert 'id="shelf-carousel"' not in response.text
+    config = await current_config(db)
+    assert config.home_carousel_enabled is False
+    assert config.home_carousel["path"] == "/library/sections/1/all"
+
+
+async def test_re_enabling_the_carousel_switch_shows_its_row_again(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await default_library(db, library_id="1", server_title="Movies")
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
+    await client.post("/admin/libraries/home/carousel-enabled", data={})
+
     response = await client.post(
-        "/admin/libraries/home/carousel-enabled", data={}
+        "/admin/libraries/home/carousel-enabled", data={"enabled": "on"}
     )
 
     assert response.status_code == 200
+    assert 'id="shelf-carousel"' in response.text
     config = await current_config(db)
-    assert config.home_carousel_enabled is False
+    assert config.home_carousel_enabled is True
     assert config.home_carousel["path"] == "/library/sections/1/all"
 
 

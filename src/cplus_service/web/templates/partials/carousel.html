@@ -1,9 +1,9 @@
 {# The hero carousel — one shelf-shaped row, same fields and live-apply
    behaviour as an ordinary Home shelf (partials/_shelf_row_fields.html),
    just with no Remove (there is always exactly one) and its own on/off
-   switch. Turning the switch off only stops Canopy+ from showing it: the
-   row below stays fully visible and editable, dimmed to signal that its
-   own configuration is retained rather than cleared.
+   switch. Turning the switch off just hides the row — it does not clear
+   ``home_carousel`` itself, so whatever was configured is exactly what
+   comes back once it's turned back on.
 
    Expects: carousel (see libraries._carousel_context) — namespaced rather
    than flattened into the page context, since Top Shelf (partials/
@@ -19,24 +19,26 @@
     <span>Enable Home Carousel</span>
   </div>
 
-  <div class="shelf-fields shelf-box {% if not carousel.home_carousel_enabled %}dimmed{% endif %}">
-    {% with id = carousel.row_id, post_url = carousel.post_url, swap_target = carousel.swap_target,
-            current = carousel.current, current_source = carousel.current_source,
-            placeholder_text = carousel.placeholder_text, source_groups = carousel.source_groups,
-            picker = carousel.picker, show_remove = carousel.show_remove,
-            remove_url = carousel.remove_url, disable_remove = carousel.disable_remove %}
-      {% include "partials/_shelf_row_fields.html" %}
-    {% endwith %}
+  {% if carousel.home_carousel_enabled %}
+    <div class="shelf-fields shelf-box">
+      {% with id = carousel.row_id, post_url = carousel.post_url, swap_target = carousel.swap_target,
+              current = carousel.current, current_source = carousel.current_source,
+              placeholder_text = carousel.placeholder_text, source_groups = carousel.source_groups,
+              picker = carousel.picker, show_remove = carousel.show_remove,
+              remove_url = carousel.remove_url, disable_remove = carousel.disable_remove %}
+        {% include "partials/_shelf_row_fields.html" %}
+      {% endwith %}
 
-    {% if carousel.show_include_on_deck %}
-      <div class="carousel-toggle">
-        <span class="carousel-switch">
-          {% with checked = carousel.home_carousel_include_on_deck, url = "/admin/libraries/home/carousel-include-on-deck", label = 'Include "Continue Watching" items' %}
-            {% include "partials/carousel_switch.html" %}
-          {% endwith %}
-        </span>
-        <span>Include "Continue Watching" items</span>
-      </div>
-    {% endif %}
-  </div>
+      {% if carousel.show_include_on_deck %}
+        <div class="carousel-toggle">
+          <span class="carousel-switch">
+            {% with checked = carousel.home_carousel_include_on_deck, url = "/admin/libraries/home/carousel-include-on-deck", label = 'Include "Continue Watching" items' %}
+              {% include "partials/carousel_switch.html" %}
+            {% endwith %}
+          </span>
+          <span>Include "Continue Watching" items</span>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
 </div>

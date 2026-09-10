@@ -1,8 +1,10 @@
-{# Swapped in place after each toggle, so the switch reflects what was stored
-   rather than what was clicked. Same pattern as partials/notification_toggle.html. #}
+{# Swaps in the whole Carousel section after each toggle, not just itself:
+   the "enabled" switch's own state decides whether the row below it shows
+   at all, so a narrower swap (reflecting only what was clicked, the way
+   partials/notification_toggle.html's does) would leave that row stale. #}
 <input type="checkbox" name="enabled"
        {% if checked %}checked{% endif %}
        hx-post="{{ url }}"
-       hx-target="closest .carousel-switch"
-       hx-swap="innerHTML"
+       hx-target="#carousel-section"
+       hx-swap="outerHTML"
        aria-label="{{ label }}">

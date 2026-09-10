@@ -404,7 +404,13 @@ table.preview .dropped-by { color: var(--err); }
    old layout's height was actually going to, and none of it is information
    the controls don't already carry themselves. */
 .shelf-row { flex-direction: column; align-items: stretch; padding: 8px 12px; }
-.shelf-row .drag-handle { align-self: flex-start; margin-bottom: 2px; }
+/* The drag handle plus the Move Up/Down buttons that offer the same
+   reorder without needing native HTML5 drag-and-drop — see libraries._moved. */
+.reorder-controls { align-self: flex-start; margin-bottom: 2px; display: flex; align-items: center; gap: 2px; }
+.reorder-controls button.icon { padding: 2px 5px; }
+/* .move-form is display:contents (see .remove-form below), so each button —
+   its only child — reads as a direct child of .reorder-controls. */
+.move-form { display: contents; }
 .shelf-fields { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 /* A form with no visible content of its own — every real field lives outside
    it via form="<id>". display:none, not visibility:hidden, so it costs zero
@@ -434,14 +440,9 @@ table.preview .dropped-by { color: var(--err); }
   border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
   margin: 10px 0;
 }
-/* The Carousel's own row when its enabled switch is off: still fully
-   visible and editable (turning it off doesn't erase what's configured),
-   just visually backgrounded so the page reads "off" at a glance. */
-.dimmed { opacity: .5; }
-
-/* Same shape as .notify-master, but the switch itself sits in its own span
-   (.carousel-switch) with nothing else inside it — that span is what each
-   switch's hx-target="closest .carousel-switch" swaps, and swapping in a
-   replacement checkbox must never carry the label text away with it. */
+/* Same shape as .notify-master. Unlike a plain switch, both of the
+   Carousel's toggles swap in the whole #carousel-section (see
+   partials/carousel_switch.html) rather than just themselves — the enabled
+   switch's own state decides whether the row below it renders at all. */
 .carousel-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
 .carousel-toggle input { width: 17px; height: 17px; margin: 0; cursor: pointer; }
