@@ -13,13 +13,17 @@ second round trip.
 Every shelf-shaped value here — ``default_home_shelves``, and
 ``default_carousel``'s own ``carousel``/``top_shelf`` — is stored, and
 returned, in exactly the shape CanopyPlus's own ``HomeShelfDataModel``
-decodes, plus one field with no counterpart there yet: ``modifiedAt``,
-stamped on every edit (see ``admin.libraries._apply_shelf_update``) so a
-future sync layer has something to diff against from day one.
-``default_libraries`` is CanopyPlus's own ``MediaLibrary`` shape, unchanged.
-See ``cplus_service.db.models.Config`` for where each column's own
-docstring says so, and ``cplus_service.api.routes.admin.libraries`` and
-``.home_sources`` for what actually writes them.
+decodes: no extra fields. ``default_libraries`` is CanopyPlus's own
+``MediaLibrary`` shape, unchanged. See ``cplus_service.db.models.Config``
+for where each column's own docstring says so, and
+``cplus_service.api.routes.admin.libraries`` and ``.home_sources`` for what
+actually writes them.
+
+``Config.home_modified_at`` — one stamp for the whole Home document,
+matching CanopyPlus's own ``HomeSettings.modifiedAt`` — is not part of this
+payload yet: this endpoint is the fresh-install seed, not the sync
+endpoint a future ``HomeSettings`` sync will need, so nothing here reads or
+returns it today.
 
 Cache-only auth, same as ``GET /titles/{imdb_id}/actions`` and
 ``GET /search``: no outbound Plex or Seerr call.

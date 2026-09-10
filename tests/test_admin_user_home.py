@@ -103,6 +103,37 @@ async def test_a_users_home_does_not_track_later_changes_to_the_default(
     assert home.home_carousel_enabled is True  # unchanged by the later default edit
 
 
+async def test_seeding_leaves_the_document_stamp_untouched(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Seeding is not an edit — same as CanopyPlus's own HomeSettings()
+    # starting at .distantPast until a person actually changes something.
+    user = await target_user(db)
+    await signed_in(client, db)
+
+    await client.get(f"/admin/users/{user.id}/home")
+
+    home = await current_home(db, user.id)
+    assert home is not None
+    assert home.home_modified_at is None
+
+
+async def test_editing_a_users_home_stamps_one_document_wide_timestamp(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    user = await target_user(db)
+    await signed_in(client, db)
+
+    response = await client.post(f"/admin/users/{user.id}/home/shelves")
+
+    assert response.status_code == 200
+    home = await current_home(db, user.id)
+    assert home is not None
+    assert home.home_modified_at is not None
+    # The global default's own stamp is untouched by a per-user edit.
+    assert (await get_config(db)).home_modified_at is None
+
+
 # --------------------------------------------------------------------------- #
 # Shelves: isolation from Config and from other users
 # --------------------------------------------------------------------------- #

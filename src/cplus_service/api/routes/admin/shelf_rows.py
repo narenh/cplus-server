@@ -22,15 +22,22 @@ for one user's — and every URL a context builder below hands to a template
 is built from it, so ``partials/home_shelves.html``, ``partials/carousel.html``
 and ``partials/top_shelf.html`` need not know which of the two they are
 rendering.
+
+Neither ``Config`` nor ``UserHomeSettings`` stamps a per-shelf ``modifiedAt``
+any more — CanopyPlus's own ``HomeSettings`` settled on one ``modifiedAt``
+for the whole document instead, merged whole-document last-write-wins. See
+:func:`touched`, which every mutating route in :mod:`.libraries` and
+:mod:`.user_home` calls once after actually changing something.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from fastapi import HTTPException, status
 
-from ....bootstrap import now_iso, upnext_shelf
+from ....bootstrap import upnext_shelf
 from ....db.models import Config
 from ....plex.client import PlexServerClient, PlexServerError
 from ...state import AppState
@@ -53,7 +60,8 @@ class HomeSettingsLike(Protocol):
 
     For type-checking only — both real classes already carry every one of
     these fields with no shared base class, since ``Config`` carries a great
-    deal else that has nothing to do with Home.
+    deal else that has nothing to do with Home. Together these six columns
+    are exactly what CanopyPlus's own ``HomeSettings`` document holds.
     """
 
     home_shelves: list[dict[str, Any]]
@@ -61,6 +69,21 @@ class HomeSettingsLike(Protocol):
     home_carousel_enabled: bool
     home_carousel_include_on_deck: bool
     home_top_shelf: dict[str, Any] | None
+    home_modified_at: datetime | None
+
+
+def touched(home: HomeSettingsLike) -> None:
+    """Stamp ``home`` as just edited, for the whole document at once.
+
+    Every mutation below — a shelf added, removed, reordered or edited, the
+    Carousel's source or either of its switches, Top Shelf's source — calls
+    this exactly once after actually changing something, whether the target
+    is the admin's global ``Config`` or one user's own ``UserHomeSettings``.
+    Mirrors CanopyPlus's own ``HomeSettings.modifiedAt``: one timestamp for
+    the five fields together, not one per shelf — see
+    ``db.models.Config.home_modified_at`` for why.
+    """
+    home.home_modified_at = datetime.now(UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -190,11 +213,6 @@ async def collection_picker_context(
 # --------------------------------------------------------------------------- #
 
 
-def stamped(shelf_update: dict[str, Any], now_iso_value: str) -> dict[str, Any]:
-    """``shelf_update`` with a fresh ``modifiedAt`` — every real edit stamps one."""
-    return {**shelf_update, "modifiedAt": now_iso_value}
-
-
 async def apply_shelf_update(
     config: Config,
     state: AppState,
@@ -222,9 +240,10 @@ async def apply_shelf_update(
     style and titleOnly to that source's defaults, discarding whatever was
     typed here, the same behaviour the app itself has.
 
-    Every path through here is a real edit, so every path stamps a fresh
-    ``modifiedAt`` on the way out — unlike reordering or removing a shelf,
-    which touch the list, not any one shelf's own content.
+    Returns the shelf-shaped dict alone, in exactly ``HomeShelfDataModel``'s
+    own shape — no ``modifiedAt`` here; the caller stamps one ``home_modified_at``
+    on the whole document via :func:`touched` after storing the result,
+    since every route this feeds into always changes something.
     """
     libraries_by_id = {library["id"]: library for library in config.default_libraries}
 
@@ -232,33 +251,30 @@ async def apply_shelf_update(
         defaults = resolve_collection_source(source, collection_title, libraries_by_id)
         if defaults is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
-        return stamped({**current, **defaults}, now_iso())
+        return {**current, **defaults}
 
     parsed = collection_shelf_library_id(current, libraries_by_id)
     current_source = f"{COLLECTIONS_PREFIX}{parsed[0]}" if parsed else source_of(current)
 
     if source == current_source:
-        return stamped(
-            {
-                **current,
-                "title": title.strip() or current["title"],
-                "style": style if style in ("poster", "card") else current["style"],
-                "titleOnly": title_only == "on",
-            },
-            now_iso(),
-        )
+        return {
+            **current,
+            "title": title.strip() or current["title"],
+            "style": style if style in ("poster", "card") else current["style"],
+            "titleOnly": title_only == "on",
+        }
 
     if source.startswith(COLLECTIONS_PREFIX):
         library_id = source[len(COLLECTIONS_PREFIX) :]
         defaults = await first_collection_defaults(config, state, library_id)
         if defaults is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "That library has no collections.")
-        return stamped({**current, **defaults}, now_iso())
+        return {**current, **defaults}
 
     defaults = resolve_source(source, libraries_by_id)
     if defaults is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
-    return stamped({**current, **defaults}, now_iso())
+    return {**current, **defaults}
 
 
 # --------------------------------------------------------------------------- #

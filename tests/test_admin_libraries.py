@@ -346,6 +346,41 @@ async def test_a_fresh_config_starts_with_the_continue_watching_shelf(
     assert config.home_shelves[0]["title"] == "Continue Watching"
 
 
+async def test_a_fresh_config_has_no_document_stamp_yet(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # None means "never edited" — the same role CanopyPlus's own
+    # HomeSettings.modifiedAt gives .distantPast — and startup seeding is
+    # not itself an edit.
+    config = await get_config(db)
+    assert config.home_modified_at is None
+
+
+async def test_editing_home_stamps_one_document_wide_timestamp(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.post("/admin/libraries/home/shelves")
+
+    assert response.status_code == 200
+    config = await current_config(db)
+    assert config.home_modified_at is not None
+
+
+async def test_editing_default_libraries_does_not_touch_the_home_stamp(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config, library_sections
+) -> None:
+    # Default Libraries has no counterpart in CanopyPlus's HomeSettings —
+    # only the Carousel/Top Shelf/Shelves trio does — so it never touches
+    # this timestamp.
+    await signed_in(client, db)
+
+    await client.post("/admin/libraries", data={"library_id": "1"})
+
+    assert (await current_config(db)).home_modified_at is None
+
+
 async def test_adding_a_shelf(client: httpx.AsyncClient, db: AsyncSession) -> None:
     await signed_in(client, db)
     before = len((await get_config(db)).home_shelves)

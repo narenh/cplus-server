@@ -70,6 +70,7 @@ from .shelf_rows import (
     reordered,
     shelves_context,
     top_shelf_context,
+    touched,
 )
 
 logger = logging.getLogger(__name__)
@@ -340,6 +341,7 @@ async def reorder_libraries(
 async def add_shelf(request: Request, db: DbDep, state: StateDep, admin: AdminPageDep) -> Response:
     config = await get_config(db)
     config.home_shelves = [*config.home_shelves, upnext_shelf()]
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -351,6 +353,7 @@ async def reorder_shelves(
     order = [str(value) for value in form.getlist("order")]
     config = await get_config(db)
     config.home_shelves = reordered(config.home_shelves, order)
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -361,6 +364,7 @@ async def move_shelf_up(
     """Swap this shelf with the one before it. See :func:`.shelf_rows.moved`."""
     config = await get_config(db)
     config.home_shelves = moved(config.home_shelves, shelf_id, -1)
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -371,6 +375,7 @@ async def move_shelf_down(
     """Swap this shelf with the one after it. See :func:`.shelf_rows.moved`."""
     config = await get_config(db)
     config.home_shelves = moved(config.home_shelves, shelf_id, 1)
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -385,6 +390,7 @@ async def remove_shelf(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one home shelf.")
 
     config.home_shelves = [shelf for shelf in config.home_shelves if shelf["id"] != shelf_id]
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -427,6 +433,7 @@ async def update_shelf(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such home shelf")
 
     config.home_shelves = updated
+    touched(config)
     return await _home_shelves_section(request, db, state)
 
 
@@ -460,6 +467,7 @@ async def update_carousel(
         title_only=title_only,
         collection_title=collection_title,
     )
+    touched(config)
     return await _carousel_section(request, db, state)
 
 
@@ -478,6 +486,7 @@ async def toggle_carousel_enabled(
     """
     config = await get_config(db)
     config.home_carousel_enabled = enabled == "on"
+    touched(config)
     return await _carousel_section(request, db, state)
 
 
@@ -491,6 +500,7 @@ async def toggle_carousel_include_on_deck(
 ) -> Response:
     config = await get_config(db)
     config.home_carousel_include_on_deck = enabled == "on"
+    touched(config)
     return await _carousel_section(request, db, state)
 
 
@@ -524,4 +534,5 @@ async def update_top_shelf(
         title_only=title_only,
         collection_title=collection_title,
     )
+    touched(config)
     return await _top_shelf_section(request, db, state)

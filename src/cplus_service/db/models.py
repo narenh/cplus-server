@@ -201,6 +201,22 @@ class Config(Base):
     #: nothing here to turn off, only something an admin may choose instead.
     home_top_shelf: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
+    #: When any of the five columns above was last written, for the whole
+    #: Home document together — not per shelf. Mirrors CanopyPlus's own
+    #: ``HomeSettings.modifiedAt`` exactly: that struct folds the carousel,
+    #: top shelf and shelf list into one versioned document, merged
+    #: whole-document last-write-wins on this one timestamp rather than
+    #: field-by-field. ``None`` plays the same role ``.distantPast`` does as
+    #: that field's own default — "never edited" — since nothing has written
+    #: through this column yet; every mutation in
+    #: ``cplus_service.api.routes.admin.shelf_rows.touched`` sets it, the
+    #: same "one stamp for the whole document" rule
+    #: ``UserHomeSettings.home_modified_at`` follows for one user's own copy.
+    #: An earlier revision instead stamped a ``modifiedAt`` inside each
+    #: shelf-shaped dict, guessing at a shape CanopyPlus had not settled yet
+    #: — see ``bootstrap.upnext_shelf``.
+    home_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class User(Base):
     """A Seerr user permitted to use this service.
@@ -227,16 +243,24 @@ class UserHomeSettings(Base):
     """One user's own copy of the Home section — Carousel, Top Shelf and Shelves.
 
     Mirrors the matching ``Config`` columns exactly (same field names, same
-    ``HomeShelfDataModel``-compatible shapes), for the same reason
-    ``default_libraries``/``home_shelves`` do there: a future connection to
-    CanopyPlus's own per-user ``HomeSettings`` has nothing to translate.
+    ``HomeShelfDataModel``-compatible shapes, the same single
+    ``home_modified_at`` for the whole row rather than one per shelf) — see
+    ``Config.home_modified_at`` for why that one column exists at all. Same
+    field names as ``Config`` for the same reason ``default_libraries``/
+    ``home_shelves`` mirror ``MediaLibrary``/``HomeShelfDataModel`` there: a
+    future connection to CanopyPlus's own per-user ``HomeSettings`` sync has
+    nothing to translate — this row already *is* one ``HomeSettings``
+    document.
 
     Absence of a row (rather than a row full of nulls) means this user has
     never had their own Home edited — see
     ``cplus_service.api.routes.admin.user_home``, the only place that ever
     creates one. Creation seeds every field from the admin's current global
-    defaults at that moment; after that, this row is the user's own and no
-    longer tracks changes to ``Config``, the same "fork on first edit, then
+    defaults at that moment, with ``home_modified_at`` left ``None`` —
+    seeding is not itself an edit, the same way CanopyPlus's own
+    ``HomeSettings()`` starts at ``.distantPast`` until a person actually
+    changes something. After that, this row is the user's own and no longer
+    tracks changes to ``Config``, the same "fork on first edit, then
     independent" relationship a per-file override has to a shared default
     elsewhere.
     """
@@ -257,6 +281,11 @@ class UserHomeSettings(Base):
         Boolean, default=False, server_default="0"
     )
     home_top_shelf: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    #: One stamp for this whole row, not per shelf. See
+    #: ``Config.home_modified_at`` — same column, same rule, same
+    #: ``HomeSettings.modifiedAt`` it mirrors.
+    home_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="home_settings")
 

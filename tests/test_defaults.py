@@ -1,17 +1,15 @@
 """``GET /defaults`` and ``GET /register``'s ``first_run`` bundling.
 
 Checks the payload is exactly what the admin has configured, in
-CanopyPlus's own Codable shapes plus ``modifiedAt`` (``MediaLibrary`` fields
-for ``default_libraries``; ``id``/``title``/``description``/``path``/
-``discoverHubKey``/``style``/``titleOnly``/``modifiedAt`` for every
-shelf-shaped entry) — and that a caller with no valid Plex token cannot
-reach any of it.
+CanopyPlus's own Codable shapes with no extra fields (``MediaLibrary``
+fields for ``default_libraries``; ``id``/``title``/``description``/``path``/
+``discoverHubKey``/``style``/``titleOnly`` for every shelf-shaped entry) —
+and that a caller with no valid Plex token cannot reach any of it.
 """
 
 from __future__ import annotations
 
 import json
-import re
 
 import httpx
 import respx
@@ -29,11 +27,9 @@ SHELF_KEYS = {
     "discoverHubKey",
     "style",
     "titleOnly",
-    "modifiedAt",
 }
 LIBRARY_KEYS = {"id", "serverTitle", "type", "hidden", "name"}
 CAROUSEL_KEYS = {"enabled", "include_on_deck", "carousel", "top_shelf"}
-ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
@@ -71,7 +67,6 @@ def assert_well_formed_payload(body: dict) -> None:
     assert len(body["default_home_shelves"]) >= 1
     for shelf in body["default_home_shelves"]:
         assert set(shelf) == SHELF_KEYS
-        assert ISO_UTC_RE.match(shelf["modifiedAt"])
 
     carousel = body["default_carousel"]
     assert set(carousel) == CAROUSEL_KEYS

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -123,26 +122,16 @@ async def ensure_default_quality_profile(session: AsyncSession) -> QualityProfil
     return profile
 
 
-def now_iso() -> str:
-    """Now, as an ISO-8601 UTC string with no fractional seconds.
-
-    The format every shelf-shaped dict's ``modifiedAt`` is stamped in —
-    plain seconds precision with a "Z" suffix, decodable by Swift's own
-    ``ISO8601DateFormatter`` with no special options once a future
-    CanopyPlus version has a property to decode it into.
-    """
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def upnext_shelf() -> dict[str, object]:
     """A fresh "Continue Watching" shelf, in ``HomeShelfDataModel``'s own shape.
 
     Mirrors ``HomeShelfDataModel.upNext()`` in CanopyPlus exactly — same path,
-    same style — since this is the seed a fresh install and the app's own
-    built-in fallback agree on. ``modifiedAt`` is the one field with no
-    counterpart there yet: every shelf-shaped dict this service stores gets
-    one regardless, so a future sync layer has something to diff against
-    from day one rather than backfilling it later.
+    same style, same fields and no others. Earlier revisions of this service
+    also stamped a per-shelf ``modifiedAt`` here, guessing at what a future
+    sync layer would need; CanopyPlus's own ``HomeSettings`` (see
+    ``db.models.Config.home_modified_at``) settled that differently — one
+    ``modifiedAt`` for the whole Home document, not one per shelf — so this
+    went back to matching ``HomeShelfDataModel`` exactly.
     """
     return {
         "id": str(uuid.uuid4()),
@@ -152,7 +141,6 @@ def upnext_shelf() -> dict[str, object]:
         "discoverHubKey": None,
         "style": "card",
         "titleOnly": False,
-        "modifiedAt": now_iso(),
     }
 
 

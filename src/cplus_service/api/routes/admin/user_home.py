@@ -12,9 +12,15 @@ admin's global :class:`~cplus_service.db.models.Config`. See
 time anyone opens this page for a user, :func:`_get_or_create_home` seeds a
 full copy from the admin's current global defaults — after that, editing a
 user's shelf never touches ``Config``, and a later change to the global
-default never touches this user. There is deliberately no "reset to
-default" here yet: once CanopyPlus has its own per-user ``HomeSettings`` to
-sync against, this is where that sync will read from.
+default never touches this user. Seeding itself leaves ``home_modified_at``
+unset (see :class:`~cplus_service.db.models.UserHomeSettings`); every
+mutating route below calls :func:`.shelf_rows.touched` once it has actually
+changed something, the same single whole-document stamp
+:mod:`.libraries` keeps on ``Config``. There is deliberately no "reset to
+default" here yet: once a client actually syncs against CanopyPlus's own
+per-user ``HomeSettings``, this row already speaks its exact shape — same
+five content fields, one ``modifiedAt`` for the document — so there is
+nothing left to translate when that day comes.
 
 Default Libraries — which Plex libraries exist and what they're called — is
 not part of this: every user's shelves still pick from the admin's own
@@ -47,6 +53,7 @@ from .shelf_rows import (
     reordered,
     shelves_context,
     top_shelf_context,
+    touched,
 )
 
 
@@ -86,7 +93,10 @@ async def _get_or_create_home(db: AsyncSession, user: User, config: Config) -> U
     "fall back to a fresh Continue Watching shelf" rule ``defaults_payload``
     already applies to the global config's own gaps covers a global config
     that has never had a Carousel, Top Shelf or shelf list configured
-    either — the seed is never itself empty.
+    either — the seed is never itself empty. ``home_modified_at`` is left
+    unset: seeding is not an edit, the same way CanopyPlus's own
+    ``HomeSettings()`` starts at ``.distantPast`` until a person actually
+    changes something.
     """
     home = await db.get(UserHomeSettings, user.id)
     if home is not None:
@@ -176,6 +186,7 @@ async def add_shelf(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_shelves = [*home.home_shelves, upnext_shelf()]
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -188,6 +199,7 @@ async def reorder_shelves(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_shelves = reordered(home.home_shelves, order)
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -204,6 +216,7 @@ async def move_shelf_up(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_shelves = moved(home.home_shelves, shelf_id, -1)
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -220,6 +233,7 @@ async def move_shelf_down(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_shelves = moved(home.home_shelves, shelf_id, 1)
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -241,6 +255,7 @@ async def remove_shelf(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one home shelf.")
 
     home.home_shelves = [shelf for shelf in home.home_shelves if shelf["id"] != shelf_id]
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -285,6 +300,7 @@ async def update_shelf(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such home shelf")
 
     home.home_shelves = updated
+    touched(home)
     return await _home_shelves_section(request, db, state, user)
 
 
@@ -320,6 +336,7 @@ async def update_carousel(
         title_only=title_only,
         collection_title=collection_title,
     )
+    touched(home)
     return await _carousel_section(request, db, state, user)
 
 
@@ -336,6 +353,7 @@ async def toggle_carousel_enabled(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_carousel_enabled = enabled == "on"
+    touched(home)
     return await _carousel_section(request, db, state, user)
 
 
@@ -351,6 +369,7 @@ async def toggle_carousel_include_on_deck(
     config = await get_config(db)
     home = await _get_or_create_home(db, user, config)
     home.home_carousel_include_on_deck = enabled == "on"
+    touched(home)
     return await _carousel_section(request, db, state, user)
 
 
@@ -386,4 +405,5 @@ async def update_top_shelf(
         title_only=title_only,
         collection_title=collection_title,
     )
+    touched(home)
     return await _top_shelf_section(request, db, state, user)

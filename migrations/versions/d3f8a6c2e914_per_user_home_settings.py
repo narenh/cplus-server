@@ -38,6 +38,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column('home_top_shelf', sa.JSON(), nullable=True),
+        sa.Column('home_modified_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('user_id'),
     )
