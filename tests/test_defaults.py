@@ -1,15 +1,17 @@
-"""``GET /defaults`` — the fresh-install seed for Libraries & Home.
+"""``GET /defaults`` and ``GET /register``'s ``first_run`` bundling.
 
-Checks the response is exactly what the admin has configured, in
-CanopyPlus's own Codable shapes (``MediaLibrary`` fields for
-``default_libraries``; ``id``/``title``/``description``/``path``/
-``discoverHubKey``/``style``/``titleOnly`` for every shelf-shaped entry) —
-and that a caller with no valid Plex token cannot reach any of it.
+Checks the payload is exactly what the admin has configured, in
+CanopyPlus's own Codable shapes plus ``modifiedAt`` (``MediaLibrary`` fields
+for ``default_libraries``; ``id``/``title``/``description``/``path``/
+``discoverHubKey``/``style``/``titleOnly``/``modifiedAt`` for every
+shelf-shaped entry) — and that a caller with no valid Plex token cannot
+reach any of it.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 import httpx
 import respx
@@ -19,8 +21,19 @@ from cplus_service.db.session import get_config
 
 from .conftest import SEERR_URL, seerr_user_payload
 
-SHELF_KEYS = {"id", "title", "description", "path", "discoverHubKey", "style", "titleOnly"}
+SHELF_KEYS = {
+    "id",
+    "title",
+    "description",
+    "path",
+    "discoverHubKey",
+    "style",
+    "titleOnly",
+    "modifiedAt",
+}
 LIBRARY_KEYS = {"id", "serverTitle", "type", "hidden", "name"}
+CAROUSEL_KEYS = {"enabled", "include_on_deck", "carousel", "top_shelf"}
+ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 def mock_seerr_auth(**kwargs) -> respx.Route:  # noqa: ANN003
@@ -49,6 +62,30 @@ async def default_library(db: AsyncSession, *, library_id: str = "1") -> None:
     await db.commit()
 
 
+def assert_well_formed_payload(body: dict) -> None:
+    assert set(body) == {"default_libraries", "default_home_shelves", "default_carousel"}
+    for library in body["default_libraries"]:
+        assert set(library) == LIBRARY_KEYS
+
+    assert isinstance(body["default_home_shelves"], list)
+    assert len(body["default_home_shelves"]) >= 1
+    for shelf in body["default_home_shelves"]:
+        assert set(shelf) == SHELF_KEYS
+        assert ISO_UTC_RE.match(shelf["modifiedAt"])
+
+    carousel = body["default_carousel"]
+    assert set(carousel) == CAROUSEL_KEYS
+    assert isinstance(carousel["enabled"], bool)
+    assert isinstance(carousel["include_on_deck"], bool)
+    assert set(carousel["carousel"]) == SHELF_KEYS
+    assert set(carousel["top_shelf"]) == SHELF_KEYS
+
+
+# --------------------------------------------------------------------------- #
+# GET /defaults
+# --------------------------------------------------------------------------- #
+
+
 async def test_a_caller_with_no_plex_token_is_rejected(client: httpx.AsyncClient) -> None:
     response = await client.get("/defaults")
     assert response.status_code == 401
@@ -75,14 +112,7 @@ async def test_the_response_carries_every_field_the_admin_has_configured(
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
     body = response.json()
-    assert set(body) == {
-        "default_libraries",
-        "default_top_shelf",
-        "default_carousel_enabled",
-        "default_carousel",
-        "default_shelves",
-    }
-
+    assert_well_formed_payload(body)
     assert body["default_libraries"] == [
         {
             "id": "1",
@@ -92,16 +122,6 @@ async def test_the_response_carries_every_field_the_admin_has_configured(
             "name": "Movies",
         }
     ]
-    assert set(body["default_libraries"][0]) == LIBRARY_KEYS
-
-    assert set(body["default_top_shelf"]) == SHELF_KEYS
-    assert set(body["default_carousel"]) == SHELF_KEYS
-    assert isinstance(body["default_shelves"], list)
-    assert len(body["default_shelves"]) >= 1
-    for shelf in body["default_shelves"]:
-        assert set(shelf) == SHELF_KEYS
-
-    assert isinstance(body["default_carousel_enabled"], bool)
 
 
 @respx.mock
@@ -137,9 +157,9 @@ async def test_top_shelf_and_carousel_fall_back_when_unset(
     response = await client.get("/defaults", headers=plex_headers)
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["default_top_shelf"]["path"] == "/library/onDeck"
-    assert body["default_carousel"]["path"] == "/library/onDeck"
+    carousel = response.json()["default_carousel"]
+    assert carousel["top_shelf"]["path"] == "/library/onDeck"
+    assert carousel["carousel"]["path"] == "/library/onDeck"
 
 
 @respx.mock
@@ -155,7 +175,7 @@ async def test_default_carousel_enabled_reflects_the_switch(
     response = await client.get("/defaults", headers=plex_headers)
 
     assert response.status_code == 200
-    assert response.json()["default_carousel_enabled"] is False
+    assert response.json()["default_carousel"]["enabled"] is False
 
 
 @respx.mock
@@ -174,4 +194,64 @@ async def test_a_custom_shelf_title_is_reflected(
     response = await client.get("/defaults", headers=plex_headers)
 
     assert response.status_code == 200
-    assert response.json()["default_shelves"][0]["title"] == "My Custom Shelf"
+    assert response.json()["default_home_shelves"][0]["title"] == "My Custom Shelf"
+
+
+# --------------------------------------------------------------------------- #
+# GET /register's first_run bundling
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_register_bundles_defaults_when_first_run_is_absent(
+    client: httpx.AsyncClient, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+
+    response = await client.get("/register", headers=plex_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert_well_formed_payload({k: v for k, v in body.items() if k != "status"})
+
+
+@respx.mock
+async def test_register_bundles_defaults_when_first_run_is_false(
+    client: httpx.AsyncClient, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+
+    response = await client.get(
+        "/register", headers=plex_headers, params={"first_run": "false"}
+    )
+
+    assert response.status_code == 200
+    assert "default_libraries" in response.json()
+
+
+@respx.mock
+async def test_register_omits_defaults_when_first_run_is_true(
+    client: httpx.AsyncClient, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+
+    response = await client.get(
+        "/register", headers=plex_headers, params={"first_run": "true"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@respx.mock
+async def test_register_still_401s_on_a_bad_token_regardless_of_first_run(
+    client: httpx.AsyncClient, plex_headers: dict
+) -> None:
+    respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(return_value=httpx.Response(403))
+
+    response = await client.get(
+        "/register", headers=plex_headers, params={"first_run": "true"}
+    )
+
+    assert response.status_code == 401

@@ -14,17 +14,27 @@ is where the caller finds out what it can actually do.
 
 There is no session token: either this returns 200 or it 401s, and the
 client's only recovery is to call it again.
+
+**``first_run``** folds ``GET /defaults``'s own payload into this response,
+so an actual first run needs no second round trip: it is included whenever
+``first_run`` is anything other than exactly ``true`` — absent (today's
+client, which has never heard of this parameter) or ``false`` both mean
+"seed me". Pass ``first_run=true`` once local state already exists to skip
+the extra payload on every ordinary launch after that.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 
 from ...auth.identity import authenticate_plex_token
 from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import DbDep, PlexTokenDep, SeerrDep
+from .defaults import defaults_payload
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +46,16 @@ async def register(
     db: DbDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
-) -> dict[str, str]:
+    first_run: bool | None = Query(default=None),
+) -> Response:
     """Validate the caller's Plex token and prime the cache-only endpoints.
 
-    Nothing in the response body is meaningful to the client beyond the status
-    code: 200 means the token is good and the cache mapping is refreshed, 401
-    means Seerr rejected it, 502 means Seerr could not be reached.
+    Beyond the status code, nothing in the response body was ever
+    meaningful to the client — 200 means the token is good and the cache
+    mapping is refreshed, 401 means Seerr rejected it, 502 means Seerr could
+    not be reached — and that is still true for ``status`` here. Everything
+    else in the body is the ``first_run`` bundle described above, additive
+    and safe for a client that has never heard of it to ignore.
     """
     try:
         await authenticate_plex_token(db, seerr, plex_token)
@@ -56,4 +70,7 @@ async def register(
             status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
         ) from exc
 
-    return {"status": "ok"}
+    body: dict[str, object] = {"status": "ok"}
+    if first_run is not True:
+        body.update(await defaults_payload(db))
+    return Response(content=json.dumps(body, indent=2), media_type="application/json")

@@ -52,7 +52,7 @@ from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 
 from ....auth.identity import refresh_plex_server
-from ....bootstrap import upnext_shelf
+from ....bootstrap import now_iso, upnext_shelf
 from ....db.models import Config
 from ....db.session import get_config
 from ....plex.client import PlexServerClient, PlexServerError
@@ -272,6 +272,10 @@ async def _apply_shelf_update(
     tapping an entry in CanopyPlus's own content menu: it resets title,
     style and titleOnly to that source's defaults, discarding whatever was
     typed here, the same behaviour the app itself has.
+
+    Every path through here is a real edit, so every path stamps a fresh
+    ``modifiedAt`` on the way out — unlike reordering or removing a shelf,
+    which touch the list, not any one shelf's own content.
     """
     libraries_by_id = {library["id"]: library for library in config.default_libraries}
 
@@ -279,7 +283,7 @@ async def _apply_shelf_update(
         defaults = resolve_collection_source(source, collection_title, libraries_by_id)
         if defaults is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
-        return {**current, **defaults}
+        return {**current, **defaults, "modifiedAt": now_iso()}
 
     parsed = collection_shelf_library_id(current, libraries_by_id)
     current_source = f"{COLLECTIONS_PREFIX}{parsed[0]}" if parsed else source_of(current)
@@ -290,6 +294,7 @@ async def _apply_shelf_update(
             "title": title.strip() or current["title"],
             "style": style if style in ("poster", "card") else current["style"],
             "titleOnly": title_only == "on",
+            "modifiedAt": now_iso(),
         }
 
     if source.startswith(COLLECTIONS_PREFIX):
@@ -297,12 +302,12 @@ async def _apply_shelf_update(
         defaults = await _first_collection_defaults(config, state, library_id)
         if defaults is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "That library has no collections.")
-        return {**current, **defaults}
+        return {**current, **defaults, "modifiedAt": now_iso()}
 
     defaults = resolve_source(source, libraries_by_id)
     if defaults is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
-    return {**current, **defaults}
+    return {**current, **defaults, "modifiedAt": now_iso()}
 
 
 async def _collection_picker_context(

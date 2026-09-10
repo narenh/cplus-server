@@ -152,7 +152,9 @@ async def test_a_fresh_install_gets_a_continue_watching_shelf(
     assert shelf["style"] == "card"
     assert shelf["titleOnly"] is False
     assert shelf["discoverHubKey"] is None
-    # Same shape CanopyPlus's own HomeShelfDataModel encodes to.
+    # Same shape CanopyPlus's own HomeShelfDataModel encodes to, plus
+    # modifiedAt — stamped on every shelf-shaped dict for a future sync
+    # layer, with no counterpart on the client side yet.
     assert set(shelf) == {
         "id",
         "title",
@@ -161,6 +163,7 @@ async def test_a_fresh_install_gets_a_continue_watching_shelf(
         "discoverHubKey",
         "style",
         "titleOnly",
+        "modifiedAt",
     }
 
 
