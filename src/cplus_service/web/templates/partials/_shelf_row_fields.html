@@ -1,0 +1,92 @@
+{# One shelf-shaped row's fields — a Home shelf, the Carousel, or Top Shelf
+   all render through this. Two forms, not one, because Content/Style/"Hide
+   release year" (and the live collections sub-picker "Collection Items…"
+   reveals) apply the moment they change (static/shelf-source.js
+   requestSubmit()s on change, same as a switch elsewhere in this admin UI),
+   while Title is Save-gated — typing is not something you want to fire a
+   request on every keystroke of. Both forms post to the same endpoint and
+   carry every field either way (as hidden inputs for whichever half isn't
+   its own concern), so the server sees one consistent shape regardless of
+   which form actually submitted.
+
+   Expects: id (a dom-id-safe string, unique on the page), post_url,
+   swap_target, current (a shelf-shaped dict: title/style/titleOnly),
+   current_source, placeholder_text, source_groups, picker (a
+   collections-picker context dict, or none), show_remove, remove_url,
+   disable_remove. #}
+<form method="post" action="{{ post_url }}" id="shelf-{{ id }}" class="shelf-form-anchor"
+      hx-post="{{ post_url }}" hx-target="{{ swap_target }}" hx-swap="outerHTML"></form>
+<form method="post" action="{{ post_url }}" id="shelf-{{ id }}-title" class="shelf-form-anchor"
+      hx-post="{{ post_url }}" hx-target="{{ swap_target }}" hx-swap="outerHTML"></form>
+
+<div class="shelf-row-1">
+  {# hidden, not disabled: a disabled option is excluded from the browser's
+     own form submission entirely, which would silently drop "source" from
+     every Style/"Hide release year"-only edit that leaves Content
+     untouched — since this select is also part of that same form. #}
+  <select name="source" form="shelf-{{ id }}" aria-label="Content" data-auto-apply>
+    <option value="{{ current_source }}" hidden selected>{{ placeholder_text }}</option>
+    {% for group_label, opts in source_groups %}
+      {% if group_label %}<optgroup label="{{ group_label }}">{% endif %}
+      {% for opt in opts %}
+        <option value="{{ opt.value }}">{{ opt.label }}</option>
+      {% endfor %}
+      {% if group_label %}</optgroup>{% endif %}
+    {% endfor %}
+  </select>
+
+  {# source/style/titleOnly are fixed to what's already saved — this form's
+     only concern is the title, so it must never carry any of the other
+     three's un-submitted, possibly-stale state. #}
+  <input type="hidden" name="source" form="shelf-{{ id }}-title" value="{{ current_source }}">
+  <input type="hidden" name="style" form="shelf-{{ id }}-title" value="{{ current.style }}">
+  {% if current.titleOnly %}
+    <input type="hidden" name="title_only" value="on" form="shelf-{{ id }}-title">
+  {% endif %}
+  <input type="text" name="title" form="shelf-{{ id }}-title" value="{{ current.title }}"
+         id="shelf-title-{{ id }}" data-original="{{ current.title }}" aria-label="Title">
+  {# Hidden until the title actually differs from data-original — see static/dirty-save.js. #}
+  <button form="shelf-{{ id }}-title" type="submit" class="link hidden"
+          data-save-for="shelf-{{ id }}-title">Save</button>
+</div>
+
+{% if picker %}
+  <div class="shelf-row-collections">
+    {% with library_id = picker.library_id, collections = picker.collections,
+            error = picker.error, selected_collection_id = picker.selected_collection_id,
+            apply_url = post_url, swap_target = swap_target %}
+      {% include "partials/collections_picker.html" %}
+    {% endwith %}
+  </div>
+{% endif %}
+
+<div class="shelf-row-2">
+  {# The title field lives in its own form (above), so it is fixed here
+     rather than resubmitted — changing style or the checkbox must never
+     silently commit an unsaved, still-being-typed title. #}
+  <input type="hidden" name="title" form="shelf-{{ id }}" value="{{ current.title }}">
+  <select name="style" form="shelf-{{ id }}" aria-label="Style" data-auto-apply>
+    <option value="poster" {% if current.style == "poster" %}selected{% endif %}>Poster</option>
+    <option value="card" {% if current.style == "card" %}selected{% endif %}>Card</option>
+  </select>
+  <label class="check">
+    <input type="checkbox" name="title_only" form="shelf-{{ id }}" data-auto-apply
+           {% if current.titleOnly %}checked{% endif %}>
+    Hide release year
+  </label>
+
+  {% if show_remove %}
+    <form method="post" action="{{ remove_url }}" class="remove-form"
+          hx-post="{{ remove_url }}" hx-target="{{ swap_target }}" hx-swap="outerHTML">
+      <button type="submit" class="icon danger" title="Remove shelf" aria-label="Remove shelf"
+              {% if disable_remove %}disabled{% endif %}>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h18"/>
+          <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        </svg>
+      </button>
+    </form>
+  {% endif %}
+</div>

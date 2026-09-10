@@ -1,106 +1,27 @@
-{# The Shelves list alone (not the Carousel above it, which lives in
-   libraries.html and does not need to change alongside this).
+{# The Shelves list alone (not the Carousel or Top Shelf above it, which
+   live in their own partials and do not need to change alongside this).
 
    Rendered by GET /admin/libraries and returned whole by every write here
    (add, remove, reorder, edit) via #home-shelves, the same way
-   partials/library_section.html covers Default Libraries.
-
-   Each shelf is two forms, not one, because Content/Style/"Hide release
-   year" and Title behave differently: the first three apply the moment they
-   change (static/shelf-source.js requestSubmit()s on change, same as a
-   switch elsewhere in this admin UI), while Title is Save-gated — typing is
-   not something you want to fire a request on every keystroke of. Both
-   forms post to the same endpoint and carry every field either way (as
-   hidden inputs for whichever half isn't its own concern), so the server
-   sees one consistent shape regardless of which form actually submitted. #}
+   partials/library_section.html covers Default Libraries. Each row's own
+   fields are partials/_shelf_row_fields.html — see there for how a row
+   applies its edits. #}
 <div id="home-shelves">
   <h2>Shelves</h2>
   <div class="reorder-list" data-reorder-list
        data-reorder-url="/admin/libraries/home/shelves/reorder"
        data-reorder-target="#home-shelves">
-    {% for shelf in home_shelves %}
-      {% set current_source = source_of(shelf) %}
-      <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ shelf.id }}">
+    {% for row in shelf_rows %}
+      <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ row.row_id }}">
         <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
-
         <div class="shelf-fields">
-          {# Both forms carry every field of this shelf (as hidden inputs for
-             whichever half isn't their own concern) but no visible content of
-             their own — class="shelf-form-anchor" keeps them from taking up
-             any layout space, gaps included, in the flex column below. #}
-          <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}"
-                id="shelf-{{ shelf.id }}" class="shelf-form-anchor"
-                hx-post="/admin/libraries/home/shelves/{{ shelf.id }}"
-                hx-target="#home-shelves" hx-swap="outerHTML"></form>
-          <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}"
-                id="shelf-{{ shelf.id }}-title" class="shelf-form-anchor"
-                hx-post="/admin/libraries/home/shelves/{{ shelf.id }}"
-                hx-target="#home-shelves" hx-swap="outerHTML"></form>
-
-          <div class="shelf-row-1">
-            {# The placeholder's own value is the shelf's actual current
-               source (not ""), not just its display text — style/title_only
-               changing must submit the real unchanged source alongside them,
-               or the server would read it as a source change and reset
-               everything. disabled keeps it out of reach once you've picked
-               something real; the browser still displays it until you do. #}
-            <select name="source" form="shelf-{{ shelf.id }}" aria-label="Shelf content"
-                    data-shelf-source data-shelf-id="{{ shelf.id }}">
-              <option value="{{ current_source }}" disabled selected>{{ shelf.description }}</option>
-              {% for group_label, opts in shelf_source_groups %}
-                {% if group_label %}<optgroup label="{{ group_label }}">{% endif %}
-                {% for opt in opts %}
-                  <option value="{{ opt.value }}">{{ opt.label }}</option>
-                {% endfor %}
-                {% if group_label %}</optgroup>{% endif %}
-              {% endfor %}
-            </select>
-            <span id="collections-picker-{{ shelf.id }}"></span>
-
-            {# source/style/titleOnly are fixed to what's already saved — this
-               form's only concern is the title, so it must never carry any
-               of the other three's un-submitted, possibly-stale state. #}
-            <input type="hidden" name="source" form="shelf-{{ shelf.id }}-title" value="{{ current_source }}">
-            <input type="hidden" name="style" form="shelf-{{ shelf.id }}-title" value="{{ shelf.style }}">
-            {% if shelf.titleOnly %}
-              <input type="hidden" name="title_only" value="on" form="shelf-{{ shelf.id }}-title">
-            {% endif %}
-            <input type="text" name="title" form="shelf-{{ shelf.id }}-title" value="{{ shelf.title }}"
-                   id="shelf-title-{{ shelf.id }}" data-original="{{ shelf.title }}" aria-label="Shelf title">
-            {# Hidden until the title actually differs from data-original — see static/dirty-save.js. #}
-            <button form="shelf-{{ shelf.id }}-title" type="submit" class="link hidden"
-                    data-save-for="shelf-{{ shelf.id }}-title">Save</button>
-          </div>
-
-          <div class="shelf-row-2">
-            {# The title field lives in its own form (above), so it is fixed
-               here rather than resubmitted — changing style or the checkbox
-               must never silently commit an unsaved, still-being-typed title. #}
-            <input type="hidden" name="title" form="shelf-{{ shelf.id }}" value="{{ shelf.title }}">
-            <select name="style" form="shelf-{{ shelf.id }}" aria-label="Shelf style" data-auto-apply>
-              <option value="poster" {% if shelf.style == "poster" %}selected{% endif %}>Poster</option>
-              <option value="card" {% if shelf.style == "card" %}selected{% endif %}>Card</option>
-            </select>
-            <label class="check">
-              <input type="checkbox" name="title_only" form="shelf-{{ shelf.id }}" data-auto-apply
-                     {% if shelf.titleOnly %}checked{% endif %}>
-              Hide release year
-            </label>
-
-            <form method="post" action="/admin/libraries/home/shelves/{{ shelf.id }}/remove" class="remove-form"
-                  hx-post="/admin/libraries/home/shelves/{{ shelf.id }}/remove"
-                  hx-target="#home-shelves" hx-swap="outerHTML">
-              <button type="submit" class="icon danger" title="Remove shelf" aria-label="Remove shelf"
-                      {% if home_shelves|length < 2 %}disabled{% endif %}>
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M3 6h18"/>
-                  <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/>
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                </svg>
-              </button>
-            </form>
-          </div>
+          {% with id = row.row_id, post_url = row.post_url, swap_target = row.swap_target,
+                  current = row.current, current_source = row.current_source,
+                  placeholder_text = row.placeholder_text, source_groups = row.source_groups,
+                  picker = row.picker, show_remove = row.show_remove,
+                  remove_url = row.remove_url, disable_remove = row.disable_remove %}
+            {% include "partials/_shelf_row_fields.html" %}
+          {% endwith %}
         </div>
       </div>
     {% endfor %}

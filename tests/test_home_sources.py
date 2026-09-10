@@ -12,6 +12,7 @@ from cplus_service.api.routes.admin.home_sources import (
     DISCOVER_TRENDING,
     DISCOVER_WATCHLIST,
     ON_DECK,
+    collection_shelf_library_id,
     grouped_options,
     resolve_collection_source,
     resolve_source,
@@ -208,3 +209,28 @@ def test_a_collection_shelf_has_no_recognisable_source() -> None:
     fields = resolve_collection_source("col:1:99", "Best of 2026", LIBRARIES_BY_ID)
     assert fields is not None
     assert source_of(fields) == ""
+
+
+# --------------------------------------------------------------------------- #
+# collection_shelf_library_id
+# --------------------------------------------------------------------------- #
+
+
+def test_collection_shelf_library_id_recovers_the_library_and_collection() -> None:
+    shelf = resolve_collection_source("col:1:99", "Best of 2026", LIBRARIES_BY_ID)
+    assert shelf is not None
+    assert collection_shelf_library_id(shelf, LIBRARIES_BY_ID) == ("1", "99")
+
+
+def test_collection_shelf_library_id_is_none_for_an_ordinary_shelf() -> None:
+    shelf = resolve_source("lib:1:newest", LIBRARIES_BY_ID)
+    assert shelf is not None
+    assert collection_shelf_library_id(shelf, LIBRARIES_BY_ID) is None
+
+
+def test_collection_shelf_library_id_is_none_when_no_library_matches() -> None:
+    # The description's library-name prefix is all there is to go on — a
+    # library since renamed or removed leaves this unrecoverable, same as
+    # source_of already being unable to reconstruct a plain source for one.
+    shelf = resolve_collection_source("col:1:99", "Best of 2026", {})
+    assert collection_shelf_library_id(shelf, LIBRARIES_BY_ID) is None

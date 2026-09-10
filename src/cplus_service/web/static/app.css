@@ -418,9 +418,26 @@ table.preview .dropped-by { color: var(--err); }
 /* .remove-form is display:contents (see above), so the button — its only
    child — is what actually needs pushing to the row's end. */
 .shelf-row-2 form.remove-form button { margin-left: auto; }
+/* The second picker "Collection Items…" reveals, between Content+Title and
+   Style+"Hide release year" — its own line since it isn't always there,
+   rather than crowding either fixed row. */
+.shelf-row-collections select { width: auto; min-width: 220px; max-width: 100%; }
 @media (max-width: 640px) {
   .shelf-row-1, .shelf-row-2 { flex-wrap: wrap; }
+  .shelf-row-collections select { width: 100%; }
 }
+
+/* The Carousel and Top Shelf render one row's fields directly — no drag
+   handle, no list — so .shelf-box gives them the same boxed look a shelf
+   row gets from .reorder-row, without actually being one. */
+.shelf-box {
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  margin: 10px 0;
+}
+/* The Carousel's own row when its enabled switch is off: still fully
+   visible and editable (turning it off doesn't erase what's configured),
+   just visually backgrounded so the page reads "off" at a glance. */
+.dimmed { opacity: .5; }
 
 /* Same shape as .notify-master, but the switch itself sits in its own span
    (.carousel-switch) with nothing else inside it — that span is what each

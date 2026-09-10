@@ -192,6 +192,15 @@ class Config(Base):
         Boolean, default=False, server_default="0"
     )
 
+    #: The tvOS Top Shelf widget's own shelf — the one hero item Apple's OS
+    #: itself always shows above the app icon, same shape as one entry of
+    #: ``home_shelves``. Unlike the carousel there is no enabled flag: tvOS
+    #: requires the widget to show *something*, and CanopyPlus's own Top
+    #: Shelf extension (``TopShelfManager``) already falls back to Continue
+    #: Watching on its own when this has never been set — so there is
+    #: nothing here to turn off, only something an admin may choose instead.
+    home_top_shelf: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
 
 class User(Base):
     """A Seerr user permitted to use this service.

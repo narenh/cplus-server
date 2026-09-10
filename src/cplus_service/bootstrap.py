@@ -156,3 +156,35 @@ async def ensure_default_home_shelf(session: AsyncSession, config: Config) -> bo
     config.home_shelves = [upnext_shelf()]
     logger.info("seeded the default \"Continue Watching\" home shelf")
     return True
+
+
+async def ensure_default_carousel(session: AsyncSession, config: Config) -> bool:
+    """Seed the hero carousel with a "Continue Watching" default when unset.
+
+    The carousel is a shelf-shaped piece of Home config like any other, so a
+    fresh install's Home tab is never missing "the one" it's meant to always
+    have — it just starts off shown or not per ``home_carousel_enabled``'s
+    own default, exactly as :func:`ensure_default_home_shelf` does for the
+    shelf list.
+    """
+    if config.home_carousel is not None:
+        return False
+
+    config.home_carousel = upnext_shelf()
+    logger.info('seeded the default "Continue Watching" carousel')
+    return True
+
+
+async def ensure_default_top_shelf(session: AsyncSession, config: Config) -> bool:
+    """Seed the tvOS Top Shelf entry with a "Continue Watching" default when unset.
+
+    Same reasoning as :func:`ensure_default_carousel` — Top Shelf has no
+    enabled flag to begin disabled behind, so this is the only seeding it
+    needs.
+    """
+    if config.home_top_shelf is not None:
+        return False
+
+    config.home_top_shelf = upnext_shelf()
+    logger.info('seeded the default "Continue Watching" Top Shelf entry')
+    return True

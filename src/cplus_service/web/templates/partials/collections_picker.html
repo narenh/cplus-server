@@ -1,14 +1,24 @@
-{# The second-level picker "Collection Items…" reveals: one library's own
-   collections, fetched live. Picking one applies immediately — see
-   static/shelf-source.js, which reads the option's own text as the title,
-   since Plex collection ids are not scoped to a library and the server has
-   no other way to learn it without a second live lookup. #}
-<select data-collection-source data-apply-url="/admin/libraries/home/shelves/{{ shelf_id }}"
+{# One library's own collections, live, for "Collection Items…". Included
+   inline by partials/_shelf_row_fields.html whenever a row is currently in
+   collection-items mode — see libraries._collection_picker_context — so a
+   saved choice shows its own picker, already scoped to the right library
+   and collection, on every render with no separate fetch. Selecting a
+   different collection here applies immediately (static/shelf-source.js),
+   and if the library has none, the admin sees that instead of an empty
+   control.
+
+   Expects: library_id, collections, error, selected_collection_id,
+   apply_url, swap_target. #}
+<select data-collection-source data-apply-url="{{ apply_url }}" data-swap-target="{{ swap_target }}"
         aria-label="Collection">
-  <option value="" disabled selected>
-    {% if error %}{{ error }}{% elif not collections %}No collections in this library{% else %}Choose a collection…{% endif %}
-  </option>
-  {% for collection in collections %}
-    <option value="col:{{ library_id }}:{{ collection.id }}">{{ collection.title }}</option>
-  {% endfor %}
+  {% if not collections %}
+    <option value="" disabled selected>{{ error or "No collections in this library" }}</option>
+  {% else %}
+    {% for collection in collections %}
+      <option value="col:{{ library_id }}:{{ collection.id }}"
+              {% if collection.id == selected_collection_id %}selected{% endif %}>
+        {{ collection.title }}
+      </option>
+    {% endfor %}
+  {% endif %}
 </select>

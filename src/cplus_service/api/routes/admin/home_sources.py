@@ -16,6 +16,7 @@ every save. See ``libraries.update_shelf``.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from itertools import groupby
 from typing import Any
@@ -48,7 +49,16 @@ class SourceOption:
     group: str | None = None
 
 
-def _library_label(library: dict[str, Any]) -> str:
+def library_label(library: dict[str, Any]) -> str:
+    """The name a library-scoped option's ``<optgroup>`` groups under.
+
+    Also what a "Collection Items…" row shows once closed — see
+    :func:`collection_shelf_library_id` — since that's the only thing that
+    would otherwise be missing: it names the library, same as every other
+    option's group already does, rather than restating the specific
+    collection the way :func:`resolve_collection_source`'s own description
+    does for every other purpose.
+    """
     return str(library.get("name") or library.get("serverTitle") or library.get("id", ""))
 
 
@@ -62,7 +72,7 @@ def source_options(
     """
     options = [SourceOption(value=ON_DECK, label="Continue Watching")]
     for library in libraries:
-        group = _library_label(library)
+        group = library_label(library)
         library_id = library["id"]
         options.extend(
             [
@@ -215,6 +225,35 @@ def resolve_collection_source(
         "style": "poster",
         "titleOnly": False,
     }
+
+
+_COLLECTION_CHILDREN_RE = re.compile(r"^/library/collections/(\d+)/children$")
+
+
+def collection_shelf_library_id(
+    shelf: dict[str, Any], libraries_by_id: dict[str, dict[str, Any]]
+) -> tuple[str, str] | None:
+    """``(library_id, collection_id)`` if ``shelf`` is currently a "Collection
+    Items…" shelf, else ``None``.
+
+    Plex collection ids are not scoped to a library, and nothing in the
+    shelf's own stored shape (see :func:`resolve_collection_source`) records
+    which library's picker it came from — so this recovers it the only way
+    available: matching the description's own leading ``"{serverTitle}: "``
+    against a currently configured library. A library later renamed or
+    removed just means this can no longer place it, same as
+    :func:`source_of` already being unable to reconstruct a plain source for
+    an unknown library.
+    """
+    match = _COLLECTION_CHILDREN_RE.match(shelf.get("path") or "")
+    if not match:
+        return None
+    description = shelf.get("description") or ""
+    for library in libraries_by_id.values():
+        server_title = str(library.get("serverTitle") or "")
+        if server_title and description.startswith(f"{server_title}: Items in "):
+            return str(library["id"]), match.group(1)
+    return None
 
 
 def source_of(shelf: dict[str, Any]) -> str:

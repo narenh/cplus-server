@@ -475,7 +475,47 @@ async def test_an_unresolvable_source_is_rejected(
 # --------------------------------------------------------------------------- #
 
 
-async def test_the_collections_picker_lists_a_librarys_collections(
+def collections_route(library_id: str = "1", *collections: dict) -> None:
+    """Mock ``GET /library/sections/{library_id}/collections`` for the lifetime
+    of an already-open ``respx.mock`` block."""
+    respx.get(f"{PLEX_SERVER_URL}/library/sections/{library_id}/collections").mock(
+        return_value=httpx.Response(
+            200, json={"MediaContainer": {"Metadata": list(collections)}}
+        )
+    )
+
+
+async def test_choosing_collection_items_auto_applies_the_librarys_first_collection(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    # Picking "Collection Items…" itself is a placeholder, not a real source
+    # (see COLLECTIONS_PREFIX) — there is never a moment where it shows a
+    # picker but nothing has actually been saved: the server resolves it
+    # straight to the library's own first collection.
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)", name="Movies")
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    with respx.mock:
+        collections_route(
+            "1",
+            {"ratingKey": "99", "title": "Best of 2026"},
+            {"ratingKey": "100", "title": "Worst of 2026"},
+        )
+        response = await client.post(
+            f"/admin/libraries/home/shelves/{shelf_id}", data={"source": "collections:1"}
+        )
+
+    assert response.status_code == 200
+    # The row now shows a live picker with that same collection selected.
+    assert '<option value="col:1:99"\n              selected>' in response.text
+    shelf = (await current_config(db)).home_shelves[0]
+    assert shelf["path"] == "/library/collections/99/children"
+    assert shelf["title"] == "Best of 2026"
+    assert shelf["description"] == "Movies (4K HDR): Items in Best of 2026"
+
+
+async def test_a_library_with_no_collections_cannot_be_switched_to_collection_items(
     client: httpx.AsyncClient, db: AsyncSession, connected: Config
 ) -> None:
     await default_library(db, library_id="1", server_title="Movies (4K HDR)")
@@ -483,38 +523,91 @@ async def test_the_collections_picker_lists_a_librarys_collections(
     shelf_id = (await current_config(db)).home_shelves[0]["id"]
 
     with respx.mock:
-        respx.get(f"{PLEX_SERVER_URL}/library/sections/1/collections").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "MediaContainer": {
-                        "Metadata": [{"ratingKey": "99", "title": "Best of 2026"}]
-                    }
-                },
-            )
-        )
-        response = await client.get(
-            f"/admin/libraries/home/shelves/{shelf_id}/collections",
-            params={"library_id": "1"},
+        collections_route("1")
+        response = await client.post(
+            f"/admin/libraries/home/shelves/{shelf_id}", data={"source": "collections:1"}
         )
 
-    assert response.status_code == 200
-    assert '<option value="col:1:99">Best of 2026</option>' in response.text
+    assert response.status_code == 400
 
 
-async def test_the_collections_picker_reports_when_not_connected(
+async def test_switching_to_collection_items_without_a_plex_connection_is_rejected(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)")
     await signed_in(client, db)
     shelf_id = (await current_config(db)).home_shelves[0]["id"]
 
-    response = await client.get(
-        f"/admin/libraries/home/shelves/{shelf_id}/collections",
-        params={"library_id": "1"},
+    response = await client.post(
+        f"/admin/libraries/home/shelves/{shelf_id}", data={"source": "collections:1"}
     )
 
+    assert response.status_code == 400
+
+
+async def test_a_collection_shelf_shows_a_live_picker_on_every_render(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    # A saved collection shelf's picker is rebuilt from its own stored
+    # fields on every render, not just right after it was chosen — so a
+    # plain page load shows it too, already scoped to the right library and
+    # collection, and its closed Content dropdown reads just the library's
+    # own name rather than the full "library: collection" description every
+    # other source shows there.
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)", name="Movies")
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    with respx.mock:
+        collections_route("1", {"ratingKey": "99", "title": "Best of 2026"})
+        respx.get(f"{PLEX_SERVER_URL}/library/sections").mock(
+            return_value=httpx.Response(200, json=sections_payload(movies_section()))
+        )
+        await client.post(
+            f"/admin/libraries/home/shelves/{shelf_id}",
+            data={"source": "col:1:99", "collection_title": "Best of 2026"},
+        )
+
+        response = await client.get("/admin/libraries")
+
     assert response.status_code == 200
-    assert "Not connected" in response.text
+    assert '<option value="col:1:99"\n              selected>' in response.text
+    assert '<option value="collections:1" hidden selected>Movies</option>' in response.text
+
+
+async def test_editing_a_collection_shelfs_style_does_not_reset_its_collection(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config
+) -> None:
+    # A Style/"Hide release year" edit resubmits the row's whole form,
+    # collections picker included — without recognising that as "no source
+    # change", it would look identical to a fresh switch and silently pick
+    # the library's first collection again, discarding whichever one was
+    # actually chosen.
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)", name="Movies")
+    await signed_in(client, db)
+    shelf_id = (await current_config(db)).home_shelves[0]["id"]
+
+    with respx.mock:
+        collections_route(
+            "1",
+            {"ratingKey": "99", "title": "Best of 2026"},
+            {"ratingKey": "100", "title": "Worst of 2026"},
+        )
+        await client.post(
+            f"/admin/libraries/home/shelves/{shelf_id}",
+            data={"source": "col:1:100", "collection_title": "Worst of 2026"},
+        )
+
+        response = await client.post(
+            f"/admin/libraries/home/shelves/{shelf_id}",
+            data={"source": "collections:1", "style": "card"},
+        )
+
+    assert response.status_code == 200
+    shelf = (await current_config(db)).home_shelves[0]
+    assert shelf["path"] == "/library/collections/100/children"
+    assert shelf["title"] == "Worst of 2026"
+    assert shelf["style"] == "card"
 
 
 async def test_choosing_a_collection_applies_it(
@@ -586,30 +679,144 @@ async def test_disabling_the_carousel_switch(
     assert (await current_config(db)).home_carousel_enabled is False
 
 
+async def test_a_fresh_config_starts_with_a_continue_watching_carousel(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Seeded by ensure_default_carousel at app startup — the Carousel is a
+    # shelf-shaped piece of Home config like any other, so it's never left
+    # unconfigured for a fresh install to stumble on as an empty picker.
+    config = await get_config(db)
+    assert config.home_carousel is not None
+    assert config.home_carousel["path"] == "/library/onDeck"
+
+
 async def test_setting_the_carousel_source(client: httpx.AsyncClient, db: AsyncSession) -> None:
     await default_library(db, library_id="1", server_title="Movies")
     await signed_in(client, db)
 
+    # No redirect: the response is the updated Carousel section, swapped in
+    # place, same as every other write on this page.
+    response = await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
+
+    assert response.status_code == 200
+    assert 'id="carousel-section"' in response.text
+    carousel = (await current_config(db)).home_carousel
+    assert carousel["path"] == "/library/sections/1/all"
+
+
+async def test_disabling_the_carousel_switch_keeps_its_configured_content(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # There is no longer an "off" source — the enabled switch is the only
+    # on/off control, and it never clears what's actually configured, only
+    # dims it (see partials/carousel.html) so an admin can tell the
+    # difference between "off" and "never set up".
+    await default_library(db, library_id="1", server_title="Movies")
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
+
     response = await client.post(
-        "/admin/libraries/home/carousel", data={"source": "ondeck"}, follow_redirects=False
+        "/admin/libraries/home/carousel-enabled", data={}
     )
 
-    assert response.status_code == 303
-    carousel = (await current_config(db)).home_carousel
-    assert carousel is not None
-    assert carousel["path"] == "/library/onDeck"
+    assert response.status_code == 200
+    config = await current_config(db)
+    assert config.home_carousel_enabled is False
+    assert config.home_carousel["path"] == "/library/sections/1/all"
 
 
-async def test_turning_the_carousel_off_clears_it(
+async def test_editing_the_carousel_without_changing_its_source(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
     await signed_in(client, db)
-    await client.post("/admin/libraries/home/carousel", data={"source": "ondeck"})
-    assert (await current_config(db)).home_carousel is not None
 
-    await client.post("/admin/libraries/home/carousel", data={"source": "off"})
+    response = await client.post(
+        "/admin/libraries/home/carousel",
+        data={"source": "ondeck", "title": "My Carousel", "style": "poster"},
+    )
 
-    assert (await current_config(db)).home_carousel is None
+    assert response.status_code == 200
+    carousel = (await current_config(db)).home_carousel
+    assert carousel["title"] == "My Carousel"
+    assert carousel["path"] == "/library/onDeck"
+
+
+# --------------------------------------------------------------------------- #
+# Top Shelf
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_fresh_config_starts_with_a_continue_watching_top_shelf(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Seeded by ensure_default_top_shelf at app startup, same as the shelf
+    # list and the Carousel — there is no enabled switch to leave it behind,
+    # so it always has to be *something*.
+    config = await get_config(db)
+    assert config.home_top_shelf is not None
+    assert config.home_top_shelf["path"] == "/library/onDeck"
+
+
+async def test_setting_the_top_shelf_source(client: httpx.AsyncClient, db: AsyncSession) -> None:
+    await default_library(db, library_id="1", server_title="Movies")
+    await signed_in(client, db)
+
+    response = await client.post(
+        "/admin/libraries/home/top-shelf", data={"source": "lib:1:newest"}
+    )
+
+    assert response.status_code == 200
+    assert 'id="top-shelf-section"' in response.text
+    top_shelf = (await current_config(db)).home_top_shelf
+    assert top_shelf["path"] == "/library/sections/1/newest"
+
+
+async def test_editing_the_top_shelf_without_changing_its_source(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.post(
+        "/admin/libraries/home/top-shelf",
+        data={"source": "ondeck", "title": "My Top Shelf", "style": "poster"},
+    )
+
+    assert response.status_code == 200
+    top_shelf = (await current_config(db)).home_top_shelf
+    assert top_shelf["title"] == "My Top Shelf"
+    assert top_shelf["path"] == "/library/onDeck"
+
+
+async def test_there_is_no_enabled_switch_for_the_top_shelf(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    assert "top-shelf-enabled" not in response.text
+
+
+async def test_the_carousel_and_top_shelf_keep_their_own_content_on_the_same_page(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Carousel and Top Shelf are both one "shelf row" and share every field
+    # name in their own context dicts — a page render that flattened both
+    # into the same namespace would have the second one silently clobber
+    # the first's post_url/current/etc.
+    await default_library(db, library_id="1", server_title="Movies")
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
+    await client.post("/admin/libraries/home/top-shelf", data={"source": "lib:1:newest"})
+
+    response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    assert 'action="/admin/libraries/home/carousel"' in response.text
+    assert 'action="/admin/libraries/home/top-shelf"' in response.text
+    # Each row's own form still points at its own endpoint, not the other's.
+    assert response.text.count('action="/admin/libraries/home/carousel"') == 2
+    assert response.text.count('action="/admin/libraries/home/top-shelf"') == 2
 
 
 async def test_toggling_include_on_deck(client: httpx.AsyncClient, db: AsyncSession) -> None:

@@ -12,37 +12,41 @@ nothing to translate:
   rather than through Seerr — see :mod:`cplus_service.plex.client` for why,
   and ``Config.plex_admin_token`` for where the credential comes from.
 
-* **Home** — the shelves (and the one hero carousel) a fresh install shows on
-  its Home tab, built from the same "content source" menu CanopyPlus itself
-  offers when editing a shelf. See :mod:`.home_sources`.
+* **Home** — the Carousel, the Top Shelf, and the shelves a fresh install
+  shows on its Home tab, all built from the same "content source" menu
+  CanopyPlus itself offers when editing a shelf. See :mod:`.home_sources`.
 
-**Both Default Libraries and Home shelves write in place, with no page
-reload.** Every add, rename, remove and reorder posts via htmx and gets back
-the whole card or list (``partials/library_section.html``,
-``partials/home_shelves.html``), swapped in by id — the same pattern
-``partials/notification_panel.html`` uses, and for the same reason: a list and
-whatever depends on its current contents (the "add" dropdown's available set,
-for libraries) are two views of one piece of state, so they are re-rendered
-together or not at all. Dragging is live (``static/reorder.js`` moves rows as
-you drag); dropping posts the new order. A row's Save control only shows once
-one of its own fields actually differs from what it started at
-(``static/dirty-save.js``).
+**Everything here writes in place, with no page reload.** Every add, rename,
+remove, reorder and content edit posts via htmx and gets back the whole card
+or row group it changed (``partials/library_section.html``,
+``partials/home_shelves.html``, ``partials/carousel.html``,
+``partials/top_shelf.html``), swapped in by id — the same pattern
+``partials/notification_panel.html`` uses. Dragging is live
+(``static/reorder.js`` moves rows as you drag); dropping posts the new
+order. A row's Save control only shows once its Title actually differs from
+what it started at (``static/dirty-save.js``) — every other field applies
+the moment it changes (``static/shelf-source.js``), the same way a switch
+elsewhere in this admin UI does.
 
-The carousel is simpler still: its two on/off switches write through
-immediately like the Notifications tab's switches, and its content-source
-picker is an ordinary form post that redirects back to the page, the same
-style as ``actions.py`` and ``permissions.py`` — there is exactly one of it,
-so there is no list to keep in sync and no reload worth avoiding. "Reconnect"
-mirrors the "Verify Prowlarr connection" button.
+Home shelves, the Carousel and the Top Shelf are all "shelf-shaped" — one
+``HomeShelfDataModel``-equivalent dict apiece — and share one row template
+(``partials/_shelf_row_fields.html``) and one update code path
+(:func:`_apply_shelf_update`) for exactly that reason: a content-source edit
+means the same thing regardless of which of the three it lands on. They
+differ only in whether there can be more than one (shelves: yes, reorderable
+and removable; Carousel/Top Shelf: no) and whether it can be switched off
+(Carousel: yes, via its own enabled flag, which just dims the row rather
+than clearing it — see ``partials/carousel.html``; Top Shelf: never, because
+tvOS itself always shows *something* there).
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
+from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from ....auth.identity import refresh_plex_server
 from ....bootstrap import upnext_shelf
@@ -55,7 +59,11 @@ from ...state import AppState
 from .deps import AdminPageDep
 from .home_sources import (
     COLLECTION_PREFIX,
+    COLLECTIONS_PREFIX,
+    ON_DECK_PATH,
+    collection_shelf_library_id,
     grouped_options,
+    library_label,
     resolve_collection_source,
     resolve_source,
     source_of,
@@ -83,7 +91,7 @@ PAGE_URL = "/admin/libraries"
 
 
 # --------------------------------------------------------------------------- #
-# Shared context
+# Default Libraries: shared context
 # --------------------------------------------------------------------------- #
 
 
@@ -135,53 +143,10 @@ async def _library_context(db: DbDep, state: AppState) -> dict[str, object]:
     }
 
 
-def _shelves_context(config: Config) -> dict[str, object]:
-    """Everything ``partials/home_shelves.html`` renders from."""
-    return {
-        "home_shelves": config.home_shelves,
-        "shelf_source_groups": grouped_options(
-            source_options(config.default_libraries, allow_discover=True)
-        ),
-        "source_of": source_of,
-    }
-
-
-def _carousel_context(config: Config) -> dict[str, object]:
-    """Everything the carousel controls render from."""
-    return {
-        "home_carousel": config.home_carousel,
-        "home_carousel_enabled": config.home_carousel_enabled,
-        "home_carousel_include_on_deck": config.home_carousel_include_on_deck,
-        "carousel_source_groups": grouped_options(
-            source_options(config.default_libraries, allow_discover=False)
-        ),
-        "source_of": source_of,
-    }
-
-
-def _home_context(config: Config) -> dict[str, object]:
-    """Everything the Home section (shelves and carousel) renders from."""
-    return {**_shelves_context(config), **_carousel_context(config)}
-
-
-async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
-    library_ctx = await _library_context(db, state)
-    config = await get_config(db)
-    return {**library_ctx, **_home_context(config)}
-
-
 async def _library_section(request: Request, db: DbDep, state: AppState) -> Response:
     """The Default Libraries card alone, for every htmx write to it."""
     return templates.TemplateResponse(
         request, "partials/library_section.html", await _library_context(db, state)
-    )
-
-
-async def _home_shelves_section(request: Request, db: DbDep) -> Response:
-    """The Shelves list alone, for every htmx write to it."""
-    config = await get_config(db)
-    return templates.TemplateResponse(
-        request, "partials/home_shelves.html", _shelves_context(config)
     )
 
 
@@ -200,8 +165,294 @@ def _reordered(items: list[dict], order: list[str]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Home: shared "shelf row" plumbing
+# --------------------------------------------------------------------------- #
+
+
+async def _collections_for_library(
+    config: Config, state: AppState, library_id: str
+) -> tuple[list[dict[str, str]], str | None]:
+    """That library's own collections, live, plus an error message instead of raising.
+
+    Shared by every "Collection Items…" picker (shelves, Carousel, Top
+    Shelf) and by :func:`_first_collection_defaults`, so a page that has
+    several rows pointed at the same library only asks Plex once each.
+    """
+    if not config.plex_server_base_url or not config.plex_admin_token:
+        return [], "Not connected to a Plex server."
+
+    plex = PlexServerClient(config.plex_server_base_url, config.plex_admin_token, client=state.http)
+    try:
+        collections = await plex.list_collections(library_id)
+    except PlexServerError as exc:
+        logger.warning("could not list collections for library %s: %s", library_id, exc)
+        return [], f"Could not reach the Plex server: {exc}"
+    return [{"id": c.id, "title": c.title} for c in collections], None
+
+
+async def _first_collection_defaults(
+    config: Config, state: AppState, library_id: str
+) -> dict[str, Any] | None:
+    """The fields a fresh switch to "Collection Items…" applies.
+
+    Picking that entry always resolves straight to the library's own first
+    collection rather than leaving the row on a picker with nothing actually
+    saved yet — the second picker (already showing that collection selected)
+    is what an admin then uses to change it, no differently from any other
+    edit. ``None`` means the library has no collections to default to.
+    """
+    if not config.plex_server_base_url or not config.plex_admin_token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Not connected to a Plex server.")
+
+    plex = PlexServerClient(config.plex_server_base_url, config.plex_admin_token, client=state.http)
+    try:
+        collections = await plex.list_collections(library_id)
+    except PlexServerError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach the Plex server: {exc}"
+        ) from exc
+    if not collections:
+        return None
+
+    first = collections[0]
+    libraries_by_id = {library["id"]: library for library in config.default_libraries}
+    return resolve_collection_source(
+        f"{COLLECTION_PREFIX}{library_id}:{first.id}", first.title, libraries_by_id
+    )
+
+
+async def _apply_shelf_update(
+    config: Config,
+    state: AppState,
+    current: dict[str, Any],
+    *,
+    source: str,
+    title: str,
+    style: str,
+    title_only: str,
+    collection_title: str,
+) -> dict[str, Any]:
+    """The next value for one shelf-shaped dict — a Home shelf, the Carousel or Top Shelf.
+
+    Picking a specific collection from the second picker (``source`` starts
+    with ``col:``) always applies: that value only ever arrives from
+    deliberately choosing an option there. Otherwise, this is the same
+    "did the source actually change" comparison :func:`source_of` powers
+    everywhere else, just extended to recognise a shelf already in
+    "Collection Items…" mode as unchanged when the same library's entry is
+    resubmitted (a Style or "Hide release year" edit resubmits the row's
+    *whole* form, collections picker included) — without that, every such
+    edit would look like a fresh switch and silently reset the chosen
+    collection back to the library's first one. A genuine change mirrors
+    tapping an entry in CanopyPlus's own content menu: it resets title,
+    style and titleOnly to that source's defaults, discarding whatever was
+    typed here, the same behaviour the app itself has.
+    """
+    libraries_by_id = {library["id"]: library for library in config.default_libraries}
+
+    if source.startswith(COLLECTION_PREFIX):
+        defaults = resolve_collection_source(source, collection_title, libraries_by_id)
+        if defaults is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
+        return {**current, **defaults}
+
+    parsed = collection_shelf_library_id(current, libraries_by_id)
+    current_source = f"{COLLECTIONS_PREFIX}{parsed[0]}" if parsed else source_of(current)
+
+    if source == current_source:
+        return {
+            **current,
+            "title": title.strip() or current["title"],
+            "style": style if style in ("poster", "card") else current["style"],
+            "titleOnly": title_only == "on",
+        }
+
+    if source.startswith(COLLECTIONS_PREFIX):
+        library_id = source[len(COLLECTIONS_PREFIX) :]
+        defaults = await _first_collection_defaults(config, state, library_id)
+        if defaults is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "That library has no collections.")
+        return {**current, **defaults}
+
+    defaults = resolve_source(source, libraries_by_id)
+    if defaults is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
+    return {**current, **defaults}
+
+
+async def _collection_picker_context(
+    shelf: dict[str, Any],
+    libraries_by_id: dict[str, dict[str, Any]],
+    config: Config,
+    state: AppState,
+) -> dict[str, object] | None:
+    """The live collections-picker context for one shelf-shaped dict, or ``None``.
+
+    ``None`` means ``shelf`` is not currently a "Collection Items…" shelf —
+    the row renders its ordinary Content dropdown alone.
+    """
+    parsed = collection_shelf_library_id(shelf, libraries_by_id)
+    if parsed is None:
+        return None
+    library_id, collection_id = parsed
+    collections, error = await _collections_for_library(config, state, library_id)
+    return {
+        "library_id": library_id,
+        "collections": collections,
+        "selected_collection_id": collection_id,
+        "error": error,
+    }
+
+
+async def _row_context(
+    shelf: dict[str, Any], config: Config, state: AppState, *, allow_discover: bool
+) -> dict[str, object]:
+    """The picker-related fields ``partials/_shelf_row_fields.html`` needs.
+
+    Shared by Home shelves, the Carousel and Top Shelf — each caller adds
+    its own routing/identity fields (``row_id``, ``post_url``, ...) on top.
+    """
+    libraries_by_id = {library["id"]: library for library in config.default_libraries}
+    picker = await _collection_picker_context(shelf, libraries_by_id, config, state)
+
+    if picker is not None:
+        current_source = f"{COLLECTIONS_PREFIX}{picker['library_id']}"
+        library = libraries_by_id.get(picker["library_id"])
+        placeholder_text = library_label(library) if library else shelf["description"]
+    else:
+        current_source = source_of(shelf)
+        placeholder_text = shelf["description"]
+
+    return {
+        "current": shelf,
+        "current_source": current_source,
+        "placeholder_text": placeholder_text,
+        "source_groups": grouped_options(
+            source_options(config.default_libraries, allow_discover=allow_discover)
+        ),
+        "picker": picker,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Home: Shelves
+# --------------------------------------------------------------------------- #
+
+
+async def _shelves_context(config: Config, state: AppState) -> dict[str, object]:
+    """Everything ``partials/home_shelves.html`` renders from."""
+    rows = []
+    for shelf in config.home_shelves:
+        row = await _row_context(shelf, config, state, allow_discover=True)
+        row.update(
+            {
+                "row_id": shelf["id"],
+                "post_url": f"/admin/libraries/home/shelves/{shelf['id']}",
+                "remove_url": f"/admin/libraries/home/shelves/{shelf['id']}/remove",
+                "swap_target": "#home-shelves",
+                "show_remove": True,
+                "disable_remove": len(config.home_shelves) < 2,
+            }
+        )
+        rows.append(row)
+    return {"shelf_rows": rows}
+
+
+async def _home_shelves_section(request: Request, db: DbDep, state: AppState) -> Response:
+    """The Shelves list alone, for every htmx write to it."""
+    config = await get_config(db)
+    return templates.TemplateResponse(
+        request, "partials/home_shelves.html", await _shelves_context(config, state)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Home: Carousel
+# --------------------------------------------------------------------------- #
+
+
+async def _carousel_context(config: Config, state: AppState) -> dict[str, object]:
+    """Everything ``partials/carousel.html`` renders from."""
+    current = config.home_carousel or upnext_shelf()
+    row = await _row_context(current, config, state, allow_discover=False)
+    row.update(
+        {
+            "row_id": "carousel",
+            "post_url": "/admin/libraries/home/carousel",
+            "remove_url": None,
+            "swap_target": "#carousel-section",
+            "show_remove": False,
+            "disable_remove": False,
+            "home_carousel_enabled": config.home_carousel_enabled,
+            "home_carousel_include_on_deck": config.home_carousel_include_on_deck,
+            "show_include_on_deck": current.get("path") != ON_DECK_PATH,
+        }
+    )
+    return row
+
+
+async def _carousel_section(request: Request, db: DbDep, state: AppState) -> Response:
+    """The Carousel section alone, for every htmx write to it."""
+    config = await get_config(db)
+    return templates.TemplateResponse(
+        request, "partials/carousel.html", {"carousel": await _carousel_context(config, state)}
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Home: Top Shelf
+# --------------------------------------------------------------------------- #
+
+
+async def _top_shelf_context(config: Config, state: AppState) -> dict[str, object]:
+    """Everything ``partials/top_shelf.html`` renders from."""
+    current = config.home_top_shelf or upnext_shelf()
+    row = await _row_context(current, config, state, allow_discover=False)
+    row.update(
+        {
+            "row_id": "top-shelf",
+            "post_url": "/admin/libraries/home/top-shelf",
+            "remove_url": None,
+            "swap_target": "#top-shelf-section",
+            "show_remove": False,
+            "disable_remove": False,
+        }
+    )
+    return row
+
+
+async def _top_shelf_section(request: Request, db: DbDep, state: AppState) -> Response:
+    """The Top Shelf section alone, for every htmx write to it."""
+    config = await get_config(db)
+    return templates.TemplateResponse(
+        request, "partials/top_shelf.html", {"top_shelf": await _top_shelf_context(config, state)}
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Page
 # --------------------------------------------------------------------------- #
+
+
+async def _home_context(config: Config, state: AppState) -> dict[str, object]:
+    """Everything the Home section (Carousel, Top Shelf and shelves) renders from.
+
+    Carousel and Top Shelf are each namespaced under their own key — they
+    share every field name (both are one "shelf row"), so flattening them
+    together into the same page context the way ``shelf_rows`` already is
+    would have the second one silently clobber the first's.
+    """
+    return {
+        **await _shelves_context(config, state),
+        "carousel": await _carousel_context(config, state),
+        "top_shelf": await _top_shelf_context(config, state),
+    }
+
+
+async def _page_context(db: DbDep, state: AppState) -> dict[str, object]:
+    library_ctx = await _library_context(db, state)
+    config = await get_config(db)
+    return {**library_ctx, **await _home_context(config, state)}
 
 
 @router.get("", response_class=HTMLResponse)
@@ -337,66 +588,27 @@ async def reorder_libraries(
 
 
 @router.post("/home/shelves", response_class=HTMLResponse)
-async def add_shelf(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+async def add_shelf(request: Request, db: DbDep, state: StateDep, admin: AdminPageDep) -> Response:
     config = await get_config(db)
     config.home_shelves = [*config.home_shelves, upnext_shelf()]
-    return await _home_shelves_section(request, db)
+    return await _home_shelves_section(request, db, state)
 
 
 @router.post("/home/shelves/reorder", response_class=HTMLResponse)
-async def reorder_shelves(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+async def reorder_shelves(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep
+) -> Response:
     form = await request.form()
     order = [str(value) for value in form.getlist("order")]
     config = await get_config(db)
     config.home_shelves = _reordered(config.home_shelves, order)
-    return await _home_shelves_section(request, db)
-
-
-@router.get("/home/shelves/{shelf_id}/collections", response_class=HTMLResponse)
-async def shelf_collections(
-    request: Request,
-    db: DbDep,
-    state: StateDep,
-    admin: AdminPageDep,
-    shelf_id: str,
-    library_id: str,
-) -> Response:
-    """The picker of one library's own collections, for "Collection Items…".
-
-    ``shelf_id`` names nothing here beyond which shelf's picker to wire the
-    result up to — this is a read, not a write to that shelf.
-    """
-    config = await get_config(db)
-    collections: list[dict[str, str]] = []
-    error: str | None = None
-    if not config.plex_server_base_url or not config.plex_admin_token:
-        error = "Not connected to a Plex server."
-    else:
-        plex = PlexServerClient(
-            config.plex_server_base_url, config.plex_admin_token, client=state.http
-        )
-        try:
-            collections = [
-                {"id": c.id, "title": c.title} for c in await plex.list_collections(library_id)
-            ]
-        except PlexServerError as exc:
-            logger.warning("could not list collections for library %s: %s", library_id, exc)
-            error = f"Could not reach the Plex server: {exc}"
-
-    return templates.TemplateResponse(
-        request,
-        "partials/collections_picker.html",
-        {
-            "shelf_id": shelf_id,
-            "library_id": library_id,
-            "collections": collections,
-            "error": error,
-        },
-    )
+    return await _home_shelves_section(request, db, state)
 
 
 @router.post("/home/shelves/{shelf_id}/remove", response_class=HTMLResponse)
-async def remove_shelf(request: Request, db: DbDep, admin: AdminPageDep, shelf_id: str) -> Response:
+async def remove_shelf(
+    request: Request, db: DbDep, state: StateDep, admin: AdminPageDep, shelf_id: str
+) -> Response:
     config = await get_config(db)
     if len(config.home_shelves) <= 1:
         # Unreachable through the page — the button is disabled — but the app
@@ -404,13 +616,14 @@ async def remove_shelf(request: Request, db: DbDep, admin: AdminPageDep, shelf_i
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one home shelf.")
 
     config.home_shelves = [shelf for shelf in config.home_shelves if shelf["id"] != shelf_id]
-    return await _home_shelves_section(request, db)
+    return await _home_shelves_section(request, db, state)
 
 
 @router.post("/home/shelves/{shelf_id}", response_class=HTMLResponse)
 async def update_shelf(
     request: Request,
     db: DbDep,
+    state: StateDep,
     admin: AdminPageDep,
     shelf_id: str,
     source: str = Form(...),
@@ -419,20 +632,8 @@ async def update_shelf(
     title_only: str = Form(default=""),
     collection_title: str = Form(default=""),
 ) -> Response:
-    """Save one shelf's edits.
-
-    Changing ``source`` mirrors tapping an entry in CanopyPlus's own content
-    menu: it always resets title, style and titleOnly to that source's
-    defaults, discarding whatever was typed here — the same behaviour the app
-    itself has. A specific collection (``source`` starting with ``col:``) is
-    the same case with a title the server has no other way to learn — see
-    :func:`~.home_sources.resolve_collection_source`. Leaving the source alone
-    applies the other three fields as ordinary edits, same as the app's
-    separate Title field, Style picker and "Hide Release Year" toggle.
-    """
+    """Save one shelf's edits. See :func:`_apply_shelf_update`."""
     config = await get_config(db)
-    libraries_by_id = {library["id"]: library for library in config.default_libraries}
-
     updated = []
     found = False
     for shelf in config.home_shelves:
@@ -440,35 +641,24 @@ async def update_shelf(
             updated.append(shelf)
             continue
         found = True
-
-        if source.startswith(COLLECTION_PREFIX):
-            defaults = resolve_collection_source(source, collection_title, libraries_by_id)
-            if defaults is None:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
-            updated.append({**shelf, **defaults})
-            continue
-
-        if source != source_of(shelf):
-            defaults = resolve_source(source, libraries_by_id)
-            if defaults is None:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
-            updated.append({**shelf, **defaults})
-            continue
-
         updated.append(
-            {
-                **shelf,
-                "title": title.strip() or shelf["title"],
-                "style": style if style in ("poster", "card") else shelf["style"],
-                "titleOnly": title_only == "on",
-            }
+            await _apply_shelf_update(
+                config,
+                state,
+                shelf,
+                source=source,
+                title=title,
+                style=style,
+                title_only=title_only,
+                collection_title=collection_title,
+            )
         )
 
     if not found:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such home shelf")
 
     config.home_shelves = updated
-    return await _home_shelves_section(request, db)
+    return await _home_shelves_section(request, db, state)
 
 
 # --------------------------------------------------------------------------- #
@@ -476,21 +666,32 @@ async def update_shelf(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/home/carousel")
-async def update_carousel(db: DbDep, admin: AdminPageDep, source: str = Form(...)) -> Response:
+@router.post("/home/carousel", response_class=HTMLResponse)
+async def update_carousel(
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    source: str = Form(...),
+    title: str = Form(default=""),
+    style: str = Form(default="poster"),
+    title_only: str = Form(default=""),
+    collection_title: str = Form(default=""),
+) -> Response:
+    """Save the Carousel's edits. Same fields, same rules as :func:`update_shelf`."""
     config = await get_config(db)
-
-    if source == "off":
-        config.home_carousel = None
-        return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
-
-    libraries_by_id = {library["id"]: library for library in config.default_libraries}
-    defaults = resolve_source(source, libraries_by_id)
-    if defaults is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
-
-    config.home_carousel = {"id": str(uuid.uuid4()), **defaults}
-    return RedirectResponse(PAGE_URL, status_code=status.HTTP_303_SEE_OTHER)
+    current = config.home_carousel or upnext_shelf()
+    config.home_carousel = await _apply_shelf_update(
+        config,
+        state,
+        current,
+        source=source,
+        title=title,
+        style=style,
+        title_only=title_only,
+        collection_title=collection_title,
+    )
+    return await _carousel_section(request, db, state)
 
 
 @router.post("/home/carousel-enabled", response_class=HTMLResponse)
@@ -525,3 +726,36 @@ async def toggle_carousel_include_on_deck(
             "label": 'Include "Continue Watching" items',
         },
     )
+
+
+# --------------------------------------------------------------------------- #
+# Top Shelf
+# --------------------------------------------------------------------------- #
+
+
+@router.post("/home/top-shelf", response_class=HTMLResponse)
+async def update_top_shelf(
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    source: str = Form(...),
+    title: str = Form(default=""),
+    style: str = Form(default="poster"),
+    title_only: str = Form(default=""),
+    collection_title: str = Form(default=""),
+) -> Response:
+    """Save the Top Shelf's edits. Same fields, same rules as :func:`update_shelf`."""
+    config = await get_config(db)
+    current = config.home_top_shelf or upnext_shelf()
+    config.home_top_shelf = await _apply_shelf_update(
+        config,
+        state,
+        current,
+        source=source,
+        title=title,
+        style=style,
+        title_only=title_only,
+        collection_title=collection_title,
+    )
+    return await _top_shelf_section(request, db, state)

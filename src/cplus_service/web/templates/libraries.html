@@ -6,50 +6,12 @@
 <section class="card">
   <h2>Home</h2>
   <p class="lede">
-    The shelves — and the one hero carousel — a fresh install's Home tab
+    The Carousel, the Top Shelf, and the shelves a fresh install's Home tab
     shows, and what each is built from.
   </p>
 
-  <h2>Carousel</h2>
-  <div class="carousel-toggle">
-    <span class="carousel-switch">
-      {% with checked = home_carousel_enabled, url = "/admin/libraries/home/carousel-enabled", label = "Enable Home Carousel" %}
-        {% include "partials/carousel_switch.html" %}
-      {% endwith %}
-    </span>
-    <span>Enable Home Carousel</span>
-  </div>
-
-  {% if home_carousel_enabled %}
-    <form method="post" action="/admin/libraries/home/carousel" class="row">
-      <select name="source" aria-label="Carousel content source">
-        <option value="off" {% if not home_carousel %}selected{% endif %}>Off</option>
-        {% set current = source_of(home_carousel) if home_carousel else "" %}
-        {% for group_label, opts in carousel_source_groups %}
-          {% if group_label %}
-            <optgroup label="{{ group_label }}">
-          {% endif %}
-          {% for opt in opts %}
-            <option value="{{ opt.value }}" {% if opt.value == current %}selected{% endif %}>{{ opt.label }}</option>
-          {% endfor %}
-          {% if group_label %}</optgroup>{% endif %}
-        {% endfor %}
-      </select>
-      <button type="submit" class="secondary">Save</button>
-    </form>
-
-    {% if home_carousel and not (home_carousel.path == "/library/onDeck") %}
-      <div class="carousel-toggle">
-        <span class="carousel-switch">
-          {% with checked = home_carousel_include_on_deck, url = "/admin/libraries/home/carousel-include-on-deck", label = 'Include "Continue Watching" items' %}
-            {% include "partials/carousel_switch.html" %}
-          {% endwith %}
-        </span>
-        <span>Include "Continue Watching" items</span>
-      </div>
-    {% endif %}
-  {% endif %}
-
+  {% include "partials/carousel.html" %}
+  {% include "partials/top_shelf.html" %}
   {% include "partials/home_shelves.html" %}
 </section>
 

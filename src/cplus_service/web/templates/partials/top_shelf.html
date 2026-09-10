@@ -1,0 +1,27 @@
+{# The tvOS Top Shelf widget's own shelf — always on, unlike the Carousel:
+   tvOS itself always shows something in the widget above the app icon, and
+   Canopy+'s own Top Shelf extension already falls back to Continue Watching
+   on its own when nothing has been chosen, so there is no enabled switch to
+   give here — only the same content picker every other shelf-shaped row
+   has.
+
+   Expects: top_shelf (see libraries._top_shelf_context) — namespaced
+   rather than flattened into the page context, since the Carousel
+   (partials/carousel.html) is also one "shelf row" and shares every field
+   name. #}
+<div id="top-shelf-section">
+  <h2>Top Shelf</h2>
+  <p class="hint">
+    What the tvOS Top Shelf widget above the app icon shows. Always on —
+    tvOS itself requires it.
+  </p>
+  <div class="shelf-fields shelf-box">
+    {% with id = top_shelf.row_id, post_url = top_shelf.post_url, swap_target = top_shelf.swap_target,
+            current = top_shelf.current, current_source = top_shelf.current_source,
+            placeholder_text = top_shelf.placeholder_text, source_groups = top_shelf.source_groups,
+            picker = top_shelf.picker, show_remove = top_shelf.show_remove,
+            remove_url = top_shelf.remove_url, disable_remove = top_shelf.disable_remove %}
+      {% include "partials/_shelf_row_fields.html" %}
+    {% endwith %}
+  </div>
+</div>
