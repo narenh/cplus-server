@@ -920,3 +920,45 @@ async def test_toggling_include_on_deck(client: httpx.AsyncClient, db: AsyncSess
 
     assert response.status_code == 200
     assert (await current_config(db)).home_carousel_include_on_deck is True
+
+
+async def test_the_carousel_has_no_hide_release_year_checkbox(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # There is no such setting for a row that only ever shows one item —
+    # "Include Continue Watching items" renders in that same spot instead.
+    await default_library(db, library_id="1", server_title="Movies")
+    await signed_in(client, db)
+    await client.post("/admin/libraries/home/carousel", data={"source": "lib:1:all"})
+
+    response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    carousel_html = response.text.split('id="carousel-section"')[1]
+    carousel_html = carousel_html.split('id="top-shelf-section"')[0]
+    assert "Hide release year" not in carousel_html
+    assert "Include &#34;Continue Watching&#34; items" in carousel_html
+
+
+async def test_the_top_shelf_has_no_hide_release_year_checkbox(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    top_shelf_html = response.text.split('id="top-shelf-section"')[1].split('id="home-shelves"')[0]
+    assert "Hide release year" not in top_shelf_html
+
+
+async def test_shelves_still_have_the_hide_release_year_checkbox(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.get("/admin/libraries")
+
+    assert response.status_code == 200
+    shelves_html = response.text.split('id="home-shelves"')[1]
+    assert "Hide release year" in shelves_html

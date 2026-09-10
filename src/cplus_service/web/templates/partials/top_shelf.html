@@ -19,7 +19,8 @@
     {% with id = top_shelf.row_id, post_url = top_shelf.post_url, swap_target = top_shelf.swap_target,
             current = top_shelf.current, current_source = top_shelf.current_source,
             placeholder_text = top_shelf.placeholder_text, source_groups = top_shelf.source_groups,
-            picker = top_shelf.picker, show_remove = top_shelf.show_remove,
+            picker = top_shelf.picker, show_title_only = top_shelf.show_title_only,
+            extra_checkbox = top_shelf.extra_checkbox, show_remove = top_shelf.show_remove,
             remove_url = top_shelf.remove_url, disable_remove = top_shelf.disable_remove %}
       {% include "partials/_shelf_row_fields.html" %}
     {% endwith %}

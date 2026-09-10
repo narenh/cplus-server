@@ -43,7 +43,8 @@
           {% with id = row.row_id, post_url = row.post_url, swap_target = row.swap_target,
                   current = row.current, current_source = row.current_source,
                   placeholder_text = row.placeholder_text, source_groups = row.source_groups,
-                  picker = row.picker, show_remove = row.show_remove,
+                  picker = row.picker, show_title_only = row.show_title_only,
+                  extra_checkbox = row.extra_checkbox, show_remove = row.show_remove,
                   remove_url = row.remove_url, disable_remove = row.disable_remove %}
             {% include "partials/_shelf_row_fields.html" %}
           {% endwith %}

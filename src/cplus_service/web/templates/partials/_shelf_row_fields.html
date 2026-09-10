@@ -12,8 +12,12 @@
    Expects: id (a dom-id-safe string, unique on the page), post_url,
    swap_target, current (a shelf-shaped dict: title/style/titleOnly),
    current_source, placeholder_text, source_groups, picker (a
-   collections-picker context dict, or none), show_remove, remove_url,
-   disable_remove. #}
+   collections-picker context dict, or none), show_title_only (whether to
+   offer "Hide release year" — the Carousel and Top Shelf have no such
+   setting), extra_checkbox (the Carousel's "Include Continue Watching
+   items" toggle — {toggle_url, checked, label} — rendered in "Hide
+   release year"'s own spot when it isn't, or none), show_remove,
+   remove_url, disable_remove. #}
 <form method="post" action="{{ post_url }}" id="shelf-{{ id }}" class="shelf-form-anchor"
       hx-post="{{ post_url }}" hx-target="{{ swap_target }}" hx-swap="outerHTML"></form>
 <form method="post" action="{{ post_url }}" id="shelf-{{ id }}-title" class="shelf-form-anchor"
@@ -69,11 +73,27 @@
     <option value="poster" {% if current.style == "poster" %}selected{% endif %}>Poster</option>
     <option value="card" {% if current.style == "card" %}selected{% endif %}>Card</option>
   </select>
-  <label class="check">
-    <input type="checkbox" name="title_only" form="shelf-{{ id }}" data-auto-apply
-           {% if current.titleOnly %}checked{% endif %}>
-    Hide release year
-  </label>
+  {% if show_title_only %}
+    <label class="check">
+      <input type="checkbox" name="title_only" form="shelf-{{ id }}" data-auto-apply
+             {% if current.titleOnly %}checked{% endif %}>
+      Hide release year
+    </label>
+  {% elif current.titleOnly %}
+    {# No checkbox to show it, but the value itself is still whatever the
+       source last set it to — preserved, not silently discarded, the next
+       time this row's Style is edited. #}
+    <input type="hidden" name="title_only" value="on" form="shelf-{{ id }}">
+  {% endif %}
+
+  {% if extra_checkbox %}
+    <label class="check">
+      <input type="checkbox" name="enabled" hx-post="{{ extra_checkbox.toggle_url }}"
+             hx-target="{{ swap_target }}" hx-swap="outerHTML"
+             {% if extra_checkbox.checked %}checked{% endif %}>
+      {{ extra_checkbox.label }}
+    </label>
+  {% endif %}
 
   {% if show_remove %}
     <form method="post" action="{{ remove_url }}" class="remove-form"

@@ -24,21 +24,11 @@
       {% with id = carousel.row_id, post_url = carousel.post_url, swap_target = carousel.swap_target,
               current = carousel.current, current_source = carousel.current_source,
               placeholder_text = carousel.placeholder_text, source_groups = carousel.source_groups,
-              picker = carousel.picker, show_remove = carousel.show_remove,
+              picker = carousel.picker, show_title_only = carousel.show_title_only,
+              extra_checkbox = carousel.extra_checkbox, show_remove = carousel.show_remove,
               remove_url = carousel.remove_url, disable_remove = carousel.disable_remove %}
         {% include "partials/_shelf_row_fields.html" %}
       {% endwith %}
-
-      {% if carousel.show_include_on_deck %}
-        <div class="carousel-toggle">
-          <span class="carousel-switch">
-            {% with checked = carousel.home_carousel_include_on_deck, url = "/admin/libraries/home/carousel-include-on-deck", label = 'Include "Continue Watching" items' %}
-              {% include "partials/carousel_switch.html" %}
-            {% endwith %}
-          </span>
-          <span>Include "Continue Watching" items</span>
-        </div>
-      {% endif %}
     </div>
   {% endif %}
 </div>

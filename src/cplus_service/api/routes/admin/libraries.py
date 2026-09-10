@@ -330,12 +330,21 @@ async def _collection_picker_context(
 
 
 async def _row_context(
-    shelf: dict[str, Any], config: Config, state: AppState, *, allow_discover: bool
+    shelf: dict[str, Any],
+    config: Config,
+    state: AppState,
+    *,
+    allow_discover: bool,
+    show_title_only: bool,
 ) -> dict[str, object]:
     """The picker-related fields ``partials/_shelf_row_fields.html`` needs.
 
     Shared by Home shelves, the Carousel and Top Shelf — each caller adds
-    its own routing/identity fields (``row_id``, ``post_url``, ...) on top.
+    its own routing/identity fields (``row_id``, ``post_url``, ...) and, for
+    the Carousel alone, its own ``extra_checkbox`` (see
+    :func:`_carousel_context`) on top. ``show_title_only`` is ``False`` for
+    the Carousel and Top Shelf: unlike an ordinary shelf, neither has a
+    "Hide release year" setting.
     """
     libraries_by_id = {library["id"]: library for library in config.default_libraries}
     picker = await _collection_picker_context(shelf, libraries_by_id, config, state)
@@ -356,6 +365,8 @@ async def _row_context(
             source_options(config.default_libraries, allow_discover=allow_discover)
         ),
         "picker": picker,
+        "show_title_only": show_title_only,
+        "extra_checkbox": None,
     }
 
 
@@ -369,7 +380,9 @@ async def _shelves_context(config: Config, state: AppState) -> dict[str, object]
     rows = []
     total = len(config.home_shelves)
     for index, shelf in enumerate(config.home_shelves):
-        row = await _row_context(shelf, config, state, allow_discover=True)
+        row = await _row_context(
+            shelf, config, state, allow_discover=True, show_title_only=True
+        )
         row.update(
             {
                 "row_id": shelf["id"],
@@ -404,7 +417,9 @@ async def _home_shelves_section(request: Request, db: DbDep, state: AppState) ->
 async def _carousel_context(config: Config, state: AppState) -> dict[str, object]:
     """Everything ``partials/carousel.html`` renders from."""
     current = config.home_carousel or upnext_shelf()
-    row = await _row_context(current, config, state, allow_discover=False)
+    row = await _row_context(
+        current, config, state, allow_discover=False, show_title_only=False
+    )
     row.update(
         {
             "row_id": "carousel",
@@ -414,8 +429,20 @@ async def _carousel_context(config: Config, state: AppState) -> dict[str, object
             "show_remove": False,
             "disable_remove": False,
             "home_carousel_enabled": config.home_carousel_enabled,
-            "home_carousel_include_on_deck": config.home_carousel_include_on_deck,
-            "show_include_on_deck": current.get("path") != ON_DECK_PATH,
+            # In the same row-2 spot "Hide release year" sits for an
+            # ordinary shelf — the Carousel has no such setting, but this is
+            # the one thing it has instead. Inert (and hidden) when the
+            # Carousel's own source already is Continue Watching, same rule
+            # as before.
+            "extra_checkbox": (
+                {
+                    "toggle_url": "/admin/libraries/home/carousel-include-on-deck",
+                    "checked": config.home_carousel_include_on_deck,
+                    "label": 'Include "Continue Watching" items',
+                }
+                if current.get("path") != ON_DECK_PATH
+                else None
+            ),
         }
     )
     return row
@@ -437,7 +464,9 @@ async def _carousel_section(request: Request, db: DbDep, state: AppState) -> Res
 async def _top_shelf_context(config: Config, state: AppState) -> dict[str, object]:
     """Everything ``partials/top_shelf.html`` renders from."""
     current = config.home_top_shelf or upnext_shelf()
-    row = await _row_context(current, config, state, allow_discover=False)
+    row = await _row_context(
+        current, config, state, allow_discover=False, show_title_only=False
+    )
     row.update(
         {
             "row_id": "top-shelf",
