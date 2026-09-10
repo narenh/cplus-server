@@ -159,8 +159,14 @@ class Config(Base):
     #: fresh Canopy+ install before a user has customised anything of their
     #: own. Each entry is stored in exactly the shape CanopyPlus's own
     #: ``MediaLibrary`` Codable struct encodes to (``id``, ``serverTitle``,
-    #: ``type``, ``hidden``, ``name``) so the two sides can eventually be
-    #: connected directly. List order is display order.
+    #: ``type``, ``hidden``, ``name``) so the two sides connect directly,
+    #: with no translation at either end. List order is display order.
+    #:
+    #: A **one-shot seed and nothing more**: it rides along in
+    #: ``GET /register?first_run=true`` and is never synced back. Uncapped
+    #: on purpose — the client filters this down to the libraries the
+    #: signed-in user can actually see and takes the first few, so an admin
+    #: naming more than any one user can reach is the ordinary case.
     default_libraries: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, default=list, server_default="[]"
     )
@@ -209,7 +215,7 @@ class Config(Base):
     #: field-by-field. ``None`` plays the same role ``.distantPast`` does as
     #: that field's own default — "never edited" — since nothing has written
     #: through this column yet; every mutation in
-    #: ``cplus_service.api.routes.admin.shelf_rows.touched`` sets it, the
+    #: ``cplus_service.home.touched`` sets it, the
     #: same "one stamp for the whole document" rule
     #: ``UserHomeSettings.home_modified_at`` follows for one user's own copy.
     #: An earlier revision instead stamped a ``modifiedAt`` inside each
@@ -247,16 +253,19 @@ class UserHomeSettings(Base):
     ``home_modified_at`` for the whole row rather than one per shelf) — see
     ``Config.home_modified_at`` for why that one column exists at all. Same
     field names as ``Config`` for the same reason ``default_libraries``/
-    ``home_shelves`` mirror ``MediaLibrary``/``HomeShelfDataModel`` there: a
-    future connection to CanopyPlus's own per-user ``HomeSettings`` sync has
-    nothing to translate — this row already *is* one ``HomeSettings``
-    document.
+    ``home_shelves`` mirror ``MediaLibrary``/``HomeShelfDataModel`` there:
+    ``GET``/``PUT /home`` has nothing to translate, because this row already
+    *is* one ``HomeSettings`` document. See ``cplus_service.home`` for the
+    projection and ``api.routes.home`` for the merge.
 
     Absence of a row (rather than a row full of nulls) means this user has
-    never had their own Home edited — see
-    ``cplus_service.api.routes.admin.user_home``, the only place that ever
-    creates one. Creation seeds every field from the admin's current global
-    defaults at that moment, with ``home_modified_at`` left ``None`` —
+    never had their own Home edited, and is still tracking the admin's
+    global default. Two doors fork them off it, both through the one seeder
+    in ``cplus_service.home.get_or_create_home``: an admin opening their
+    Home in the web UI (``api.routes.admin.user_home``), or their own first
+    accepted ``PUT /home`` (``api.routes.home``). Creation seeds every field
+    from the admin's current global defaults at that moment, with
+    ``home_modified_at`` left ``None`` —
     seeding is not itself an edit, the same way CanopyPlus's own
     ``HomeSettings()`` starts at ``.distantPast`` until a person actually
     changes something. After that, this row is the user's own and no longer

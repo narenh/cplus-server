@@ -158,7 +158,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 390 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 836 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -197,12 +197,13 @@ src/cplus_service/
   search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           register, titles, grab, manager, request, seerr
+  api/routes/           register, home, titles, grab, manager, request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
   web/                  Jinja2 templates + vendored HTMX and CSS
   db/models.py          SQLAlchemy 2.0 schema
+  home.py               the Home document: whose it is, its wire shape, its stamp
   bootstrap.py          seeds the built-in Request action and the "All" profile
 migrations/             Alembic
 docker/entrypoint.sh    migrate, then serve
@@ -434,8 +435,9 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`. Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
+| `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`, `plex_admin_token`, `plex_server_base_url`, `plex_server_client_identifier`, `plex_server_name`, `default_libraries`, and the install-wide Home default (`home_shelves`, `home_carousel`, `home_carousel_enabled`, `home_carousel_include_on_deck`, `home_top_shelf`, `home_modified_at`). Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
 | `users` | `seerr_user_id` (unique), `plex_username` |
+| `user_home_settings` | one user's own Home — the five content fields plus one `home_modified_at` for the whole document. Absent until they fork; see below |
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
 | `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
@@ -556,7 +558,9 @@ migration deletes, so nothing can prove what they were resolved against.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /capabilities` | none | What this instance has switched on, before anyone signs in. Today just `{"notifications": bool}` |
-| `GET /register` | live Seerr | **tvOS only.** The auth checkpoint — no body worth reading, just 200 or 401 |
+| `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server`; with `first_run=true`, bundles the Libraries seed and the caller's Home |
+| `GET /home` | cache | The caller's whole home screen, in CanopyPlus's own `HomeSettings` shape |
+| `PUT /home` | cache | One `HomeSettings` document. 200 if it won, 409 if it lost — the winner is the body either way |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
@@ -652,6 +656,121 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
 page swaps straight into the DOM.
+
+---
+
+## The Home document
+
+CanopyPlus keeps its whole home screen as **one versioned document** — the
+carousel and its two switches, the shelf list, the Top Shelf, and a single
+`modifiedAt` covering all of it — and merges it whole-document
+last-write-wins. `GET`/`PUT /home` is the other half of that, per user, so a
+person's shelves follow them to every Apple TV they sign in on and an admin
+editing that person's Home in the web UI reaches those same devices.
+
+Deletion is therefore just absence: a shelf missing from the winning document
+is deleted, with no tombstone, because shelves are never reconciled
+individually.
+
+### Whose document
+
+A user with no `user_home_settings` row is still tracking the admin's global
+default, and `GET /home` hands them exactly that. They **fork on first edit** —
+the first accepted `PUT`, or the first time an admin opens their Home in the
+web UI — and from then on the two are independent in both directions.
+
+Reading a Home deliberately does *not* create the row. Forking someone merely
+because something looked at their Home would silently freeze them at whatever
+the default happened to be that day.
+
+### The merge
+
+`PUT /home` carries a whole document and its `modifiedAt`, compared against the
+stamp on whatever document applies to that user today:
+
+| Incoming stamp | Result |
+|---|---|
+| strictly newer | client wins, stored verbatim, `200` |
+| equal | nothing to do, not written, `200` |
+| older | server wins, `409` |
+
+**Both outcomes answer with the winning document, in the identical shape.** A
+client applies the body it gets back either way and is immediately consistent;
+it never needs a second call to find out what it lost to, and the `409` is what
+tells it to stop treating its local copy as unsynced. That is the whole
+reconciliation protocol.
+
+An equal stamp is a `200` rather than a conflict on purpose — it is the
+ordinary case for a client re-pushing after a reconnect, and calling that a
+failure would make an idempotent push look broken.
+
+A push **replicates the client's stamp rather than re-stamping on arrival**.
+Re-stamping would make every push look newer than the edit it carries, and the
+next device to sync would lose a merge it should have won.
+
+### Two compatibility rules that are not cosmetic
+
+Both of these are constraints imposed by a decoder in another repository, and
+both fail silently-ish if broken:
+
+**Every shelf carries all seven keys, nulls included.** CanopyPlus's
+`HomeShelfDataModel.init(from:)` is a *strict* decoder — it calls
+`decode(String?.self, forKey: .discoverHubKey)`, which throws `keyNotFound` on
+a missing key rather than yielding `nil`. So a shelf with no Discover hub must
+serialise as `"discoverHubKey": null` and never be omitted. Its parent
+`HomeSettings` decodes leniently and *does* tolerate a missing key; the shelves
+inside it do not.
+
+**Timestamps are whole seconds, in UTC, always** — `2026-06-01T12:00:00Z`. Two
+independent reasons:
+
+* CanopyPlus decodes with `dateDecodingStrategy = .iso8601`, which is
+  `ISO8601DateFormatter`'s `.withInternetDateTime` and **rejects fractional
+  seconds**. Microseconds on a stamp fail the client's decode outright.
+* If a stored stamp kept a microsecond component the wire format then dropped,
+  every document the client echoed back would look *older* than what is on file
+  and would lose its own merge, permanently. So the truncation happens at
+  **write** time, not at serialisation — see `cplus_service.home.touched`.
+
+`modifiedAt` is **omitted** on the way out when the document has never been
+edited, and **required** on the way in. Absence out is "never edited", which
+the app's lenient decoder falls back to `.distantPast` — the one value that can
+never win a merge against real user data. A client holding a never-edited
+document has nothing to push, so absence in is a bug rather than a state.
+
+One more trap worth knowing about: SQLite has no timestamp type, so
+`DateTime(timezone=True)` round-trips as a plain string and SQLAlchemy hands
+back a `datetime` with `tzinfo=None`, while a stamp parsed off the wire is
+offset-aware. Comparing the two raises `TypeError` — a 500 on the merge path.
+Everything that writes a stamp writes UTC, so `home.as_utc` reattaches it and
+nothing compares two stamps without going through it first.
+
+### Libraries are a seed, not a sync
+
+`default_libraries` rides along in `GET /register?first_run=true` and goes
+nowhere else. It is **one-shot**: a client applies it only when it has no
+library selection of its own, never pushes back, and an existing install is
+never repointed by it.
+
+There is deliberately **no cap** here. The admin may name as many libraries as
+they like, because the client is what filters the list down to the ones *this*
+user can actually see and then takes the first few. An admin listing eight and
+a user with access to four is the ordinary case, not an error.
+
+### Binding
+
+`GET /register` always reports `plex_server` — the identity of the Plex Media
+Server this instance is configured against — so a client that discovered this
+instance's URL out of a Plex collection summary can check it against the server
+it is actually signed in to before binding. Same identifier, same library ids,
+and `default_libraries` means what it says.
+
+It is on `/register` rather than the unauthenticated `/capabilities` because
+nothing needs it before a caller is known good. `null` is a real answer — an
+admin who has not yet connected this instance to Plex — and says only "this
+cannot be verified", not "this is the wrong server". Only the identity is
+reported, never `plex_server_base_url`: that is the address *this service*
+reaches Plex on, which is frequently not one the client could use.
 
 ---
 

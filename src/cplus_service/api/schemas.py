@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -120,6 +121,67 @@ class RequestResponse(BaseModel):
     success: bool
     message: str | None = None
     request_id: int | None = None
+
+
+#: A ceiling on a pushed shelf list. The admin UI imposes no limit of its own
+#: and no real Home comes close to this, so it is not a product rule — it is
+#: the bound that stops one authenticated client from parking an unbounded blob
+#: in someone's row. The floor of one is a real rule, though, and both ends
+#: already enforce it: CanopyPlus disables shelf removal below two, and
+#: ``admin.libraries`` refuses to drop the last one.
+MAX_HOME_SHELVES = 100
+
+#: ``HomeShelfDataModel.ShelfStyle`` in CanopyPlus, exactly.
+SHELF_STYLES = ("poster", "card", "hero", "square", "tvEpisode")
+
+
+class HomeShelf(BaseModel):
+    """One shelf, in CanopyPlus's own ``HomeShelfDataModel`` shape.
+
+    Field names are the app's Codable names rather than this service's usual
+    snake_case, deliberately: the whole point of the Home document is that it
+    crosses the wire needing no translation at either end.
+
+    ``extra="forbid"`` matters more here than it does elsewhere. A shelf the
+    client invents a field on would otherwise be stored verbatim and handed
+    back to the *admin* UI, which builds its editors from these dicts and knows
+    nothing of it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=128)
+    title: str = Field(max_length=256)
+    description: str = Field(max_length=1024)
+    path: str = Field(min_length=1, max_length=1024)
+    discoverHubKey: str | None = Field(default=None, max_length=512)
+    style: Literal[SHELF_STYLES]
+    titleOnly: bool
+
+
+class HomeDocument(BaseModel):
+    """``PUT /home`` — one whole ``HomeSettings`` document from a client.
+
+    The mirror of :func:`cplus_service.home.document`, and deliberately not the
+    same object: what leaves is projected from whatever is on file and tolerates
+    gaps in it, while what arrives is a complete document from a client that
+    holds one and is rejected outright if it is not.
+
+    ``modifiedAt`` is **required**, unlike on the way out. Absence on the way
+    out means "never edited"; a client with a never-edited document has nothing
+    to push and should not be pushing, so absence on the way in is a bug rather
+    than a state — and a document with no stamp could not be merged against one
+    that has one anyway.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    carouselEnabled: bool
+    carouselIncludeOnDeck: bool
+    carouselShelf: HomeShelf
+    homeShelves: list[HomeShelf] = Field(min_length=1, max_length=MAX_HOME_SHELVES)
+    topShelf: HomeShelf
+    modifiedAt: datetime
 
 
 class PushDeviceRegistration(BaseModel):
