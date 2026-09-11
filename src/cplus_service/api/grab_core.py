@@ -42,6 +42,15 @@ async def execute_grab(
     row's ``action_id`` is nullable for exactly that reason. It is also what
     decides whether this raises a notification — see below.
     """
+    # An action-free grab is the admin app's own work, not a user exercising an
+    # action, so it is filed under ADMIN (with a ``kind``) rather than GRAB. The
+    # two would otherwise be indistinguishable in the activity log: both write a
+    # ``grabs`` row and a grab event, and the only tell was a null ``action_id``,
+    # which is also what a grab whose action was later deleted looks like.
+    admin = action is None
+    event_type = EventType.ADMIN if admin else EventType.GRAB
+    kind = {"kind": "grab"} if admin else {}
+
     try:
         await prowlarr.grab(
             guid=body.release_guid,
@@ -55,8 +64,9 @@ async def execute_grab(
         db.add(
             ActivityLog(
                 user_id=user.id,
-                event_type=EventType.GRAB,
+                event_type=event_type,
                 detail={
+                    **kind,
                     "action_id": action.id if action else None,
                     "download_client_id": download_client_id,
                     "release_guid": body.release_guid,
@@ -87,8 +97,9 @@ async def execute_grab(
     db.add(
         ActivityLog(
             user_id=user.id,
-            event_type=EventType.GRAB,
+            event_type=event_type,
             detail={
+                **kind,
                 "action_id": action.id if action else None,
                 "action_name": action.name if action else None,
                 "download_client_id": download_client_id,

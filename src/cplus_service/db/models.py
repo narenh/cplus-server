@@ -39,8 +39,23 @@ class Base(DeclarativeBase):
 
 
 class EventType(StrEnum):
+    """What kind of thing an :class:`ActivityLog` row records.
+
+    ``SEARCH`` and ``GRAB`` are the end-user events a tvOS client causes:
+    browsing a title and running an action. ``REQUEST`` is the other end-user
+    event — filing a request, or deleting one's own. ``ADMIN`` is the request
+    manager's own work — the action-free grab, the unrestricted search, and
+    approving/declining/deleting any request — which is deliberately not filed
+    under ``GRAB``/``SEARCH``/``REQUEST`` just because it happens to reach
+    Prowlarr or Seerr: an admin picking a release is not a user exercising an
+    action. ``detail["kind"]`` names the specific operation (``grab``,
+    ``search``, ``request``, ``request_approve``, ...).
+    """
+
     SEARCH = "search"
     GRAB = "grab"
+    REQUEST = "request"
+    ADMIN = "admin"
 
 
 class ApnsEnvironment(StrEnum):
@@ -531,7 +546,7 @@ class ApnsDevice(Base):
 
 
 class ActivityLog(Base):
-    """Append-only audit trail of searches and grabs.
+    """Append-only audit trail of searches, grabs, requests and admin operations.
 
     ``detail`` is free-form JSON whose shape depends on ``event_type``; nothing
     queries into it, so it stays deliberately unstructured.

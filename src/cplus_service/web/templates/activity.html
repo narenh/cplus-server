@@ -16,23 +16,31 @@
       <td class="nowrap muted">{{ entry.created_at|when }}</td>
       <td>{{ usernames.get(entry.user_id, "—") }}</td>
       <td>
-        {# Requests are logged as grab events with a kind marker: the stored
-           event_type enum is search|grab, and a request is neither a search nor
-           a Prowlarr grab. #}
-        {% if detail.get("kind") == "request" %}
+        {# event_type is search|grab|request|admin. A filed request may still be
+           seen as grab+kind=request on an install that has not run the backfill
+           migration, so the badge keeps that fallback. Admin operations also
+           name the operation in the detail's kind. #}
+        {% if entry.event_type == "grab" and detail.get("kind") == "request" %}
           <span class="badge">request</span>
         {% else %}
           <span class="badge">{{ entry.event_type }}</span>
         {% endif %}
+        {% if entry.event_type == "admin" and detail.get("kind") %}
+          <span class="muted">{{ detail.get("kind") }}</span>
+        {% endif %}
         {% if detail.get("success") is false %}<span class="err">failed</span>{% endif %}
       </td>
       <td class="detail">
-        {% if entry.event_type == "search" and detail.get("kind") != "request" %}
-          {{ detail.get("imdb_id", "?") }}
-          <span class="muted">· {{ detail.get("action_ids", [])|length }} action(s)</span>
-        {% elif detail.get("kind") == "request" %}
+        {% if detail.get("kind") == "request" %}
           tmdb {{ detail.get("tmdb_id", "?") }} · {{ detail.get("type", "?") }}
           {% if detail.get("seasons") %}<span class="muted">seasons {{ detail.seasons|join(", ") }}</span>{% endif %}
+        {% elif (detail.get("kind") or "").startswith("request_") %}
+          request {{ detail.get("seerr_request_id", "?") }}
+        {% elif detail.get("kind") == "search" %}
+          {{ detail.get("query") or detail.get("imdb_id") or "all indexers" }}
+        {% elif entry.event_type == "search" %}
+          {{ detail.get("imdb_id", "?") }}
+          <span class="muted">· {{ detail.get("action_ids", [])|length }} action(s)</span>
         {% else %}
           {{ detail.get("release_title") or detail.get("release_guid") or "—" }}
         {% endif %}

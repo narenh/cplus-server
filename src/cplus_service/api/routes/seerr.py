@@ -143,7 +143,7 @@ async def decide_request(
         db.add(
             ActivityLog(
                 user_id=user.id,
-                event_type=EventType.GRAB,
+                event_type=EventType.ADMIN,
                 detail={
                     "kind": f"request_{decision}",
                     "seerr_request_id": request_id,
@@ -158,7 +158,7 @@ async def decide_request(
     db.add(
         ActivityLog(
             user_id=user.id,
-            event_type=EventType.GRAB,
+            event_type=EventType.ADMIN,
             detail={
                 "kind": f"request_{decision}",
                 "seerr_request_id": request_id,
@@ -175,9 +175,11 @@ async def delete_request(
 ) -> Response:
     """Delete a request.
 
-    Not gated here: Seerr lets a user delete their own and an admin delete any,
-    which is the rule we want, and it enforces it inline rather than by
-    middleware.
+    Not gated here: Seerr lets a user delete their own pending request and a
+    manager delete any, which is the rule we want, and it enforces it inline
+    rather than by middleware. Because every caller may reach this, the row is
+    attributed by capacity — a manager's delete is admin work, a user's own is
+    not.
     """
     user, auth = await _authenticate(db, seerr, plex_token)
 
@@ -191,7 +193,9 @@ async def delete_request(
     db.add(
         ActivityLog(
             user_id=user.id,
-            event_type=EventType.GRAB,
+            event_type=(
+                EventType.ADMIN if auth.user.can_manage_requests else EventType.REQUEST
+            ),
             detail={
                 "kind": "request_delete",
                 "seerr_request_id": request_id,

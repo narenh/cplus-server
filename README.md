@@ -443,7 +443,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, release title/guid/indexer/size, `created_at` |
-| `activity_log` | user, `event_type` (`search`\|`grab`), `detail` JSON, `created_at` |
+| `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
 
@@ -983,9 +983,12 @@ and passed through to Seerr verbatim. Season `0` is specials. We never
 substitute the literal `"all"`, which would silently drop them.
 
 No `grabs` row is written — nothing was grabbed. It is recorded in
-`activity_log` instead, with `detail.kind == "request"`; the `event_type` enum
-is `search | grab` per the stage-1 schema, so requests are logged as `grab` with
-that discriminator rather than widening the enum.
+`activity_log` instead, with `event_type == "request"` and
+`detail.kind == "request"`. A request is a user event, and filing one is its own
+kind of event rather than a grab; the request *manager's* operations on a
+request (approve, decline, delete) are logged under the `admin` event type
+instead — see
+[Admin operations are their own event type](#admin-operations-are-their-own-event-type).
 
 ---
 
@@ -1096,11 +1099,30 @@ rendered on `GET /admin/users` instead — and stage 3 added routes the stubs di
 not anticipate (`/quality-profiles/new`, `/quality-profiles/rows`,
 `/users/{id}/delete`, and the login/PIN routes).
 
-**Requests are logged as `grab` events.** `activity_log.event_type` is the
-stage-1 enum `search | grab`, and a request is neither a search nor a Prowlarr
-grab. It is stored as `grab` with `detail.kind == "request"`, and the activity
-page renders it as its own badge. Widening the enum would be cleaner but is a
-schema change nobody asked for.
+**Requests are their own event type.** A request is neither a search nor a
+Prowlarr grab, so filing one (`POST /request`) and deleting one's own
+(`DELETE /seerr/requests/{id}`) are recorded as `activity_log.event_type ==
+"request"`, with `detail.kind == "request"` / `"request_delete"`. A request gets
+no `grabs` row — nothing reached Prowlarr. Before this type existed, a filed
+request was stored as `grab` with `detail.kind == "request"`; the backfill
+migration rewrites those rows.
+
+**Admin operations are their own event type.** The action-free grab
+(`POST /manager/grab`), the unrestricted manager search (`GET /manager/search`),
+and a manager approving/declining/deleting a request (`/seerr/requests/*`) are
+recorded as `activity_log.event_type == "admin"`, with `detail.kind` naming the
+operation (`grab`, `search`, `request_approve`, ...). They used to reuse
+`grab`/`search`, which conflated the admin's own work with a user's action grab
+and made the two indistinguishable except by a null `action_id` — the same thing
+a grab whose action was later deleted looks like. Whether a delete is `admin` or
+`request` is decided by the caller's capacity, not the route: Seerr lets any
+user delete their own pending request and a manager delete any, so the route is
+ungated and the row is attributed accordingly. The stored `event_type` is a
+plain `String(32)`, not a constrained enum, so the new values needed no schema
+change. Migration `97cb1bac43d5` backfills the history: it rewrites the rows
+whose old shape is unambiguous (a filed request, a request decision, an
+action-free grab, the manager's unrestricted search) and leaves any row whose
+shape predates those markers alone.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
 the user's next `/register` call, because `/titles/{imdb_id}/actions` and

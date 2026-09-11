@@ -130,8 +130,9 @@ async def search(
     db.add(
         ActivityLog(
             user_id=user.id,
-            event_type=EventType.SEARCH,
+            event_type=EventType.ADMIN,
             detail={
+                "kind": "search",
                 "imdb_id": imdb_id,
                 "query": query,
                 "preferred_only": preferred_only,

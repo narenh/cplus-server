@@ -14,7 +14,7 @@ import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cplus_service.db.models import ActivityLog, Config, User
+from cplus_service.db.models import ActivityLog, Config, EventType, User
 
 from .conftest import SEERR_URL, seerr_user_payload
 
@@ -194,6 +194,7 @@ async def test_an_admin_can_decide_a_request(
     assert route.called
 
     entry = (await db.execute(select(ActivityLog))).scalars().all()[-1]
+    assert entry.event_type == EventType.ADMIN
     assert entry.detail["kind"] == f"request_{decision}"
     assert entry.detail["seerr_request_id"] == 7
     assert entry.detail["success"] is True
@@ -256,6 +257,8 @@ async def test_seerrs_own_rejection_is_surfaced(
     assert response.json()["detail"] == "Request not found"
 
     entry = (await db.execute(select(ActivityLog))).scalars().all()[-1]
+    assert entry.event_type == EventType.ADMIN
+    assert entry.detail["kind"] == "request_approve"
     assert entry.detail["success"] is False
 
 
@@ -268,8 +271,9 @@ async def test_seerrs_own_rejection_is_surfaced(
 async def test_deleting_a_request_is_left_to_seerrs_own_rule(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
-    # Seerr allows a user to delete their own and an admin to delete any, which
-    # is the rule we want, so cplus adds no gate of its own.
+    # Seerr allows a user to delete their own pending request and a manager to
+    # delete any, which is the rule we want, so cplus adds no gate of its own.
+    # A plain user's delete is a user event, not an admin one.
     mock_auth(PLAIN_USER)
     route = respx.delete(f"{SEERR_URL}/api/v1/request/9").mock(
         return_value=httpx.Response(204)
@@ -282,6 +286,24 @@ async def test_deleting_a_request_is_left_to_seerrs_own_rule(
     assert route.called
 
     entry = (await db.execute(select(ActivityLog))).scalars().all()[-1]
+    assert entry.event_type == EventType.REQUEST
+    assert entry.detail["kind"] == "request_delete"
+
+
+@respx.mock
+async def test_a_managers_delete_is_logged_as_admin(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Same endpoint, but a manager deleting is admin work — attributed by
+    # capacity, since the route itself cannot gate either caller.
+    mock_auth(MANAGE_REQUESTS)
+    respx.delete(f"{SEERR_URL}/api/v1/request/9").mock(return_value=httpx.Response(204))
+
+    response = await client.delete("/seerr/requests/9", headers=plex_headers)
+
+    assert response.status_code == 200
+    entry = (await db.execute(select(ActivityLog))).scalars().all()[-1]
+    assert entry.event_type == EventType.ADMIN
     assert entry.detail["kind"] == "request_delete"
 
 

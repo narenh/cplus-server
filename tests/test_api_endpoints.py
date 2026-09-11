@@ -513,7 +513,7 @@ async def test_request_writes_activity_log_but_no_grab_row(
 
     entries = (
         await db.execute(
-            select(ActivityLog).where(ActivityLog.event_type == EventType.GRAB)
+            select(ActivityLog).where(ActivityLog.event_type == EventType.REQUEST)
         )
     ).scalars().all()
     assert len(entries) == 1

@@ -89,7 +89,7 @@ async def create_request(
         db.add(
             ActivityLog(
                 user_id=user.id,
-                event_type=EventType.GRAB,
+                event_type=EventType.REQUEST,
                 detail={
                     "kind": "request",
                     "action_id": action.id,
@@ -115,7 +115,7 @@ async def create_request(
     db.add(
         ActivityLog(
             user_id=user.id,
-            event_type=EventType.GRAB,
+            event_type=EventType.REQUEST,
             detail={
                 "kind": "request",
                 "action_id": action.id,

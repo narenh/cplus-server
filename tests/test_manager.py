@@ -118,6 +118,39 @@ async def test_a_request_manager_can_grab_without_an_action(
     assert record.action_id is None  # no action was involved
     assert record.release_title == WEB_2160["title"]
 
+    # Filed as an admin event, not a user grab: the action-free grab reaches
+    # Prowlarr but is not a user exercising an action, and the null action_id
+    # alone cannot tell it apart from a grab whose action was later deleted.
+    entry = (
+        await db.execute(
+            select(ActivityLog).where(ActivityLog.event_type == EventType.ADMIN)
+        )
+    ).scalar_one()
+    assert entry.detail["kind"] == "grab"
+    assert entry.detail["action_id"] is None
+
+
+@respx.mock
+async def test_a_failed_action_free_grab_is_still_an_admin_event(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    """The failure row is admin too, so a rejected grab never reads as a user's."""
+    mock_seerr_auth(permissions=2)
+    respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(500, json={"message": "boom"})
+    )
+
+    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
+
+    assert response.status_code == 502
+    entry = (
+        await db.execute(
+            select(ActivityLog).where(ActivityLog.event_type == EventType.ADMIN)
+        )
+    ).scalar_one()
+    assert entry.detail["kind"] == "grab"
+    assert entry.detail["success"] is False
+
 
 @respx.mock
 async def test_a_regular_user_cannot_grab_without_an_action(
@@ -413,7 +446,7 @@ async def test_manager_search_requires_exactly_one_of_imdb_id_or_query(
 
 
 @respx.mock
-async def test_manager_search_is_logged_to_the_activity_log(
+async def test_manager_search_is_logged_as_an_admin_event(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     mock_seerr_auth(permissions=2)
@@ -427,9 +460,10 @@ async def test_manager_search_is_logged_to_the_activity_log(
 
     entry = (
         await db.execute(
-            select(ActivityLog).where(ActivityLog.event_type == EventType.SEARCH)
+            select(ActivityLog).where(ActivityLog.event_type == EventType.ADMIN)
         )
     ).scalar_one()
+    assert entry.detail["kind"] == "search"
     assert entry.detail["query"] == "dune part two"
     assert entry.detail["preferred_only"] is True
 

@@ -1465,13 +1465,18 @@ async def test_activity_log_renders_searches_grabs_and_requests(
             ),
             ActivityLog(
                 user_id=admin.id,
-                event_type=EventType.GRAB,
+                event_type=EventType.REQUEST,
                 detail={"kind": "request", "tmdb_id": 1399, "type": "tv", "seasons": [1, 2]},
             ),
             ActivityLog(
                 user_id=admin.id,
                 event_type=EventType.GRAB,
                 detail={"release_title": "Movie.2024-GRP", "success": False, "error": "boom"},
+            ),
+            ActivityLog(
+                user_id=admin.id,
+                event_type=EventType.ADMIN,
+                detail={"kind": "search", "query": "the office", "success": True},
             ),
         ]
     )
@@ -1483,6 +1488,8 @@ async def test_activity_log_renders_searches_grabs_and_requests(
     assert "tmdb 1399" in response.text
     assert "boom" in response.text
     assert "request" in response.text
+    assert '<span class="badge">admin</span>' in response.text
+    assert "the office" in response.text
 
 
 async def test_the_root_path_goes_to_the_admin_ui(client: httpx.AsyncClient) -> None:
