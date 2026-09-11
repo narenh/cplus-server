@@ -12,6 +12,7 @@
   --line: #dfe3e8;
   --accent: #3b6ea5;
   --ok: #1f7a4d;
+  --warn: #8a6100;
   --err: #b3261e;
   --filter: #8a5a00;
   --preference: #3b6ea5;
@@ -38,6 +39,7 @@
     --line: #2c3138;
     --accent: #7aa9dd;
     --ok: #6ed49b;
+    --warn: #e0b355;
     --err: #f08a84;
     --filter: #e0b060;
     --preference: #7aa9dd;
@@ -192,6 +194,7 @@ form.inline { display: inline; }
 .inline-result { font-size: 14px; }
 .status { min-height: 1.4em; margin-top: 14px; }
 .ok { color: var(--ok); }
+.warn { color: var(--warn); }
 .err { color: var(--err); }
 .errors { color: var(--err); padding-left: 18px; }
 
@@ -455,3 +458,26 @@ table.preview .dropped-by { color: var(--err); }
    switch's own state decides whether the row below it renders at all. */
 .carousel-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
 .carousel-toggle input { width: 17px; height: 17px; margin: 0; cursor: pointer; }
+
+/* Actions table: ranked by dragging a row, so the rows are drag sources in
+   their own right rather than living in a .reorder-row flex container. */
+.actions tbody tr[draggable="true"] { cursor: default; }
+.actions tbody tr.dragging { opacity: .4; }
+.actions td.drag-cell { width: 24px; padding-right: 0; }
+/* Fixed, so the verdict line wraps inside the column instead of widening it
+   and squeezing the name and button-title fields next door. */
+.actions .icon-cell { width: 175px; }
+.actions .icon-field {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.actions .name-cell { width: 165px; }
+.actions .title-cell { width: 135px; }
+.icon-verdict {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 3px;
+  min-height: 1em;
+}

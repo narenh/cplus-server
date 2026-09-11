@@ -5,30 +5,49 @@
   <p class="err">Create a quality profile first — every Prowlarr-backed action needs one.</p>
 {% endif %}
 
+<!-- Dropping a dragged row writes the new order into this and submits it for
+     real, which comes back as a normal page render in the new order. See
+     static/reorder.js. -->
+<form method="post" action="/admin/actions/reorder" id="actions-reorder" class="hidden"></form>
+
+<datalist id="icon-symbols">
+  {% for symbol in suggested_icons %}<option value="{{ symbol }}"></option>{% endfor %}
+</datalist>
+
 <table class="actions">
   <thead>
     <tr>
-      <th>Name <span class="th-hint">admin only</span></th>
-      <th>Button title <span class="th-hint">what users see</span></th>
+      <th></th>
+      <th class="name-cell">Name <span class="th-hint">admin only</span></th>
+      <th class="title-cell">Button title <span class="th-hint">what users see</span></th>
+      <th class="icon-cell">Icon <span class="th-hint">SF Symbol</span></th>
       <th>Download client</th>
       <th>Quality profile</th>
       <th></th>
     </tr>
   </thead>
-  <tbody>
+  <tbody data-reorder-list data-reorder-form="actions-reorder">
   {% for action in actions %}
     {% if action.is_system %}
-      <tr class="system">
+      <tr class="system" draggable="true" data-reorder-id="{{ action.id }}">
         <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
-        <td>
+        <td class="drag-cell"><span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span></td>
+        <td class="name-cell">
           <input form="action-{{ action.id }}" type="text" name="name"
                  value="{{ action.name }}" required>
           <span class="badge">built in</span>
         </td>
-        <td>
+        <td class="title-cell">
           <input form="action-{{ action.id }}" type="text" name="display_title"
                  value="{{ action.display_title or '' }}" maxlength="128"
                  placeholder="{{ action.name }}">
+        </td>
+        <td class="icon-cell">
+          <input form="action-{{ action.id }}" type="text" name="icon" class="icon-field"
+                 value="{{ action.icon or '' }}" maxlength="64" list="icon-symbols"
+                 placeholder="arrow.down.circle" autocomplete="off"
+                 data-known="{{ suggested_icons | join(' ') }}">
+          <span class="icon-verdict"></span>
         </td>
         <td class="muted" colspan="2">
           Files a request in Seerr. Never touches Prowlarr, so it has no
@@ -41,13 +60,21 @@
         </td>
       </tr>
     {% else %}
-      <tr>
+      <tr draggable="true" data-reorder-id="{{ action.id }}">
         <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
-        <td><input form="action-{{ action.id }}" type="text" name="name" value="{{ action.name }}" required></td>
-        <td>
+        <td class="drag-cell"><span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span></td>
+        <td class="name-cell"><input form="action-{{ action.id }}" type="text" name="name" value="{{ action.name }}" required></td>
+        <td class="title-cell">
           <input form="action-{{ action.id }}" type="text" name="display_title"
                  value="{{ action.display_title or '' }}" maxlength="128"
                  placeholder="{{ action.name }}">
+        </td>
+        <td class="icon-cell">
+          <input form="action-{{ action.id }}" type="text" name="icon" class="icon-field"
+                 value="{{ action.icon or '' }}" maxlength="64" list="icon-symbols"
+                 placeholder="arrow.down.circle" autocomplete="off"
+                 data-known="{{ suggested_icons | join(' ') }}">
+          <span class="icon-verdict"></span>
         </td>
         <td>
           <select form="action-{{ action.id }}" name="download_client_id" required>
@@ -85,8 +112,15 @@
 
   <tr class="new-row">
     <form method="post" action="/admin/actions" id="new-action"></form>
-    <td><input form="new-action" type="text" name="name" placeholder="Add to library in HD" required></td>
-    <td><input form="new-action" type="text" name="display_title" maxlength="128" placeholder="Play Now"></td>
+    <td></td>
+    <td class="name-cell"><input form="new-action" type="text" name="name" placeholder="Add to library in HD" required></td>
+    <td class="title-cell"><input form="new-action" type="text" name="display_title" maxlength="128" placeholder="Play Now"></td>
+    <td class="icon-cell">
+      <input form="new-action" type="text" name="icon" class="icon-field" maxlength="64"
+             list="icon-symbols" placeholder="arrow.down.circle" autocomplete="off"
+             data-known="{{ suggested_icons | join(' ') }}">
+      <span class="icon-verdict"></span>
+    </td>
     <td>
       <select form="new-action" name="download_client_id" required
               hx-get="/admin/prowlarr/download-clients?format=html"
@@ -107,6 +141,19 @@
   </tbody>
 </table>
 <p class="hint">
+  <strong>Drag a row</strong> to reorder. Canopy+ draws the first two as
+  buttons on the detail page and folds the rest into a &#8230; menu, so the
+  order here is what decides which two a user sees. The built-in action is
+  ranked like any other — put it wherever it belongs.
+</p>
+<p class="hint">
+  <strong>Icon</strong> is an SF Symbol name. The field suggests the ones we
+  know render, and warns on anything else without refusing it: no server can
+  know what symbols a given tvOS version ships, and Canopy+ falls back to
+  <code>arrow.down.circle</code> when it cannot draw the name. Leave it blank
+  for the app's own default.
+</p>
+<p class="hint">
   <strong>Name</strong> is yours — it identifies the action here, in the grab
   history and in notifications. <strong>Button title</strong> is what the
   Canopy+ app prints on the button; leave it blank and the name is used. Name an
@@ -121,4 +168,9 @@
   word held back for it: on any other button it would promise a user the one
   thing that button cannot do.
 </p>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/reorder.js" defer></script>
+<script src="/static/icon-field.js" defer></script>
 {% endblock %}

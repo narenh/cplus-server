@@ -1332,6 +1332,160 @@ async def test_editing_and_deleting_an_ordinary_action(
     assert await db.get(Action, action.id) is None
 
 
+async def test_dragging_actions_rewrites_every_rank(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Positions come from the submitted order, not from the ids in it."""
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    first = await make_action(db, "Stream Now", sort_order=50)
+    second = await make_action(db, "Add to Library", sort_order=60)
+
+    response = await client.post(
+        "/admin/actions/reorder",
+        data={"order": [str(first.id), str(system.id), str(second.id)]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    db.expunge_all()
+    assert (await db.get(Action, first.id)).sort_order == 0
+    assert (await db.get(Action, system.id)).sort_order == 1
+    assert (await db.get(Action, second.id)).sort_order == 2
+
+
+async def test_reorder_ignores_ids_that_are_not_actions(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # The page the admin dragged may have gone stale. Reordering what is still
+    # there beats refusing the whole drop.
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now", sort_order=9)
+
+    response = await client.post(
+        "/admin/actions/reorder",
+        data={"order": ["4242", str(action.id)]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    db.expunge_all()
+    assert (await db.get(Action, action.id)).sort_order == 1
+
+
+async def test_the_actions_page_lists_them_in_rank_order(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # The admin should be reading the same order their users are sent.
+    await signed_in(client, db)
+    await make_action(db, "Zulu", sort_order=1)
+    await make_action(db, "Alpha", sort_order=2)
+
+    body = (await client.get("/admin/actions")).text
+
+    assert body.index("Zulu") < body.index("Alpha")
+
+
+async def test_a_new_action_lands_last_in_the_ranking(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Arriving at the top would push an existing button into the overflow menu
+    # on every tvOS in the house, which is not what "add an action" means.
+    await signed_in(client, db)
+    profile = QualityProfile(name="P", rules=[])
+    db.add(profile)
+    await db.commit()
+    existing = await make_action(db, "Stream Now", sort_order=7)
+
+    await client.post(
+        "/admin/actions",
+        data={
+            "name": "Add 4K",
+            "download_client_id": "5",
+            "quality_profile_id": str(profile.id),
+        },
+        follow_redirects=False,
+    )
+
+    created = (
+        await db.execute(select(Action).where(Action.name == "Add 4K"))
+    ).scalar_one()
+    assert created.sort_order > existing.sort_order
+
+
+async def test_an_unknown_icon_is_saved_rather_than_refused(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """The server cannot know what symbols a tvOS build ships, so it does not judge.
+
+    The field warns; the client falls back. Refusing here would be this service
+    claiming knowledge it does not have.
+    """
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "icon": "sparkle.magnifyingglass.badge",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await db.refresh(action)
+    assert action.icon == "sparkle.magnifyingglass.badge"
+
+
+async def test_an_icon_that_is_not_a_symbol_name_is_refused(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # Shape, not membership: this rejects markup and whitespace, not names we
+    # happen not to recognise.
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "icon": "<script>alert(1)</script>",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+    )
+    assert response.status_code == 400
+
+    await db.refresh(action)
+    assert action.icon is None
+
+
+async def test_a_blank_icon_clears_it(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now", icon="play.fill")
+
+    await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "icon": "  ",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+
+    await db.refresh(action)
+    assert action.icon is None
+
+
 # --------------------------------------------------------------------------- #
 # Permissions
 # --------------------------------------------------------------------------- #

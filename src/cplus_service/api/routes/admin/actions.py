@@ -26,7 +26,7 @@ import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from ....bootstrap import REQUEST_ACTION_NAME
@@ -58,6 +58,55 @@ async def _download_clients(state: StateDep, db: DbDep) -> tuple[list[dict], str
 
 #: Matches ``Action.display_title``'s column width; the form is client input.
 MAX_DISPLAY_TITLE = 128
+
+#: Matches ``Action.icon``'s column width.
+MAX_ICON = 64
+
+#: SF Symbols the icon field offers, and the only ones it can vouch for.
+#:
+#: **Not a whitelist.** A name outside this list is saved as typed and warned
+#: about, because no server can know which symbols a given tvOS version ships:
+#: refusing one would be this service claiming knowledge it does not have, and
+#: the client already falls back when it cannot render a name. The list is
+#: what the field autocompletes and what it shows a tick for.
+SUGGESTED_ICONS = (
+    "plus",
+    "play",
+    "play.fill",
+    "arrow.down",
+    "arrow.down.circle",
+    "checkmark",
+    "star.fill",
+    "sparkles",
+    "tv",
+    "film",
+    "bolt.fill",
+    "square.and.arrow.down",
+)
+
+#: What a symbol name may be made of. Apple's are lowercase words separated by
+#: dots, with the odd digit; this rejects markup, whitespace and control
+#: characters rather than judging the name itself.
+ICON_CHARSET = set("abcdefghijklmnopqrstuvwxyz0123456789.")
+
+
+def _clean_icon(raw: str) -> str | None:
+    """Normalise the icon field. Blank means "let the client choose"."""
+    clean = raw.strip()
+    if not clean:
+        return None
+    if len(clean) > MAX_ICON:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"A symbol name can be at most {MAX_ICON} characters.",
+        )
+    if not set(clean) <= ICON_CHARSET:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "An SF Symbol name is lowercase words separated by dots, like"
+            " 'arrow.down.circle'.",
+        )
+    return clean
 
 
 def _clean_display_title(raw: str) -> str | None:
@@ -101,8 +150,10 @@ async def _load(db: DbDep, action_id: int) -> Action:
 async def list_actions(
     request: Request, state: StateDep, db: DbDep, admin: AdminPageDep
 ) -> Response:
+    # The order the client is sent them in, which is the whole point of the
+    # ranking: the admin should be looking at the same list their users get.
     actions = list(
-        (await db.execute(select(Action).order_by(Action.is_system, Action.name)))
+        (await db.execute(select(Action).order_by(Action.sort_order, Action.id)))
         .scalars()
         .all()
     )
@@ -123,6 +174,7 @@ async def list_actions(
             "clients": clients,
             "client_names": client_names,
             "client_error": client_error,
+            "suggested_icons": SUGGESTED_ICONS,
             "admin": admin,
             "title": "Actions",
             "nav": "actions",
@@ -138,20 +190,29 @@ async def create_action(
     download_client_id: int = Form(...),
     quality_profile_id: int = Form(...),
     display_title: str = Form(default=""),
+    icon: str = Form(default=""),
 ) -> Response:
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
     clean_title = _clean_display_title(display_title)
+    clean_icon = _clean_icon(icon)
     _reject_reserved_word(clean, field="name")
     _reject_reserved_word(clean_title, field="button title")
     if await db.get(QualityProfile, quality_profile_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
 
+    # Last in the ranking rather than first: a new action appearing at the top
+    # would push whatever was there into the overflow menu on every tvOS in the
+    # house, which is not what "add an action" should mean.
+    last = (await db.execute(select(func.max(Action.sort_order)))).scalar()
+
     db.add(
         Action(
             name=clean,
             display_title=clean_title,
+            icon=clean_icon,
+            sort_order=(last or 0) + 1,
             download_client_id=download_client_id,
             quality_profile_id=quality_profile_id,
         )
@@ -167,6 +228,39 @@ async def create_action(
     return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/reorder")
+async def reorder_actions(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+    """Rewrite every rank from the order the ids arrive in.
+
+    **Declared above ``POST /{action_id}``**, which would otherwise match this
+    path and reject "reorder" as a malformed id — FastAPI takes the first
+    route that matches, not the first that validates.
+
+    Positions are reassigned from zero rather than the submitted ids being
+    trusted to carry ranks, so a dragged list can never leave gaps or an id
+    ordering that disagrees with the ranking.
+
+    Ids that are not actions are ignored, and actions the form did not mention
+    keep the rank they had. Both are the same judgement: this is a reordering
+    of what the admin was looking at, and a list that went stale between render
+    and drop should reorder what it can rather than fail outright.
+    """
+    form = await request.form()
+    order = [str(value) for value in form.getlist("order")]
+
+    actions = {
+        str(action.id): action
+        for action in (await db.execute(select(Action))).scalars().all()
+    }
+    for position, action_id in enumerate(order):
+        action = actions.get(action_id)
+        if action is not None:
+            action.sort_order = position
+
+    await db.flush()
+    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/{action_id}")
 async def update_action(
     db: DbDep,
@@ -174,6 +268,7 @@ async def update_action(
     action_id: int,
     name: str = Form(...),
     display_title: str = Form(default=""),
+    icon: str = Form(default=""),
     download_client_id: int | None = Form(default=None),
     quality_profile_id: int | None = Form(default=None),
 ) -> Response:
@@ -189,6 +284,7 @@ async def update_action(
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
     clean_title = _clean_display_title(display_title)
+    clean_icon = _clean_icon(icon)
 
     if action.is_system:
         # The reserved word is its own — this is the action the word describes.
@@ -216,6 +312,7 @@ async def update_action(
     # state worth being able to reason about.
     action.name = clean
     action.display_title = clean_title
+    action.icon = clean_icon
     if not action.is_system:
         action.download_client_id = download_client_id
         action.quality_profile_id = quality_profile_id
