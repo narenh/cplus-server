@@ -143,6 +143,14 @@ async def search(
 
     preferred_indexer_id = config.preferred_indexer_id
 
+    # End the transaction before the stream starts. The request dependency's
+    # own commit does not run until the body drains, and a Prowlarr search can
+    # take a minute — holding a SQLite write lock that long fails every
+    # concurrent request with ``database is locked``, which is what made the
+    # admin app report "cplus-server ran into a problem" on a second screen
+    # while a search was still running. See :func:`..deps.get_db`.
+    await db.commit()
+
     async def body() -> AsyncIterator[str]:
         async for phase in stream_search(
             prowlarr=prowlarr,

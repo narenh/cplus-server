@@ -12,7 +12,9 @@ any action — lives here instead.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import httpx
 import respx
@@ -664,3 +666,63 @@ async def test_tmdb_token_502s_when_seerr_is_unreachable(
     seerr_is_unreachable()
     response = await client.get("/manager/tmdb-token", headers=plex_headers)
     assert response.status_code == 502
+
+
+# --------------------------------------------------------------------------- #
+# A search in flight must not lock the rest of the service out
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+async def test_a_slow_search_does_not_block_another_request(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    """The admin app uses two screens at once, and both must work.
+
+    A streamed response keeps its request alive until the body drains, and the
+    session dependency does not commit until then either — so everything the
+    handler wrote sat in an open SQLite transaction for as long as Prowlarr
+    took to answer. Every other request writes too (authenticating refreshes
+    the caller's token mapping), so a search in flight held a write lock the
+    rest of the service queued behind and then failed on with ``database is
+    locked`` — reaching the app as a bare HTTP 500.
+
+    Asserted as "the second request finishes while the first is still
+    streaming", because that is the property that broke: correctness here is
+    not eventual, it is concurrent.
+    """
+    mock_seerr_auth(permissions=2)
+    respx.get(f"{SEERR_URL}/api/v1/auth/me").mock(
+        return_value=httpx.Response(200, json=seerr_user_payload(permissions=2))
+    )
+    # Settle the caller's own rows first, so what this measures is the lock a
+    # search in flight holds and not two requests racing to create a user.
+    await client.get("/seerr/me", headers=plex_headers)
+
+    search_duration = 2.0
+
+    async def slow_prowlarr(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(search_duration)
+        return httpx.Response(200, json=[WEB_2160])
+
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(side_effect=slow_prowlarr)
+
+    started = time.monotonic()
+
+    async def search() -> httpx.Response:
+        return await client.get(
+            "/manager/search", params={"query": "dune"}, headers=plex_headers
+        )
+
+    async def alongside() -> tuple[httpx.Response, float]:
+        await asyncio.sleep(0.2)
+        response = await client.get("/seerr/me", headers=plex_headers)
+        return response, time.monotonic() - started
+
+    searched, (alongside_response, alongside_elapsed) = await asyncio.gather(
+        search(), alongside()
+    )
+
+    assert searched.status_code == 200
+    assert alongside_response.status_code == 200
+    assert alongside_elapsed < search_duration

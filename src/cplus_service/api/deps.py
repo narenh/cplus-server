@@ -43,7 +43,18 @@ StateDep = Annotated[AppState, Depends(get_state)]
 
 
 async def get_db(state: StateDep) -> AsyncIterator[AsyncSession]:
-    """A transactional session per request: commits on success, rolls back on error."""
+    """A transactional session per request: commits on success, rolls back on error.
+
+    **A handler returning a ``StreamingResponse`` must commit before it
+    returns.** This dependency's exit code runs only once the response body has
+    finished streaming, so everything the handler wrote stays in an open
+    transaction for as long as the stream lasts — minutes, for a search waiting
+    on Prowlarr. SQLite holds a write lock for that whole time and every other
+    request that writes (which is all of them: authentication refreshes the
+    caller's token mapping) waits on it and then fails ``database is locked``.
+    Committing at the end of the handler ends the transaction before the first
+    byte of the body is produced; the commit here is then a no-op.
+    """
     async with state.sessionmaker() as session:
         try:
             yield session

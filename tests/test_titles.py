@@ -8,7 +8,9 @@ free-text search's bare ``recommendations`` dict to deserve its own file.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import httpx
 import respx
@@ -479,3 +481,45 @@ async def test_any_live_seerr_call_primes_the_mapping_for_titles(
     assert after.status_code == 200
     # No actions granted, so nothing is offered.
     assert ndjson(after)[0]["actions"] == []
+
+
+@respx.mock
+async def test_a_slow_title_search_does_not_block_another_request(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    """The tvOS side of the same lock the admin app's search had.
+
+    A streamed response's session dependency commits only once the body has
+    drained, so the activity-log row and the token-mapping refresh this handler
+    writes sat in an open SQLite transaction for the whole Prowlarr search —
+    long enough for any concurrent request to give up with ``database is
+    locked``. See ``test_a_slow_search_does_not_block_another_request``.
+    """
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+    user = (await db.execute(select(User))).scalars().one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    search_duration = 2.0
+
+    async def slow_prowlarr(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(search_duration)
+        return httpx.Response(200, json=[WEB_2160])
+
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(side_effect=slow_prowlarr)
+
+    started = time.monotonic()
+
+    async def alongside() -> tuple[httpx.Response, float]:
+        await asyncio.sleep(0.2)
+        response = await client.get("/register", headers=plex_headers)
+        return response, time.monotonic() - started
+
+    searched, (registered, elapsed) = await asyncio.gather(
+        client.get("/titles/tt0111161/actions", headers=plex_headers), alongside()
+    )
+
+    assert searched.status_code == 200
+    assert registered.status_code == 200
+    assert elapsed < search_duration
