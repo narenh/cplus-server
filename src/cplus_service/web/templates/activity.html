@@ -16,15 +16,11 @@
       <td class="nowrap muted">{{ entry.created_at|when }}</td>
       <td>{{ usernames.get(entry.user_id, "—") }}</td>
       <td>
-        {# event_type is search|grab|request|admin. A filed request may still be
-           seen as grab+kind=request on an install that has not run the backfill
-           migration, so the badge keeps that fallback. Admin operations also
-           name the operation in the detail's kind. #}
-        {% if entry.event_type == "grab" and detail.get("kind") == "request" %}
-          <span class="badge">request</span>
-        {% else %}
-          <span class="badge">{{ entry.event_type }}</span>
-        {% endif %}
+        {# event_type is search|grab|request|admin, for every row: the backfill
+           migration retyped the history, and it runs before the app serves
+           (docker/entrypoint.sh), so no request can still be sitting here as a
+           grab. Admin operations also name the operation in the detail's kind. #}
+        <span class="badge">{{ entry.event_type }}</span>
         {% if entry.event_type == "admin" and detail.get("kind") %}
           <span class="muted">{{ detail.get("kind") }}</span>
         {% endif %}
