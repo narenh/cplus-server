@@ -19,9 +19,10 @@
 {% elif not judgements %}
   <p class="empty">Nothing came back{% if live %} for “{{ query }}”{% endif %}.</p>
 {% else %}
+  <div class="table-scroll">
   <table class="preview">
     <thead>
-      <tr><th></th><th>Release</th><th class="right">Size</th><th>Verdict</th></tr>
+      <tr><th></th><th class="release">Release</th><th class="right size">Size</th><th>Verdict</th></tr>
     </thead>
     <tbody>
       {% for judgement in judgements %}
@@ -60,4 +61,5 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endif %}

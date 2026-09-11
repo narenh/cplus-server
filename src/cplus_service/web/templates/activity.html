@@ -5,16 +5,17 @@
 {% if not entries %}
   <p class="empty">Nothing logged yet.</p>
 {% else %}
+<div class="table-scroll">
 <table>
   <thead>
-    <tr><th>When</th><th>User</th><th>Event</th><th>Detail</th></tr>
+    <tr><th class="when">When</th><th class="who">User</th><th>Event</th><th class="detail">Detail</th></tr>
   </thead>
   <tbody>
   {% for entry in entries %}
     {% set detail = entry.detail or {} %}
     <tr>
-      <td class="nowrap muted">{{ entry.created_at|when }}</td>
-      <td>{{ usernames.get(entry.user_id, "—") }}</td>
+      <td class="when muted">{{ entry.created_at|when }}</td>
+      <td class="who">{{ usernames.get(entry.user_id, "—") }}</td>
       <td>
         {# event_type is search|grab|request|admin, for every row: the backfill
            migration retyped the history, and it runs before the app serves
@@ -46,5 +47,6 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

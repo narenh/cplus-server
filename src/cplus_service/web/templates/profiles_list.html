@@ -5,8 +5,9 @@
 {% if not profiles %}
   <p class="empty">No quality profiles yet. Every action needs one, so start here.</p>
 {% else %}
+<div class="table-scroll">
 <table>
-  <thead><tr><th>Name</th><th>What it does</th><th></th></tr></thead>
+  <thead><tr><th class="who">Name</th><th>What it does</th><th class="actions-col"></th></tr></thead>
   <tbody>
   {% for profile in profiles %}
     {% set summary = summaries.get(profile.id) %}
@@ -37,13 +38,16 @@
           {% endif %}
         {% endif %}
       </td>
-      <td class="right">
+      <td class="right actions-col">
         {% if profile.id in in_use %}
           <span class="muted" title="Used by at least one action">in use</span>
         {% else %}
           <form method="post" action="/admin/quality-profiles/{{ profile.id }}/delete"
                 onsubmit="return confirm('Delete {{ profile.name }}?')">
-            <button type="submit" class="link danger">Delete</button>
+            <button type="submit" class="icon danger" title="Delete {{ profile.name }}"
+                    aria-label="Delete {{ profile.name }}">
+              {% include "partials/_trash_icon.html" with context %}
+            </button>
           </form>
         {% endif %}
       </td>
@@ -51,5 +55,6 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

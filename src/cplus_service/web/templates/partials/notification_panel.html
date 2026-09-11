@@ -123,6 +123,7 @@
         there is nothing to enter here by hand.
       </p>
     {% else %}
+      <div class="table-scroll">
       <table>
         <thead>
           <tr>
@@ -161,7 +162,8 @@
           </tr>
         {% endfor %}
         </tbody>
-      </table>
+            </table>
+      </div>
       <p class="hint">
         A device removed here comes back the next time that app launches and
         registers again. To stop one for good, sign out of the app on it.

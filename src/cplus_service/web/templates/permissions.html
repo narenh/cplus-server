@@ -6,6 +6,7 @@
     identity comes from Seerr, so there is nobody to grant access to until then.
   </p>
 {% else %}
+<div class="table-scroll">
 <table class="perms">
   <thead>
     <tr>
@@ -27,17 +28,23 @@
           {% endwith %}
         </td>
       {% endfor %}
-      <td class="right">
-        <a href="/admin/users/{{ user.id }}/home">Home</a>
-        <form method="post" action="/admin/users/{{ user.id }}/delete"
-              onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
-          <button type="submit" class="link danger">Remove</button>
-        </form>
+      <td class="right actions-col">
+        <span class="row-controls">
+          <a href="/admin/users/{{ user.id }}/home">Home</a>
+          <form method="post" action="/admin/users/{{ user.id }}/delete"
+                onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
+            <button type="submit" class="icon danger" title="Remove {{ user.plex_username }}"
+                    aria-label="Remove {{ user.plex_username }}">
+              {% include "partials/_trash_icon.html" with context %}
+            </button>
+          </form>
+        </span>
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 <p class="hint">
   Granting takes effect at the user's next app launch, when their client calls
   <code>/register</code> again — actions and searches authenticate from a

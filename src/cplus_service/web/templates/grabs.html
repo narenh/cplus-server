@@ -5,15 +5,16 @@
 {% if not grabs %}
   <p class="empty">No grabs recorded yet.</p>
 {% else %}
+<div class="table-scroll">
 <table>
   <thead>
-    <tr><th>When</th><th>User</th><th>Action</th><th>Release</th><th>Size</th></tr>
+    <tr><th class="when">When</th><th class="who">User</th><th>Action</th><th class="release">Release</th><th class="size">Size</th></tr>
   </thead>
   <tbody>
   {% for grab in grabs %}
     <tr>
-      <td class="nowrap muted">{{ grab.created_at|when }}</td>
-      <td>{{ usernames.get(grab.user_id, "—") }}</td>
+      <td class="when muted">{{ grab.created_at|when }}</td>
+      <td class="who">{{ usernames.get(grab.user_id, "—") }}</td>
       {# A null `action_id` means one of two different things, and `via_manager`
          is what tells them apart: an admin grabbing a release directly from
          the admin app (no action was ever involved), or an ordinary grab whose
@@ -26,10 +27,11 @@
         {% endif %}
       </td>
       <td class="release">{{ grab.release_title }}</td>
-      <td class="nowrap">{{ grab.size_bytes|size }}</td>
+      <td class="size">{{ grab.size_bytes|size }}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}
