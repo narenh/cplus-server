@@ -1164,6 +1164,21 @@ Seerr. The UI says so rather than papering over it. Removing the user entirely
 *is* immediate — the delete cascades to their token mappings and browser
 sessions.
 
+**Download clients are on their way out of the client contract.** Nothing a
+Swift client shows should involve a download client or its id: which client a
+grab lands in is the admin's decision, made once on the Actions page, and a
+device has no basis for choosing. tvOS already knows nothing about them —
+Canopy+'s "More Versions" sends no client and takes Prowlarr's default.
+
+The iOS admin app is the remaining holdout: `GET /manager/download-clients`
+exists to populate its grab picker, and `POST /manager/grab` still accepts a
+`download_client_id` for it. Both stay for now so that app keeps working.
+
+**TODO, once the iOS app has dropped its picker:** remove `download_client_id`
+from `ManagerGrabRequest` and delete `GET /manager/download-clients`. Doing it
+before then breaks grabbing in that app, which is why it is staged rather than
+done in one go.
+
 ### Resolved
 
 *Two admin sign-in paths.* Stage 2's `POST /auth` assumed the browser would run
