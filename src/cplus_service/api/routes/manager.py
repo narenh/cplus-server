@@ -3,8 +3,8 @@
 A different caller from both tvOS and the browser admin webui: it authenticates
 with a Plex token like tvOS does, but — unlike tvOS — always validates live
 against Seerr, because these operations (grabbing a specific release directly,
-listing download clients, unrestricted search) have no action and no
-permission grant of their own to check against the cache. Named ``/manager/*``
+unrestricted search) have no action and no permission grant of their own to
+check against the cache. Named ``/manager/*``
 after that live check, to keep it visually distinct from tvOS's ``/grab`` and
 ``/titles/{imdb_id}/actions`` and from the cookie-authenticated ``/admin/*``
 webui.
@@ -25,7 +25,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ActivityLog, EventType
-from ...prowlarr.client import ProwlarrError
 from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import (
@@ -171,44 +170,6 @@ async def search(
         # Proxies love to buffer streamed responses; this asks nginx not to.
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
-
-
-@router.get("/download-clients")
-async def list_download_clients(
-    db: DbDep, prowlarr: ProwlarrDep, seerr: SeerrDep, plex_token: PlexTokenDep
-) -> Any:
-    """Prowlarr's download clients, for the admin app's grab picker.
-
-    The web UI has its own session-gated copy of this; the admin app
-    authenticates with a Plex token instead, so it needs one of its own. Same
-    gate as the action-free grab above — if you cannot grab directly, knowing
-    the client list is no use to you.
-    """
-    try:
-        _, auth = await authenticate_plex_token(db, seerr, plex_token)
-    except SeerrAuthError as exc:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
-        ) from exc
-    except SeerrError as exc:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
-        ) from exc
-
-    require_request_manager(auth)
-
-    try:
-        clients = await prowlarr.list_download_clients()
-    except ProwlarrError as exc:
-        logger.warning("listing download clients failed: %s", exc)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, exc.summary) from exc
-
-    return {
-        "download_clients": [
-            {"id": c.id, "name": c.name, "enable": c.enable, "protocol": c.protocol}
-            for c in clients
-        ]
-    }
 
 
 @router.get("/tmdb-token")

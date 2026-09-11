@@ -571,8 +571,7 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /tv/tmdb/{tmdb_id}/actions` | cache | A TV title: grab actions undecided, so Request only. Plain JSON, one line's shape |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
-| `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id?, release_guid, indexer_id, release_title, size_bytes?}` — omitting the client asks Prowlarr for its own default |
-| `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
+| `POST /manager/grab` | live Seerr | **admin only.** `{release_guid, indexer_id, release_title, size_bytes?}` — no action, and no client to name: Prowlarr picks its own default |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
 | `POST /manager/push-devices` | live Seerr | **admin only.** `{device_token, environment?, device_name?}` — the app offering its APNs token. 409 while notifications are off |
 | `DELETE /manager/push-devices/{token}` | live Seerr | **admin only.** The app handing its own token back on sign-out. Never gated on notifications being on |
@@ -1164,22 +1163,16 @@ Seerr. The UI says so rather than papering over it. Removing the user entirely
 *is* immediate — the delete cascades to their token mappings and browser
 sessions.
 
-**Download clients are on their way out of the client contract.** Nothing a
-Swift client shows should involve a download client or its id: which client a
-grab lands in is the admin's decision, made once on the Actions page, and a
-device has no basis for choosing. tvOS already knows nothing about them —
-Canopy+'s "More Versions" sends no client and takes Prowlarr's default.
-
-The iOS admin app is the remaining holdout: `GET /manager/download-clients`
-exists to populate its grab picker, and `POST /manager/grab` still accepts a
-`download_client_id` for it. Both stay for now so that app keeps working.
-
-**TODO, once the iOS app has dropped its picker:** remove `download_client_id`
-from `ManagerGrabRequest` and delete `GET /manager/download-clients`. Doing it
-before then breaks grabbing in that app, which is why it is staged rather than
-done in one go.
-
 ### Resolved
+
+*Download clients in the client contract.* Nothing a Swift client shows should
+involve a download client or its id: which client a grab lands in is the
+admin's decision, made once on the Actions page, and a device has no basis for
+choosing. tvOS never knew about them; the iOS admin app did, through a picker
+fed by `GET /manager/download-clients` and a `download_client_id` on
+`POST /manager/grab`. The app has dropped the picker, so both are gone and an
+action-free grab takes Prowlarr's default. `extra="forbid"` means a build that
+still sends the field gets a 422, which is why the app update ships first.
 
 *Two admin sign-in paths.* Stage 2's `POST /auth` assumed the browser would run
 the PIN flow and hand over a token; stage 3 proxies the flow server-side, so

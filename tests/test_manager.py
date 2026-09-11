@@ -1,9 +1,9 @@
-"""``POST /manager/grab``, ``GET /manager/download-clients``, ``GET /manager/search``.
+"""``POST /manager/grab`` and ``GET /manager/search``.
 
 The admin app's request-manager endpoints: live Seerr auth, gated on
-``MANAGE_REQUESTS``, no action involved. ``grab`` and ``download-clients`` were
-split out of ``POST /grab`` and ``GET /download-clients`` — naming a download
-client directly was one of two branches on the tvOS grab endpoint. ``search``
+``MANAGE_REQUESTS``, no action involved. ``grab`` was split out of
+``POST /grab`` — grabbing without an action was one of two branches on the tvOS
+grab endpoint. ``search``
 is the unrestricted-search counterpart to ``GET /titles/{imdb_id}/actions``:
 regular tvOS users only ever see Prowlarr results through an action they hold,
 so unrestricted search — by free text or by IMDB id, independent of holding
@@ -257,11 +257,10 @@ async def test_manager_grab_rejects_an_action_id(
 # --------------------------------------------------------------------------- #
 # Upstream failures on the live-validating paths
 #
-# /manager/grab and /manager/download-clients validate against Seerr on every
-# call rather than reading the token mapping, so each has to keep "Seerr says
-# no" (401) distinct from "Seerr did not answer" (502): a client that treats an
-# outage as a bad token throws away a working Plex token and cannot recover
-# without a fresh sign-in.
+# /manager/grab validates against Seerr on every call rather than reading the
+# token mapping, so it has to keep "Seerr says no" (401) distinct from "Seerr
+# did not answer" (502): a client that treats an outage as a bad token throws
+# away a working Plex token and cannot recover without a fresh sign-in.
 # --------------------------------------------------------------------------- #
 
 
@@ -296,67 +295,6 @@ async def test_manager_grab_502s_when_seerr_is_unreachable(
     assert response.status_code == 502
     assert not prowlarr.called
     assert (await db.execute(select(Grab))).scalars().first() is None
-
-
-# --------------------------------------------------------------------------- #
-# GET /manager/download-clients
-# --------------------------------------------------------------------------- #
-
-
-@respx.mock
-async def test_a_request_manager_can_list_download_clients(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth(permissions=2)
-    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
-        return_value=httpx.Response(200, json=[{"id": 5, "name": "qBittorrent"}])
-    )
-
-    response = await client.get("/manager/download-clients", headers=plex_headers)
-
-    assert response.status_code == 200
-    assert response.json()["download_clients"][0]["name"] == "qBittorrent"
-
-
-@respx.mock
-async def test_a_regular_user_cannot_list_download_clients(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth(permissions=32)
-    response = await client.get("/manager/download-clients", headers=plex_headers)
-    assert response.status_code == 403
-
-
-@respx.mock
-async def test_manager_download_clients_401s_when_seerr_rejects_the_token(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    seerr_rejects_the_token()
-    response = await client.get("/manager/download-clients", headers=plex_headers)
-    assert response.status_code == 401
-
-
-@respx.mock
-async def test_manager_download_clients_502s_when_seerr_is_unreachable(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    seerr_is_unreachable()
-    response = await client.get("/manager/download-clients", headers=plex_headers)
-    assert response.status_code == 502
-
-
-@respx.mock
-async def test_manager_download_clients_502s_when_prowlarr_fails(
-    client: httpx.AsyncClient, configured: Config, plex_headers: dict
-) -> None:
-    mock_seerr_auth(permissions=2)
-    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
-        return_value=httpx.Response(500, json={"message": "boom"})
-    )
-
-    response = await client.get("/manager/download-clients", headers=plex_headers)
-
-    assert response.status_code == 502
 
 
 # --------------------------------------------------------------------------- #
@@ -571,18 +509,20 @@ async def test_a_prowlarr_failure_does_not_tell_the_app_where_prowlarr_lives(
 
 
 @respx.mock
-async def test_an_unreachable_prowlarr_is_502_without_the_url_on_download_clients(
+async def test_an_unreachable_prowlarr_is_502_without_the_url_on_a_grab(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
+    """The non-streaming counterpart: a transport failure, not an HTTP status."""
     mock_seerr_auth(permissions=2)
-    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+    respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
         side_effect=httpx.ConnectError("[Errno 111] Connection refused")
     )
 
-    response = await client.get("/manager/download-clients", headers=plex_headers)
+    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "Could not reach Prowlarr."
+    assert response.json()["message"] == "Prowlarr rejected the grab. Could not reach Prowlarr."
+    assert "prowlarr.test" not in response.text
 
 
 async def test_manager_search_before_prowlarr_is_configured_is_503(
