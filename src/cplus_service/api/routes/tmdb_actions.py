@@ -58,7 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.models import User
 from ...search.stream import PHASE_ALL
 from ..deps import CachedUserDep, DbDep
-from .titles import KIND_REQUEST, permitted_request_action
+from .titles import permitted_request_action, request_offer_for
 
 router = APIRouter(tags=["client"])
 
@@ -69,15 +69,7 @@ async def request_only_payload(db: AsyncSession, user: User) -> dict[str, Any]:
 
     actions: list[dict[str, Any]] = []
     if request_action is not None:
-        actions.append(
-            {
-                "id": request_action.id,
-                "name": request_action.name,
-                "display_title": request_action.button_title,
-                "kind": KIND_REQUEST,
-                "recommended_release_guid": None,
-            }
-        )
+        actions.append(request_offer_for(request_action))
 
     return {"phase": PHASE_ALL, "releases": [], "actions": actions}
 

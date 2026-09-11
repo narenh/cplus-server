@@ -86,6 +86,11 @@ class ScorableAction:
     #: it has one, otherwise its name. Carried alongside the name rather than
     #: replacing it because the two are reported separately on the wire.
     display_title: str = ""
+    #: The admin's rank for this action, carried so the caller can order the
+    #: offers it builds without going back to the database for it.
+    sort_order: int = 0
+    #: SF Symbol the client should draw, or None for the client's own default.
+    icon: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

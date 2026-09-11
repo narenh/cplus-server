@@ -152,6 +152,7 @@ async def test_the_shape_matches_one_line_of_the_movie_stream(
         "name",
         "display_title",
         "kind",
+        "icon",
         "recommended_release_guid",
     }
 

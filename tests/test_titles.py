@@ -129,6 +129,7 @@ async def test_titles_streams_ndjson_with_action_offers(
             # No display title configured, so the button copy is the name.
             "display_title": "Stream Now",
             "kind": "grab",
+            "icon": None,
             "recommended_release_guid": "guid-uhd",
         }
     ]
@@ -191,10 +192,84 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
         "name": "Request",
         "display_title": "Request",
         "kind": "request",
+        "icon": None,
         "recommended_release_guid": None,
     }
     assert actions[grab_action.id]["kind"] == "grab"
     assert actions[grab_action.id]["recommended_release_guid"] == "guid-uhd"
+
+
+@respx.mock
+async def test_actions_arrive_in_the_admins_order(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    """The wire order is the rank order, Request ranked among the rest.
+
+    tvOS draws the first two as buttons and folds the remainder into an
+    overflow menu, so this ordering is the only thing deciding which two an
+    admin's users actually see.
+    """
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    request_action = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    request_action.sort_order = 20
+    await db.commit()
+
+    stream_now = await make_action(db, "Stream Now", sort_order=10)
+    add_library = await make_action(db, "Add to Library", sort_order=30)
+    for action in (request_action, stream_now, add_library):
+        await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    names = [action["display_title"] for action in ndjson(response)[0]["actions"]]
+    assert names == ["Stream Now", "Request", "Add to Library"]
+
+
+@respx.mock
+async def test_actions_sharing_a_rank_fall_back_to_their_id(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Ranks are not unique — an admin never asked to resolve a tie — so the
+    # order has to be total anyway, or two calls could disagree.
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    first = await make_action(db, "Alpha", sort_order=5)
+    second = await make_action(db, "Beta", sort_order=5)
+    await grant(db, user, second)
+    await grant(db, user, first)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    ids = [action["id"] for action in ndjson(response)[0]["actions"]]
+    assert ids == sorted([first.id, second.id])
+
+
+@respx.mock
+async def test_an_actions_icon_reaches_the_client(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    # Passed through verbatim. The server has no way to know what symbols a
+    # given tvOS build ships, so judging the name is the client's job.
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now", icon="play.fill")
+    await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    assert ndjson(response)[0]["actions"][0]["icon"] == "play.fill"
 
 
 @respx.mock
@@ -339,6 +414,7 @@ async def test_a_user_with_only_the_request_action_never_triggers_a_search(
                     "name": "Request",
                     "display_title": "Request",
                     "kind": "request",
+                    "icon": None,
                     "recommended_release_guid": None,
                 }
             ],

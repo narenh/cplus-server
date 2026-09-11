@@ -126,7 +126,12 @@ async def configured(db: AsyncSession) -> Config:
 
 
 async def make_action(
-    db: AsyncSession, name: str, *, download_client_id: int = 5
+    db: AsyncSession,
+    name: str,
+    *,
+    download_client_id: int = 5,
+    sort_order: int = 0,
+    icon: str | None = None,
 ) -> Action:
     """An ordinary Prowlarr-backed action with a permissive profile."""
     profile = QualityProfile(name=f"{name} profile", rules=[])
@@ -136,6 +141,8 @@ async def make_action(
         name=name,
         download_client_id=download_client_id,
         quality_profile_id=profile.id,
+        sort_order=sort_order,
+        icon=icon,
     )
     db.add(action)
     await db.flush()

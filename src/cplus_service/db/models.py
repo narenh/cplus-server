@@ -362,6 +362,12 @@ class Action(Base):
     other.  It cannot be deleted: it is the only route to ``POST /request``,
     and the next startup would seed it again regardless.
 
+    ``sort_order`` is the admin's ranking, and it covers the built-in action
+    too — a client draws the actions in the order it is sent them, and tvOS has
+    room for only the first two before the rest fold into an overflow menu, so
+    the ranking decides which two those are.  Ties break on ``id`` so the order
+    is total and never depends on row order in the table.
+
     ``name`` and ``display_title`` are deliberately two different things.  The
     name is the admin's own label — unique, and what identifies the action in
     the admin UI, in grab history and in notification text.  The display title
@@ -390,6 +396,18 @@ class Action(Base):
     #: ``None`` means "use the name", which is what every action created before
     #: this column existed does.
     display_title: Mapped[str | None] = mapped_column(String(128))
+
+    #: Rank among the caller's actions, ascending.  Not unique: two actions may
+    #: share a rank, and ``id`` settles it rather than the admin being made to
+    #: resolve something they did not ask about.
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    #: SF Symbol name the client draws on the button, or ``None`` for the
+    #: client's own default.  Stored as typed: the admin UI knows a handful of
+    #: symbols worth suggesting, but no server can know what a given tvOS
+    #: version actually ships, so an unrecognised name is warned about rather
+    #: than refused, and the client falls back when it cannot render it.
+    icon: Mapped[str | None] = mapped_column(String(64))
 
     download_client_id: Mapped[int | None] = mapped_column(Integer)
     quality_profile_id: Mapped[int | None] = mapped_column(

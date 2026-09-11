@@ -41,7 +41,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -75,13 +76,15 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
         .join(Permission, Permission.action_id == Action.id)
         .join(QualityProfile, QualityProfile.id == Action.quality_profile_id)
         .where(Permission.user_id == user_id, Action.is_system.is_(False))
-        .order_by(Action.id)
+        .order_by(Action.sort_order, Action.id)
     )
     return [
         ScorableAction(
             id=action.id,
             name=action.name,
             display_title=action.button_title,
+            sort_order=action.sort_order,
+            icon=action.icon,
             profile=ProfileSchema(
                 id=profile.id,
                 name=profile.name,
@@ -93,6 +96,22 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
     ]
 
 
+def request_offer_for(action: Action) -> dict[str, Any]:
+    """The built-in Request action as one entry in an actions payload.
+
+    Shared with the TMDB routes, which report this action and nothing else, so
+    the two cannot drift on what a Request offer looks like.
+    """
+    return {
+        "id": action.id,
+        "name": action.name,
+        "display_title": action.button_title,
+        "kind": KIND_REQUEST,
+        "icon": action.icon,
+        "recommended_release_guid": None,
+    }
+
+
 async def permitted_request_action(session: AsyncSession, user_id: int) -> Action | None:
     """The built-in Request action, if the caller has been granted it."""
     result = await session.execute(
@@ -101,6 +120,46 @@ async def permitted_request_action(session: AsyncSession, user_id: int) -> Actio
         .where(Permission.user_id == user_id, Action.is_system.is_(True))
     )
     return result.scalars().first()
+
+
+def _ranked_offers(
+    scorable: Sequence[ScorableAction],
+    request_action: Action | None,
+    recommendations: dict[str, str | None],
+) -> list[dict[str, Any]]:
+    """Every offer the caller holds, in the admin's order.
+
+    **The built-in Request action ranks among the rest rather than above them.**
+    A client draws these in the order it receives them and tvOS has room for two
+    buttons, so pinning Request first would make "Stream Now goes first" an
+    order no admin could express. Ties break on id, matching the query's own
+    ordering, so the list is stable across calls.
+    """
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+
+    if request_action is not None:
+        ranked.append(
+            (request_action.sort_order, request_action.id, request_offer_for(request_action))
+        )
+
+    for action in scorable:
+        ranked.append(
+            (
+                action.sort_order,
+                action.id,
+                {
+                    "id": action.id,
+                    "name": action.name,
+                    "display_title": action.display_title or action.name,
+                    "kind": KIND_GRAB,
+                    "icon": action.icon,
+                    "recommended_release_guid": recommendations.get(str(action.id)),
+                },
+            )
+        )
+
+    ranked.sort(key=lambda entry: (entry[0], entry[1]))
+    return [offer for _, _, offer in ranked]
 
 
 @router.get("/titles/{imdb_id}/actions")
@@ -129,15 +188,9 @@ async def title_actions(
     scorable = await scorable_actions(db, user.id)
     request_action = await permitted_request_action(db, user.id)
 
-    request_offer: dict[str, object] | None = None
-    if request_action is not None:
-        request_offer = {
-            "id": request_action.id,
-            "name": request_action.name,
-            "display_title": request_action.button_title,
-            "kind": KIND_REQUEST,
-            "recommended_release_guid": None,
-        }
+    request_offer = (
+        request_offer_for(request_action) if request_action is not None else None
+    )
 
     # Logged up front rather than after the stream drains, so a client that
     # disconnects mid-search still leaves an audit trail.
@@ -188,20 +241,7 @@ async def title_actions(
             payload = phase.to_payload()
             recommendations = payload.pop("recommendations")
 
-            actions: list[dict[str, object]] = []
-            if request_offer is not None:
-                actions.append(request_offer)
-            for action in scorable:
-                actions.append(
-                    {
-                        "id": action.id,
-                        "name": action.name,
-                        "display_title": action.display_title or action.name,
-                        "kind": KIND_GRAB,
-                        "recommended_release_guid": recommendations.get(str(action.id)),
-                    }
-                )
-            payload["actions"] = actions
+            payload["actions"] = _ranked_offers(scorable, request_action, recommendations)
 
             yield json.dumps(payload, separators=(",", ":")) + "\n"
 
