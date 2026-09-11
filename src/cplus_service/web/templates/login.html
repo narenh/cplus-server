@@ -7,8 +7,8 @@
    wordmark's ink has to flip while the green arc stays put. `picture` picks by
    the OS preference with no script and no flash of the wrong one. #}
 <picture class="signin-logo">
-  <source srcset="/static/canopy-logo-light.png" media="(prefers-color-scheme: dark)">
-  <img src="/static/canopy-logo-dark.png" alt="Canopy" width="885" height="400">
+  <source srcset="{{ static_url('canopy-logo-light.png') }}" media="(prefers-color-scheme: dark)">
+  <img src="{{ static_url('canopy-logo-dark.png') }}" alt="Canopy" width="885" height="400">
 </picture>
 {% endblock %}
 

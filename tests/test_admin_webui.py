@@ -8,6 +8,8 @@ all show up here.
 
 from __future__ import annotations
 
+import hashlib
+
 import re
 
 import httpx
@@ -1511,6 +1513,42 @@ async def test_a_blank_icon_clears_it(
 
     await db.refresh(action)
     assert action.icon is None
+
+
+async def test_static_assets_are_served_under_a_content_hash(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """A deploy must not land new markup against a cached old stylesheet.
+
+    The origin sends ``Cache-Control: no-cache``, but a CDN in front of it can
+    and does replace that with a browser TTL of its own — so the URL itself has
+    to change when the file does.
+    """
+    from cplus_service.web import STATIC_DIR, static_url
+
+    await signed_in(client, db)
+    body = (await client.get("/admin/actions")).text
+
+    versioned = static_url("app.css")
+    assert re.fullmatch(r"/static/app\.css\?v=[0-9a-f]{10}", versioned)
+    assert f'href="{versioned}"' in body
+    # Every reference, not just the stylesheet: a stale reorder.js breaks
+    # dragging just as quietly.
+    unversioned = re.findall(r'"/static/[A-Za-z0-9._-]+"', body)
+    assert unversioned == []
+
+    # And the hash follows the bytes, or it is only decoration.
+    digest = versioned.rsplit("=", 1)[1]
+    assert digest == hashlib.sha256((STATIC_DIR / "app.css").read_bytes()).hexdigest()[:10]
+
+
+async def test_a_missing_static_asset_does_not_take_the_page_down(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    # A 404 on one asset is already visible; a template that raises is not.
+    from cplus_service.web import static_url
+
+    assert static_url("not-a-real-file.css") == "/static/not-a-real-file.css"
 
 
 # --------------------------------------------------------------------------- #

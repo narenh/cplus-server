@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title|default("Admin") }} · cplus-service</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="{{ static_url('app.css') }}">
   {# Vendored, not from a CDN: a self-hosted box may have no outbound access. #}
-  <script src="/static/htmx.min.js" defer></script>
+  <script src="{{ static_url('htmx.min.js') }}" defer></script>
 </head>
 <body>
 {% if admin is defined and admin %}
@@ -32,8 +32,14 @@
        hidden from screen readers rather than read out twice. #}
     <span class="topbar-logo">
       <picture>
-        <source srcset="/static/canopy-logo-light.png" media="(prefers-color-scheme: dark)">
-        <img src="/static/canopy-logo-dark.png" alt="" width="885" height="400" aria-hidden="true">
+        <source srcset="{{ static_url('canopy-logo-light.png') }}" media="(prefers-color-scheme: dark)">
+        {# Intrinsic size given as the size it is actually drawn at, not the
+           asset's own 885x400. It reserves the right box before the image
+           loads, and — the reason it is here — it keeps the mark small even if
+           the stylesheet does not arrive, instead of an 885px logo tearing the
+           header apart. #}
+        <img src="{{ static_url('canopy-logo-dark.png') }}" alt=""
+             width="53" height="24" aria-hidden="true">
       </picture>
     </span>
   </div>
