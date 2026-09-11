@@ -11,7 +11,19 @@
 <body>
 {% if admin is defined and admin %}
 <header class="topbar">
-  <div class="brand">cplus-service</div>
+  {# The mark stands in for the service's name rather than sitting beside it,
+     in the same corner tvOS puts it. Named in alt for the same reason: it is
+     the heading of this bar, not decoration. #}
+  <div class="brand">
+    <picture>
+      <source srcset="{{ static_url('canopy-logo-light.png') }}" media="(prefers-color-scheme: dark)">
+      {# Intrinsic size given as the size it is actually drawn at, not the
+         asset's own 885x400: it reserves the right box before the image loads,
+         and keeps the mark small even if the stylesheet does not arrive. #}
+      <img src="{{ static_url('canopy-logo-dark.png') }}" alt="cplus-service"
+           width="62" height="28">
+    </picture>
+  </div>
   <nav>
     <a href="/admin/config" class="{{ 'on' if nav == 'config' }}">Configuration</a>
     <a href="/admin/libraries" class="{{ 'on' if nav == 'libraries' }}">Libraries &amp; Home</a>
@@ -27,21 +39,6 @@
       <span class="who">{{ admin.plex_username }}</span>
       <button type="submit" class="link">Sign out</button>
     </form>
-    {# The mark tvOS wears in its own chrome, same asset. Decorative here —
-       the service already names itself at the other end of the bar — so it is
-       hidden from screen readers rather than read out twice. #}
-    <span class="topbar-logo">
-      <picture>
-        <source srcset="{{ static_url('canopy-logo-light.png') }}" media="(prefers-color-scheme: dark)">
-        {# Intrinsic size given as the size it is actually drawn at, not the
-           asset's own 885x400. It reserves the right box before the image
-           loads, and — the reason it is here — it keeps the mark small even if
-           the stylesheet does not arrive, instead of an 885px logo tearing the
-           header apart. #}
-        <img src="{{ static_url('canopy-logo-dark.png') }}" alt=""
-             width="53" height="24" aria-hidden="true">
-      </picture>
-    </span>
   </div>
 </header>
 {% endif %}

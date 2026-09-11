@@ -70,7 +70,10 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
   display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap;
   padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 600; }
+/* The mark is the brand here, so it carries the bar's height rather than a
+   font size. flex: none keeps it from being squeezed when the nav wraps. */
+.brand { font-weight: 600; display: flex; align-items: center; flex: none; }
+.brand img { display: block; height: 28px; width: auto; }
 .topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
 .topbar nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
 .topbar nav a:hover { color: var(--ink); }
@@ -78,12 +81,8 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .signout { display: flex; align-items: center; gap: 10px; }
 .who { color: var(--muted); }
 
-/* Who you are and the way out, pinned to the right of the bar with the mark
-   after them — the same mark the tvOS chrome wears, so the two halves of this
-   product look like one. */
+/* Who you are and the way out, pinned to the right of the bar. */
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 16px; }
-.topbar-logo { display: block; flex: none; }
-.topbar-logo img { display: block; height: 24px; width: auto; }
 
 /* Panels ------------------------------------------------------------------ */
 
