@@ -65,8 +65,13 @@ async def grab(
     if action.download_client_id is None:  # pragma: no cover - see below
         # Unreachable as the schema stands: ``ck_action_targets_required_unless_system``
         # lets only a system action omit a download client, and those are turned
-        # away above. Kept as the safety net if that constraint is ever relaxed,
-        # since grabbing with no client would otherwise fail deep inside Prowlarr.
+        # away above. Kept as the safety net if that constraint is ever relaxed —
+        # and it matters more than it used to. Omitting the client now *means*
+        # something (Prowlarr picks its own default), so an action with none would
+        # quietly land somewhere the admin did not choose rather than failing
+        # loudly. Naming a client is the entire point of an action: it is how a
+        # non-admin gets to grab at all, and where their grab goes is the admin's
+        # decision, not Prowlarr's.
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Action '{action.name}' has no download client configured.",

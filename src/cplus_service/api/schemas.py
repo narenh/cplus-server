@@ -75,9 +75,15 @@ class ManagerGrabRequest(ReleaseFields):
     admin picking a specific release during a request approval does not need —
     so the download client is named directly and no action is involved.
     Restricted to callers who can manage requests, checked against Seerr live.
+
+    ``download_client_id`` is optional, and omitting it asks Prowlarr for its
+    own default client. The admin app names one because it has a picker and a
+    reason to; Canopy+'s "More Versions" does not, because the self-managed
+    button it replaces never did either — it sent Prowlarr a grab with no client
+    and let Prowlarr decide.
     """
 
-    download_client_id: int
+    download_client_id: int | None = None
 
 
 class GrabResponse(BaseModel):

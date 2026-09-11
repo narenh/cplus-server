@@ -274,19 +274,26 @@ class ProwlarrClient:
         return releases
 
     async def grab(
-        self, *, guid: str, indexer_id: int, download_client_id: int
+        self, *, guid: str, indexer_id: int, download_client_id: int | None = None
     ) -> GrabResult:
         """Send a release to a download client.
 
         Prowlarr's grab endpoint is ``POST /api/v1/search`` with the release
         identity in the body; ``downloadClientId`` selects which of the
         configured clients receives it.
+
+        Omitted entirely when ``download_client_id`` is ``None``, which is how
+        Prowlarr is asked to use its own default client for the release's
+        protocol. Sending an explicit ``null`` is not the same thing — Prowlarr
+        reads the key as present and rejects it — so the field is left out of
+        the body rather than set to ``None``.
         """
-        body = {
+        body: dict[str, Any] = {
             "guid": guid,
             "indexerId": indexer_id,
-            "downloadClientId": download_client_id,
         }
+        if download_client_id is not None:
+            body["downloadClientId"] = download_client_id
         payload = await self._request("POST", "search", json=body)
         raw = payload if isinstance(payload, dict) else {}
         return GrabResult(

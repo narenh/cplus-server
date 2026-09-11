@@ -184,10 +184,24 @@ async def test_a_regular_user_cannot_grab_without_an_action(
 
 
 @respx.mock
-async def test_manager_grab_requires_a_download_client_id(
+async def test_manager_grab_without_a_download_client_uses_prowlarrs_default(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
+    """Omitting the client is allowed, and asks Prowlarr to choose.
+
+    This is what Canopy+'s "More Versions" sends: it is replacing a button that
+    grabbed straight through Prowlarr with no client named, and naming one would
+    mean inventing a choice the old button never made.
+
+    The key must be **absent** rather than null. Prowlarr reads a present
+    ``downloadClientId`` of ``null`` as a client selection and rejects it, so
+    asserting the body here is asserting the actual contract, not the shape of
+    our own model.
+    """
     mock_seerr_auth(permissions=2)
+    grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
 
     response = await client.post(
         "/manager/grab",
@@ -198,7 +212,30 @@ async def test_manager_grab_requires_a_download_client_id(
         },
         headers=plex_headers,
     )
-    assert response.status_code == 422
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    sent = json.loads(grab_route.calls.last.request.content)
+    assert "downloadClientId" not in sent
+    assert sent == {"guid": "g", "indexerId": 1}
+
+
+@respx.mock
+async def test_manager_grab_still_honours_a_named_download_client(
+    client: httpx.AsyncClient, configured: Config, plex_headers: dict
+) -> None:
+    # The admin app has a picker and names one; making the field optional must
+    # not quietly stop it being used.
+    mock_seerr_auth(permissions=2)
+    grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
+        return_value=httpx.Response(201, json={})
+    )
+
+    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
+
+    assert response.status_code == 200
+    sent = json.loads(grab_route.calls.last.request.content)
+    assert sent["downloadClientId"] == DIRECT_GRAB_BODY["download_client_id"]
 
 
 @respx.mock
