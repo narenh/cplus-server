@@ -158,7 +158,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 863 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 871 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -571,7 +571,7 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /tv/tmdb/{tmdb_id}/actions` | cache | A TV title: grab actions undecided, so Request only. Plain JSON, one line's shape |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
-| `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /manager/grab` | live Seerr | **admin only.** `{download_client_id?, release_guid, indexer_id, release_title, size_bytes?}` — omitting the client asks Prowlarr for its own default |
 | `GET /manager/download-clients` | live Seerr | **admin only.** Populates the admin app's grab picker |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
 | `POST /manager/push-devices` | live Seerr | **admin only.** `{device_token, environment?, device_name?}` — the app offering its APNs token. 409 while notifications are off |

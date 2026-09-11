@@ -31,12 +31,17 @@ async def execute_grab(
     *,
     user: User,
     action: Action | None,
-    download_client_id: int,
+    download_client_id: int | None,
     body: ReleaseFields,
     state: AppState,
     background: BackgroundTasks,
 ) -> GrabResponse | JSONResponse:
     """Send ``body``'s release to ``download_client_id`` and record the outcome.
+
+    ``download_client_id`` is ``None`` when the caller did not name one, which
+    asks Prowlarr for its own default. An action always names one; the admin
+    app's direct grab may, and Canopy+'s "More Versions" does not — it is
+    replacing a button that never picked a client either.
 
     ``action`` is ``None`` for the admin app's action-free grab; the ``grabs``
     row's ``action_id`` is nullable for exactly that reason, and its
