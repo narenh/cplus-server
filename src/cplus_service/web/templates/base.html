@@ -22,10 +22,21 @@
     <a href="/admin/activity-log" class="{{ 'on' if nav == 'activity' }}">Activity</a>
     <a href="/admin/notifications" class="{{ 'on' if nav == 'notifications' }}">Notifications</a>
   </nav>
-  <form method="post" action="/admin/logout" class="signout">
-    <span class="who">{{ admin.plex_username }}</span>
-    <button type="submit" class="link">Sign out</button>
-  </form>
+  <div class="topbar-end">
+    <form method="post" action="/admin/logout" class="signout">
+      <span class="who">{{ admin.plex_username }}</span>
+      <button type="submit" class="link">Sign out</button>
+    </form>
+    {# The mark tvOS wears in its own chrome, same asset. Decorative here —
+       the service already names itself at the other end of the bar — so it is
+       hidden from screen readers rather than read out twice. #}
+    <span class="topbar-logo">
+      <picture>
+        <source srcset="/static/canopy-logo-light.png" media="(prefers-color-scheme: dark)">
+        <img src="/static/canopy-logo-dark.png" alt="" width="885" height="400" aria-hidden="true">
+      </picture>
+    </span>
+  </div>
 </header>
 {% endif %}
 

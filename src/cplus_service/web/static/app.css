@@ -56,7 +56,10 @@ body {
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-.wrap { max-width: 1040px; margin: 0 auto; padding: 24px 20px 64px; }
+/* Wide enough for a six-column table to breathe on a laptop without the
+   prose in it stretching past a readable line — hence the narrower cap on
+   .hint and .lede, which are the only long-form text here. */
+.wrap { max-width: 1240px; margin: 0 auto; padding: 24px 20px 64px; }
 h1 { font-size: 22px; margin: 8px 0 20px; }
 h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
      color: var(--muted); margin: 28px 0 10px; }
@@ -64,16 +67,23 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 /* Header ------------------------------------------------------------------ */
 
 .topbar {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { font-weight: 600; }
 .topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
-.topbar nav a { color: var(--muted); text-decoration: none; }
+.topbar nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
 .topbar nav a:hover { color: var(--ink); }
 .topbar nav a.on { color: var(--accent); font-weight: 600; }
-.signout { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.signout { display: flex; align-items: center; gap: 10px; }
 .who { color: var(--muted); }
+
+/* Who you are and the way out, pinned to the right of the bar with the mark
+   after them — the same mark the tvOS chrome wears, so the two halves of this
+   product look like one. */
+.topbar-end { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.topbar-logo { display: block; flex: none; }
+.topbar-logo img { display: block; height: 24px; width: auto; }
 
 /* Panels ------------------------------------------------------------------ */
 
@@ -82,8 +92,13 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
   border-radius: 8px; padding: 20px;
 }
 .card.narrow { max-width: 460px; margin: 48px auto; }
-.lede { color: var(--muted); margin-top: 0; }
-.hint { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
+/* A settings form is a column, not a banner. Stretching a URL field across a
+   1200px window makes it harder to read, not easier — the extra width on a
+   desktop belongs to the tables and the action cards, which have more than
+   one thing to line up. */
+form.card, .card form { max-width: 760px; }
+.lede { color: var(--muted); margin-top: 0; max-width: 70ch; }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0 14px; max-width: 78ch; }
 .empty { color: var(--muted); padding: 24px 0; }
 .muted { color: var(--muted); }
 .right { text-align: right; }
@@ -200,11 +215,39 @@ form.inline { display: inline; }
 
 /* Tables ------------------------------------------------------------------ */
 
+/* Every table lives in one of these. A table wide enough to be readable is
+   often wider than a phone, and the choice is which thing scrolls sideways —
+   the table, or the entire page with the header and the prose dragged along
+   with it. The page must not: horizontal body scroll makes every other
+   control on the screen feel broken. So the box clips and scrolls, and the
+   table inside it keeps a min-width that stops columns collapsing into
+   unreadable slivers instead of reflowing.
+
+   The panel border and radius live here rather than on the table, or the
+   rounded corners would sit still while the rows slid under them. */
+.table-scroll {
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overscroll-behavior-x: contain;
+}
+.table-scroll > table { border: none; border-radius: 0; min-width: 680px; }
+
 table {
   width: 100%; border-collapse: collapse; background: var(--panel);
   border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
 }
 th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+/* Column minimums, by what the column holds rather than by which page it is
+   on: a scene release name and a stack trace both need room to be worth
+   showing at all, and a timestamp never does. */
+th.when, td.when { min-width: 148px; white-space: nowrap; }
+th.who, td.who { min-width: 120px; }
+th.release, td.release { min-width: 300px; }
+th.detail, td.detail { min-width: 320px; }
+th.size, td.size { min-width: 84px; white-space: nowrap; }
+th.actions-col, td.actions-col { min-width: 92px; }
 th { font-size: 13px; color: var(--muted); font-weight: 600; }
 tbody tr:last-child td { border-bottom: none; }
 tr.system td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -221,6 +264,12 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 }
 .filter { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
 .filter select { width: auto; }
+
+/* A row's controls on one line — a link and an icon button are different
+   elements with different default display, and side by side is how they read
+   as one group. */
+.row-controls { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.row-controls form { display: inline-flex; }
 
 .badge {
   display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
@@ -459,25 +508,89 @@ table.preview .dropped-by { color: var(--err); }
 .carousel-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 10px 0; }
 .carousel-toggle input { width: 17px; height: 17px; margin: 0; cursor: pointer; }
 
-/* Actions table: ranked by dragging a row, so the rows are drag sources in
-   their own right rather than living in a .reorder-row flex container. */
-.actions tbody tr[draggable="true"] { cursor: default; }
-.actions tbody tr.dragging { opacity: .4; }
-.actions td.drag-cell { width: 24px; padding-right: 0; }
-/* Fixed, so the verdict line wraps inside the column instead of widening it
-   and squeezing the name and button-title fields next door. */
-.actions .icon-cell { width: 175px; }
-.actions .icon-field {
-  width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+/* Actions ----------------------------------------------------------------- */
+
+/* One card per action instead of a table row. Five editable fields is more
+   than a phone fits on a line, and a table's only answer to that is sideways
+   scrolling; the card's field grid just reflows to however many columns the
+   viewport affords. */
+.action-list { display: flex; flex-direction: column; gap: 10px; }
+
+.action-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px;
 }
-.actions .name-cell { width: 165px; }
-.actions .title-cell { width: 135px; }
+.action-card + .action-card, .new-action { margin-top: 10px; }
+.action-card.system { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.action-card.new-action { background: color-mix(in srgb, var(--ok) 6%, var(--panel)); }
+.action-card.dragging { opacity: .4; }
+
+/* auto-fit rather than a fixed count: the same rule gives one column on a
+   phone, two or three on a tablet and all five on a laptop, with no
+   breakpoints to keep in sync. */
+.action-fields {
+  flex: 1; min-width: 0;
+  display: grid; gap: 10px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: start;
+}
+.action-fields .field { min-width: 0; }
+.action-fields label {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+/* Spans the row it lands on, so the built-in action's note reads as a
+   sentence rather than a narrow column of two-word lines. */
+.field-note { grid-column: 1 / -1; margin: 0; font-size: 13px; align-self: center; }
+
+.action-controls {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  /* Aligns with the fields' controls rather than their labels. */
+  padding-top: 21px;
+}
+.action-card .drag-handle { padding-top: 25px; }
+.drag-handle.placeholder { width: 7px; }
+
+.icon-field { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .icon-verdict {
   display: block;
   font-size: 12px;
   line-height: 1.35;
-  margin-top: 3px;
-  min-height: 1em;
+  margin-top: 4px;
+}
+.icon-verdict:empty { display: none; }
+
+/* A phone puts the fields in one column, which makes a tall card; the handle
+   and the controls belong at its top rather than floating beside the middle
+   of it. */
+@media (max-width: 560px) {
+  .action-card { flex-wrap: wrap; gap: 8px; }
+  .action-card .drag-handle, .action-controls { padding-top: 0; }
+  .action-fields { order: 3; flex-basis: 100%; }
+  .action-controls { margin-left: auto; }
+}
+
+/* Small screens ----------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .wrap { padding: 18px 14px 56px; }
+  /* One scrolling line rather than three stacked ones: the nav is eight links
+     and it should not cost a third of a phone screen before the page starts. */
+  .topbar { gap: 8px 14px; padding: 10px 14px; }
+  .topbar nav {
+    order: 3; flex-basis: 100%;
+    flex-wrap: nowrap; overflow-x: auto; gap: 14px;
+    padding-bottom: 2px; overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .topbar nav::-webkit-scrollbar { display: none; }
+  /* Fades the last link out at the right edge, so a nav that continues past
+     the screen looks like it continues rather than like it ends there. */
+  .topbar nav {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .topbar-end { gap: 12px; }
+  h1 { font-size: 20px; margin: 4px 0 16px; }
 }
