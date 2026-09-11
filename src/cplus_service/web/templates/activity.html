@@ -44,7 +44,7 @@
         {% else %}
           {{ detail.get("release_title") or detail.get("release_guid") or "—" }}
         {% endif %}
-        {% if detail.get("error") %}<div class="err">{{ detail.error }}</div>{% endif %}
+        {% if detail.get("error") %}<div class="err log-error">{{ detail.error }}</div>{% endif %}
       </td>
     </tr>
   {% endfor %}

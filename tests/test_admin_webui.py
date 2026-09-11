@@ -1452,6 +1452,47 @@ async def test_grabs_page_lists_and_filters(
     assert "Other.2024.1080p.WEB-DL-GRP" in filtered.text
 
 
+async def test_grabs_page_tells_an_admin_grab_from_a_deleted_action(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Both carry a null ``action_id`` and they are not the same thing.
+
+    An admin app grab never had an action; the other lost one when the action
+    was deleted. The activity log tells them apart by event type, but this page
+    reads the grabs table, where `via_manager` is the only tell — without it
+    both read as "deleted action", mislabelling every grab an admin ever made.
+    """
+    admin = await signed_in(client, db)
+    db.add_all(
+        [
+            Grab(
+                user_id=admin.id,
+                action_id=None,
+                via_manager=True,
+                release_title="Direct.2024.2160p.WEB-DL-FLUX",
+                release_guid="g1",
+                indexer_id=1,
+                size_bytes=25 * GB,
+            ),
+            Grab(
+                user_id=admin.id,
+                action_id=None,
+                via_manager=False,
+                release_title="Orphaned.2024.1080p.WEB-DL-GRP",
+                release_guid="g2",
+                indexer_id=2,
+                size_bytes=8 * GB,
+            ),
+        ]
+    )
+    await db.commit()
+
+    page = await client.get("/admin/grabs")
+
+    assert "admin grab" in page.text
+    assert page.text.count("deleted action") == 1
+
+
 async def test_activity_log_renders_searches_grabs_and_requests(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:

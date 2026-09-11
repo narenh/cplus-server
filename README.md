@@ -442,15 +442,19 @@ stage 2; they exist now so the migration history has one starting point.
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
 | `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
-| `grabs` | user, action, release title/guid/indexer/size, `created_at` |
+| `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
 
-`PRAGMA foreign_keys=ON` is set per connection — SQLite defaults it *off*, which
-would silently ignore every `ON DELETE` clause. Deleting a user cascades to
-permissions; deleting an action nulls the reference but keeps the grab history;
-a quality profile in use by an action cannot be deleted.
+Three pragmas are set per connection. `foreign_keys=ON` because SQLite defaults
+it *off*, which would silently ignore every `ON DELETE` clause;
+`journal_mode=WAL` so a reader and a writer can work at once; and a 30-second
+`busy_timeout` so a contended write waits rather than failing. The last two
+matter because requests here are not uniformly short — see *Streaming and the
+request transaction* below. Deleting a user cascades to permissions; deleting
+an action nulls the reference but keeps the grab history; a quality profile in
+use by an action cannot be deleted.
 
 `cplus_service.db.QualityProfile` (ORM row) and
 `cplus_service.quality.QualityProfile` (pydantic rule schema) share a name.
@@ -806,6 +810,26 @@ the only grant of indexer access a regular user has, so the response is a
 single `releases: []` line naming whatever they *are* permitted (Request, or
 nothing).
 
+### Streaming and the request transaction
+
+**A handler that returns a `StreamingResponse` commits its session before it
+returns.** FastAPI runs a `yield` dependency's exit code only once the response
+body has finished streaming, so without that explicit commit everything the
+handler wrote stays in an open transaction for as long as the search takes —
+up to a minute, waiting on Prowlarr. SQLite holds a write lock for that whole
+time, and *every* authenticated request writes (validating a caller refreshes
+their token mapping's `last_seen_at`), so one search in flight made every other
+request queue behind it and then fail with `database is locked` — which reaches
+a client as a bare HTTP 500 with no explanation in it.
+
+That is what "the admin app is broken" looked like: a search running on one
+screen, and the next screen reporting that cplus-server had a problem. WAL and
+a 30-second `busy_timeout` (see *Data model*) are the second half of the fix,
+but they are the safety net; not holding the lock is the fix. Both streaming
+endpoints are covered by a test that asserts a concurrent request finishes
+*while the search is still streaming*, because the property that broke was
+concurrency, not eventual correctness.
+
 ### Titles the search path cannot serve
 
 `GET /titles/{imdb_id}/actions` answers the full question for a movie. Two
@@ -1123,6 +1147,15 @@ change. Migration `97cb1bac43d5` backfills the history: it rewrites the rows
 whose old shape is unambiguous (a filed request, a request decision, an
 action-free grab, the manager's unrestricted search) and leaves any row whose
 shape predates those markers alone.
+
+That fixes the activity log. The grabs page reads the `grabs` table instead,
+where the same ambiguity is still a null `action_id` — so it labelled every
+manager grab, the normal way an admin fills a request, as a grab whose action
+had been deleted. `grabs.via_manager` records which of the two it was, as a
+property of how the grab was made rather than a lookup, so it stays true no
+matter what happens to the actions table afterwards. Migration `a1d6f30b24e9`
+adds it and backfills from the activity log, which is the only record of which
+historical grabs had no action.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
 the user's next `/register` call, because `/titles/{imdb_id}/actions` and

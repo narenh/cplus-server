@@ -177,3 +177,53 @@ def test_backfill_reclassifies_historical_events(tmp_path: Path) -> None:
 
     migrated = [(event_type, json.loads(detail).get("kind")) for event_type, detail in stored]
     assert migrated == [(expected_type, kind) for *_, expected_type, kind in rows]
+
+
+def test_via_manager_is_backfilled_from_the_activity_log(tmp_path: Path) -> None:
+    """Which historical grabs were the admin's is only knowable from the log.
+
+    The grabs table itself cannot say: both an admin grab and a grab whose
+    action was deleted leave a null ``action_id``. The activity log recorded
+    each successful grab's action id, and only the action-free one wrote null
+    there — so that is where the answer comes from.
+    """
+    db_path = tmp_path / "via_manager.db"
+    result = _run_alembic(db_path, "upgrade", PRE_BACKFILL_REVISION)
+    assert result.returncode == 0, result.stderr
+
+    connection = sqlite3.connect(db_path)
+    connection.execute(
+        "INSERT INTO users (id, seerr_user_id, plex_username) VALUES (1, 42, 'admin')"
+    )
+    connection.executemany(
+        "INSERT INTO grabs (user_id, action_id, release_title, release_guid,"
+        " indexer_id, created_at) VALUES (1, ?, ?, ?, 1, CURRENT_TIMESTAMP)",
+        [
+            (None, "Admin.Grab-GRP", "guid-admin"),
+            (None, "Orphaned.Grab-GRP", "guid-orphan"),
+            (3, "Action.Grab-GRP", "guid-action"),
+        ],
+    )
+    connection.executemany(
+        "INSERT INTO activity_log (user_id, event_type, detail, created_at)"
+        " VALUES (1, 'grab', ?, CURRENT_TIMESTAMP)",
+        [
+            (json.dumps({"action_id": None, "release_guid": "guid-admin", "success": True}),),
+            (json.dumps({"action_id": 3, "release_guid": "guid-orphan", "success": True}),),
+            (json.dumps({"action_id": 3, "release_guid": "guid-action", "success": True}),),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    result = _run_alembic(db_path, "upgrade", "head")
+    assert result.returncode == 0, result.stderr
+
+    connection = sqlite3.connect(db_path)
+    stored = dict(
+        connection.execute("SELECT release_guid, via_manager FROM grabs").fetchall()
+    )
+    connection.close()
+
+    # The orphan's action was deleted after the fact — still not an admin grab.
+    assert stored == {"guid-admin": 1, "guid-orphan": 0, "guid-action": 0}

@@ -440,9 +440,22 @@ class Grab(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    # Nullable so deleting an action does not destroy the grab history that
-    # referenced it.
+    # Nullable for two unrelated reasons — see ``via_manager``, which is what
+    # tells them apart: an action deleted after the fact (ON DELETE SET NULL,
+    # so history survives it), or a manager grab that never had one.
     action_id: Mapped[int | None] = mapped_column(ForeignKey("actions.id", ondelete="SET NULL"))
+
+    #: Whether this was the admin app's action-free grab (``POST
+    #: /manager/grab``) rather than a user pressing an action's button.
+    #:
+    #: The activity log tells those apart by event type — ``ADMIN`` with
+    #: ``kind: "grab"`` — but the grabs page reads this table, where a null
+    #: ``action_id`` alone is ambiguous, so it labelled every manager grab (the
+    #: normal way an admin fills a request) as a grab whose action had been
+    #: deleted. It is a property of how the grab was made, not a lookup, so it
+    #: stays true no matter what happens to the actions table afterwards.
+    via_manager: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+
     release_title: Mapped[str] = mapped_column(String(1024))
     release_guid: Mapped[str] = mapped_column(String(1024))
     indexer_id: Mapped[int | None] = mapped_column(Integer)

@@ -39,8 +39,9 @@ async def execute_grab(
     """Send ``body``'s release to ``download_client_id`` and record the outcome.
 
     ``action`` is ``None`` for the admin app's action-free grab; the ``grabs``
-    row's ``action_id`` is nullable for exactly that reason. It is also what
-    decides whether this raises a notification — see below.
+    row's ``action_id`` is nullable for exactly that reason, and its
+    ``via_manager`` records which of the two reasons applies here. It is also
+    what decides whether this raises a notification — see below.
     """
     # An action-free grab is the admin app's own work, not a user exercising an
     # action, so it is filed under ADMIN (with a ``kind``) rather than GRAB. The
@@ -69,9 +70,13 @@ async def execute_grab(
                     **kind,
                     "action_id": action.id if action else None,
                     "download_client_id": download_client_id,
+                    "release_title": body.release_title,
                     "release_guid": body.release_guid,
                     "indexer_id": body.indexer_id,
                     "success": False,
+                    # The diagnostic message, not ``summary``: this one is read
+                    # on the admin's own activity page, by the person who
+                    # configured Prowlarr and can act on what it said.
                     "error": str(exc),
                 },
             )
@@ -86,6 +91,7 @@ async def execute_grab(
     record = Grab(
         user_id=user.id,
         action_id=action.id if action else None,
+        via_manager=admin,
         release_title=body.release_title,
         release_guid=body.release_guid,
         indexer_id=body.indexer_id,

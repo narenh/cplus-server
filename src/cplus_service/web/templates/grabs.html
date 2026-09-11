@@ -14,7 +14,17 @@
     <tr>
       <td class="nowrap muted">{{ grab.created_at|when }}</td>
       <td>{{ usernames.get(grab.user_id, "—") }}</td>
-      <td>{{ action_names.get(grab.action_id, "deleted action") }}</td>
+      {# A null `action_id` means one of two different things, and `via_manager`
+         is what tells them apart: an admin grabbing a release directly from
+         the admin app (no action was ever involved), or an ordinary grab whose
+         action has since been deleted. #}
+      <td>
+        {% if grab.via_manager %}
+          <span class="badge">admin grab</span>
+        {% else %}
+          {{ action_names.get(grab.action_id, "deleted action") }}
+        {% endif %}
+      </td>
       <td class="release">{{ grab.release_title }}</td>
       <td class="nowrap">{{ grab.size_bytes|size }}</td>
     </tr>

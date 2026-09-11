@@ -157,6 +157,13 @@ async def title_actions(
 
     preferred_indexer_id = config.preferred_indexer_id
 
+    # Read everything this handler needs off the session, then end its
+    # transaction before a single byte is streamed. The request dependency's
+    # own commit does not run until the body drains, and holding a SQLite write
+    # lock for the length of a Prowlarr search fails every concurrent request
+    # with ``database is locked`` — see :func:`cplus_service.api.deps.get_db`.
+    await db.commit()
+
     async def body() -> AsyncIterator[str]:
         if not scorable:
             # No Prowlarr-backed action held — actions are the only grant of
