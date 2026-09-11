@@ -552,7 +552,6 @@ async def test_the_admin_apps_action_free_grab_notifies_nobody(
         "/manager/grab",
         headers=plex_headers,
         json={
-            "download_client_id": 3,
             "release_guid": "guid-1",
             "indexer_id": 1,
             "release_title": "I.Love.Boosters.2026.1080p.WEB-DL-FLUX",

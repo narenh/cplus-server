@@ -57,7 +57,7 @@ async def grab(
     background: BackgroundTasks,
     body: ManagerGrabRequest,
 ) -> GrabResponse | JSONResponse:
-    """Grab a release straight to a chosen download client, no action involved."""
+    """Grab a release straight to Prowlarr's default client, no action involved."""
     try:
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
@@ -77,7 +77,10 @@ async def grab(
         prowlarr,
         user=user,
         action=None,
-        download_client_id=body.download_client_id,
+        # Not the caller's to choose: which client a grab lands in is set per
+        # action on the Actions page, and an action-free grab has no such
+        # setting to read, so Prowlarr picks its own default.
+        download_client_id=None,
         body=body,
         state=state,
         background=background,

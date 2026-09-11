@@ -60,7 +60,7 @@ class GrabRequest(ReleaseFields):
     ``action_id`` names the download client indirectly: the action carries it,
     and the caller must have been granted that action. Authenticated from the
     stored token mapping, no outbound call. The admin app's action-free grab —
-    naming a download client directly during a request approval — is a
+    a moderator picking a specific release during a request approval — is a
     different caller with different auth and lives at
     ``POST /manager/grab`` instead; see :class:`ManagerGrabRequest`.
     """
@@ -72,18 +72,16 @@ class ManagerGrabRequest(ReleaseFields):
     """``POST /manager/grab`` — the admin app's action-free grab.
 
     Actions exist to give tvOS buttons a label and a recommendation, which an
-    admin picking a specific release during a request approval does not need —
-    so the download client is named directly and no action is involved.
-    Restricted to callers who can manage requests, checked against Seerr live.
+    admin picking a specific release during a request approval does not need,
+    so no action is involved. Restricted to callers who can manage requests,
+    checked against Seerr live.
 
-    ``download_client_id`` is optional, and omitting it asks Prowlarr for its
-    own default client. The admin app names one because it has a picker and a
-    reason to; Canopy+'s "More Versions" does not, because the self-managed
-    button it replaces never did either — it sent Prowlarr a grab with no client
-    and let Prowlarr decide.
+    Adds nothing to :class:`ReleaseFields`: the release is the whole request.
+    Which download client it lands in is not the caller's to choose — Prowlarr
+    is asked for its default — so this is a distinct type from
+    :class:`GrabRequest` only in what it *refuses*, an ``action_id``, which
+    ``extra="forbid"`` turns into a 422 rather than a silently ignored field.
     """
-
-    download_client_id: int | None = None
 
 
 class GrabResponse(BaseModel):

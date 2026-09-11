@@ -78,7 +78,6 @@ def seerr_is_unreachable() -> respx.Route:
 
 
 DIRECT_GRAB_BODY = {
-    "download_client_id": 9,
     "release_guid": "guid-uhd",
     "indexer_id": 1,
     "release_title": WEB_2160["title"],
@@ -95,7 +94,7 @@ async def test_a_request_manager_can_grab_without_an_action(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:
     # Actions are a tvOS concept — a button label and a recommendation. An admin
-    # picking a specific release during an approval names the client directly.
+    # picking a specific release during an approval needs neither.
     mock_seerr_auth(permissions=2)
     grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
         return_value=httpx.Response(201, json={})
@@ -104,7 +103,6 @@ async def test_a_request_manager_can_grab_without_an_action(
     response = await client.post(
         "/manager/grab",
         json={
-            "download_client_id": 9,
             "release_guid": "guid-uhd",
             "indexer_id": 1,
             "release_title": WEB_2160["title"],
@@ -114,7 +112,7 @@ async def test_a_request_manager_can_grab_without_an_action(
     )
 
     assert response.status_code == 200
-    assert json.loads(grab_route.calls[0].request.content)["downloadClientId"] == 9
+    assert grab_route.called
 
     record = (await db.execute(select(Grab))).scalar_one()
     assert record.action_id is None  # no action was involved
@@ -170,7 +168,6 @@ async def test_a_regular_user_cannot_grab_without_an_action(
     response = await client.post(
         "/manager/grab",
         json={
-            "download_client_id": 9,
             "release_guid": "g",
             "indexer_id": 1,
             "release_title": "Movie.2024.1080p.WEB-DL-GRP",
@@ -184,14 +181,10 @@ async def test_a_regular_user_cannot_grab_without_an_action(
 
 
 @respx.mock
-async def test_manager_grab_without_a_download_client_uses_prowlarrs_default(
+async def test_a_manager_grab_lets_prowlarr_choose_the_download_client(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
-    """Omitting the client is allowed, and asks Prowlarr to choose.
-
-    This is what Canopy+'s "More Versions" sends: it is replacing a button that
-    grabbed straight through Prowlarr with no client named, and naming one would
-    mean inventing a choice the old button never made.
+    """No caller names a client, so every grab from here asks Prowlarr to choose.
 
     The key must be **absent** rather than null. Prowlarr reads a present
     ``downloadClientId`` of ``null`` as a client selection and rejects it, so
@@ -221,21 +214,28 @@ async def test_manager_grab_without_a_download_client_uses_prowlarrs_default(
 
 
 @respx.mock
-async def test_manager_grab_still_honours_a_named_download_client(
+async def test_manager_grab_rejects_a_named_download_client(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
-    # The admin app has a picker and names one; making the field optional must
-    # not quietly stop it being used.
+    """A client sending one is a client that thinks it gets to choose.
+
+    The admin app used to, and 422 is the answer that says so plainly rather
+    than letting an old build keep aiming grabs at an id the admin never chose
+    here.
+    """
     mock_seerr_auth(permissions=2)
     grab_route = respx.post(f"{PROWLARR_URL}/api/v1/search").mock(
         return_value=httpx.Response(201, json={})
     )
 
-    response = await client.post("/manager/grab", json=DIRECT_GRAB_BODY, headers=plex_headers)
+    response = await client.post(
+        "/manager/grab",
+        json={**DIRECT_GRAB_BODY, "download_client_id": 9},
+        headers=plex_headers,
+    )
 
-    assert response.status_code == 200
-    sent = json.loads(grab_route.calls.last.request.content)
-    assert sent["downloadClientId"] == DIRECT_GRAB_BODY["download_client_id"]
+    assert response.status_code == 422
+    assert not grab_route.called
 
 
 @respx.mock
@@ -243,18 +243,12 @@ async def test_manager_grab_rejects_an_action_id(
     client: httpx.AsyncClient, configured: Config, plex_headers: dict
 ) -> None:
     # The tvOS action-scoped grab is a different endpoint now (POST /grab);
-    # this one only ever takes a download_client_id.
+    # this one takes nothing but the release.
     mock_seerr_auth(permissions=2)
 
     response = await client.post(
         "/manager/grab",
-        json={
-            "action_id": 1,
-            "download_client_id": 9,
-            "release_guid": "g",
-            "indexer_id": 1,
-            "release_title": "Movie.2024.1080p.WEB-DL-GRP",
-        },
+        json={**DIRECT_GRAB_BODY, "action_id": 1},
         headers=plex_headers,
     )
     assert response.status_code == 422
