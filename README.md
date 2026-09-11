@@ -440,7 +440,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `user_home_settings` | one user's own Home — the five content fields plus one `home_modified_at` for the whole document. Absent until they fork; see below |
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
-| `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
+| `actions` | `name`, `display_title` (optional button copy), `sort_order`, `icon`, `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
@@ -603,6 +603,22 @@ no button copy configured reports its name in both fields, so a client can read
 **Route on `kind`, never on either of them.** Both are free text the admin can
 change at any moment, the built-in Request action's included; `kind` is what
 says whether pressing a button posts to `/request` or to `/grab`.
+
+**Draw the actions in the order they arrive.** They come back sorted by the
+admin's ranking (ties broken on id), and tvOS has room for two buttons before
+the rest fold into an overflow menu — so that order is the only thing deciding
+which two a user actually sees. The built-in Request action is ranked among the
+others rather than pinned first: an admin who wants "Stream Now" in the first
+slot has to be able to say so. Ranks are set by dragging rows on the Actions
+page and are not sent on the wire; the order is.
+
+**`icon` is an SF Symbol name, or null.** Passed through exactly as the admin
+typed it. This service does not judge the name — it cannot know which symbols a
+given tvOS version ships — so the admin UI warns about anything outside the
+dozen it suggests rather than refusing it, and **the client is expected to fall
+back** (Canopy+ uses `arrow.down.circle`) when it cannot draw one. Null means
+the client picks for itself, which is what every action did before the field
+existed.
 
 **Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
 caller with none — zero actions, or only the built-in Request action, which
@@ -900,8 +916,8 @@ For an `imdb_id`-scoped search with a preferred indexer and
 The response is NDJSON, one object per line:
 
 ```
-{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","recommended_release_guid":null}]}
-{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","recommended_release_guid":"guid-b"},{"id":3,"name":"Request","display_title":"Request","kind":"request","recommended_release_guid":null}]}
+{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"recommended_release_guid":null}]}
+{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"recommended_release_guid":"guid-b"},{"id":3,"name":"Request","display_title":"Request","kind":"request","icon":"plus","recommended_release_guid":null}]}
 ```
 
 **Client merge rule: apply the last line you received, wholesale.** Union the
