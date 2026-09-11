@@ -442,7 +442,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
 | `actions` | `name`, `display_title` (optional button copy), `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
-| `grabs` | user, action, release title/guid/indexer/size, `created_at` |
+| `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
@@ -1147,6 +1147,15 @@ change. Migration `97cb1bac43d5` backfills the history: it rewrites the rows
 whose old shape is unambiguous (a filed request, a request decision, an
 action-free grab, the manager's unrestricted search) and leaves any row whose
 shape predates those markers alone.
+
+That fixes the activity log. The grabs page reads the `grabs` table instead,
+where the same ambiguity is still a null `action_id` — so it labelled every
+manager grab, the normal way an admin fills a request, as a grab whose action
+had been deleted. `grabs.via_manager` records which of the two it was, as a
+property of how the grab was made rather than a lookup, so it stays true no
+matter what happens to the actions table afterwards. Migration `a1d6f30b24e9`
+adds it and backfills from the activity log, which is the only record of which
+historical grabs had no action.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
 the user's next `/register` call, because `/titles/{imdb_id}/actions` and

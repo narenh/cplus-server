@@ -118,6 +118,10 @@ async def test_a_request_manager_can_grab_without_an_action(
 
     record = (await db.execute(select(Grab))).scalar_one()
     assert record.action_id is None  # no action was involved
+    # ...and `via_manager` is what says so on this row. The grabs page reads
+    # this table, not the activity log, so without it a manager grab is
+    # indistinguishable there from a grab whose action was deleted.
+    assert record.via_manager is True
     assert record.release_title == WEB_2160["title"]
 
     # Filed as an admin event, not a user grab: the action-free grab reaches

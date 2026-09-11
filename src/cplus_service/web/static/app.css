@@ -207,6 +207,15 @@ tbody tr:last-child td { border-bottom: none; }
 tr.system td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 tr.new-row td { background: color-mix(in srgb, var(--ok) 6%, transparent); }
 td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+/* A failed grab logs Prowlarr's own reply, which can be an entire .NET stack
+   trace on one unbroken line. Kept in full — it is the diagnostic the admin
+   came here for — but wrapped and boxed, so one bad row cannot push the whole
+   table sideways. */
+.log-error {
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+  max-height: 8em; overflow-y: auto; margin-top: 4px; font-size: 12px;
+}
 .filter { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
 .filter select { width: auto; }
 
