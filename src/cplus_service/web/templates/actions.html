@@ -5,147 +5,172 @@
   <p class="err">Create a quality profile first — every Prowlarr-backed action needs one.</p>
 {% endif %}
 
-<!-- Dropping a dragged row writes the new order into this and submits it for
-     real, which comes back as a normal page render in the new order. See
-     static/reorder.js. -->
+<p class="hint">
+  <strong>Drag a card</strong> to reorder. Canopy+ draws the first two as
+  buttons on the detail page and folds the rest into a &#8230; menu, so the
+  order here is what decides which two a user sees. The built-in action is
+  ranked like any other — put it wherever it belongs.
+</p>
+
+{# Dropping a dragged card writes the new order into this and submits it for
+   real, which comes back as a normal page render in the new order. See
+   static/reorder.js. #}
 <form method="post" action="/admin/actions/reorder" id="actions-reorder" class="hidden"></form>
 
 <datalist id="icon-symbols">
   {% for symbol in suggested_icons %}<option value="{{ symbol }}"></option>{% endfor %}
 </datalist>
 
-<table class="actions">
-  <thead>
-    <tr>
-      <th></th>
-      <th class="name-cell">Name <span class="th-hint">admin only</span></th>
-      <th class="title-cell">Button title <span class="th-hint">what users see</span></th>
-      <th class="icon-cell">Icon <span class="th-hint">SF Symbol</span></th>
-      <th>Download client</th>
-      <th>Quality profile</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody data-reorder-list data-reorder-form="actions-reorder">
+{# Cards rather than table rows. Five editable fields per action is more than a
+   phone can put on one line, and a table can only ever answer that by scrolling
+   sideways; a card reflows its fields onto as many lines as it has room for.
+   It also makes these ordinary <div> rows, which is what static/reorder.js
+   drags everywhere else in this UI. #}
+<div class="action-list" data-reorder-list data-reorder-form="actions-reorder">
   {% for action in actions %}
-    {% if action.is_system %}
-      <tr class="system" draggable="true" data-reorder-id="{{ action.id }}">
-        <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
-        <td class="drag-cell"><span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span></td>
-        <td class="name-cell">
-          <input form="action-{{ action.id }}" type="text" name="name"
-                 value="{{ action.name }}" required>
-          <span class="badge">built in</span>
-        </td>
-        <td class="title-cell">
-          <input form="action-{{ action.id }}" type="text" name="display_title"
-                 value="{{ action.display_title or '' }}" maxlength="128"
-                 placeholder="{{ action.name }}">
-        </td>
-        <td class="icon-cell">
-          <input form="action-{{ action.id }}" type="text" name="icon" class="icon-field"
-                 value="{{ action.icon or '' }}" maxlength="64" list="icon-symbols"
-                 placeholder="arrow.down.circle" autocomplete="off"
+    <div class="action-card{% if action.is_system %} system{% endif %}"
+         draggable="true" data-reorder-id="{{ action.id }}">
+      <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
+
+      <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+
+      <div class="action-fields">
+        <div class="field">
+          <label for="name-{{ action.id }}">
+            Name
+            {% if action.is_system %}<span class="badge">built in</span>{% endif %}
+          </label>
+          <input form="action-{{ action.id }}" id="name-{{ action.id }}" type="text" name="name"
+                 value="{{ action.name }}" data-original="{{ action.name }}" required>
+        </div>
+
+        <div class="field">
+          <label for="title-{{ action.id }}">Button title</label>
+          <input form="action-{{ action.id }}" id="title-{{ action.id }}" type="text"
+                 name="display_title" value="{{ action.display_title or '' }}"
+                 data-original="{{ action.display_title or '' }}"
+                 maxlength="128" placeholder="{{ action.name }}">
+        </div>
+
+        <div class="field">
+          <label for="icon-{{ action.id }}">Icon</label>
+          <input form="action-{{ action.id }}" id="icon-{{ action.id }}" type="text" name="icon"
+                 class="icon-field" value="{{ action.icon or '' }}"
+                 data-original="{{ action.icon or '' }}"
+                 maxlength="64" list="icon-symbols" placeholder="arrow.down.circle"
+                 autocomplete="off" spellcheck="false"
                  data-known="{{ suggested_icons | join(' ') }}">
           <span class="icon-verdict"></span>
-        </td>
-        <td class="muted" colspan="2">
-          Files a request in Seerr. Never touches Prowlarr, so it has no
-          download client or quality profile — and it is the only action that
-          supports TV as well as films.
-        </td>
-        <td class="right nowrap">
-          <button form="action-{{ action.id }}" type="submit" class="link">Save</button>
-          <span class="muted">grant per user</span>
-        </td>
-      </tr>
-    {% else %}
-      <tr draggable="true" data-reorder-id="{{ action.id }}">
-        <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"></form>
-        <td class="drag-cell"><span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span></td>
-        <td class="name-cell"><input form="action-{{ action.id }}" type="text" name="name" value="{{ action.name }}" required></td>
-        <td class="title-cell">
-          <input form="action-{{ action.id }}" type="text" name="display_title"
-                 value="{{ action.display_title or '' }}" maxlength="128"
-                 placeholder="{{ action.name }}">
-        </td>
-        <td class="icon-cell">
-          <input form="action-{{ action.id }}" type="text" name="icon" class="icon-field"
-                 value="{{ action.icon or '' }}" maxlength="64" list="icon-symbols"
-                 placeholder="arrow.down.circle" autocomplete="off"
-                 data-known="{{ suggested_icons | join(' ') }}">
-          <span class="icon-verdict"></span>
-        </td>
-        <td>
-          <select form="action-{{ action.id }}" name="download_client_id" required>
-            {% for client in clients %}
-              <option value="{{ client.id }}" {% if client.id == action.download_client_id %}selected{% endif %}>
-                {{ client.name }}
-              </option>
-            {% endfor %}
-            {% if action.download_client_id not in client_names %}
-              <option value="{{ action.download_client_id }}" selected>
-                #{{ action.download_client_id }} (not in Prowlarr)
-              </option>
-            {% endif %}
-          </select>
-        </td>
-        <td>
-          <select form="action-{{ action.id }}" name="quality_profile_id" required>
-            {% for profile in profiles %}
-              <option value="{{ profile.id }}" {% if profile.id == action.quality_profile_id %}selected{% endif %}>
-                {{ profile.name }}
-              </option>
-            {% endfor %}
-          </select>
-        </td>
-        <td class="right nowrap">
-          <button form="action-{{ action.id }}" type="submit" class="link">Save</button>
-          <form method="post" action="/admin/actions/{{ action.id }}/delete" class="inline"
+        </div>
+
+        {% if action.is_system %}
+          <p class="field-note muted">
+            Files a request in Seerr. Never touches Prowlarr, so it has no
+            download client or quality profile — and it is the only action that
+            supports TV as well as films.
+          </p>
+        {% else %}
+          <div class="field">
+            <label for="client-{{ action.id }}">Download client</label>
+            <select form="action-{{ action.id }}" id="client-{{ action.id }}"
+                    name="download_client_id" data-original="{{ action.download_client_id }}" required>
+              {% for client in clients %}
+                <option value="{{ client.id }}" {% if client.id == action.download_client_id %}selected{% endif %}>
+                  {{ client.name }}
+                </option>
+              {% endfor %}
+              {% if action.download_client_id not in client_names %}
+                <option value="{{ action.download_client_id }}" selected>
+                  #{{ action.download_client_id }} (not in Prowlarr)
+                </option>
+              {% endif %}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="profile-{{ action.id }}">Quality profile</label>
+            <select form="action-{{ action.id }}" id="profile-{{ action.id }}"
+                    name="quality_profile_id" data-original="{{ action.quality_profile_id }}" required>
+              {% for profile in profiles %}
+                <option value="{{ profile.id }}" {% if profile.id == action.quality_profile_id %}selected{% endif %}>
+                  {{ profile.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="action-controls">
+        {# Hidden until one of this card's own fields differs from what is
+           saved; see static/dirty-save.js. #}
+        <button form="action-{{ action.id }}" type="submit" class="hidden"
+                data-save-for="action-{{ action.id }}">Save</button>
+
+        {% if action.is_system %}
+          <span class="muted nowrap">grant per user</span>
+        {% else %}
+          <form method="post" action="/admin/actions/{{ action.id }}/delete" class="remove-form"
                 onsubmit="return confirm('Delete {{ action.name }}?')">
-            <button type="submit" class="link danger">Delete</button>
+            <button type="submit" class="icon danger" title="Delete {{ action.name }}"
+                    aria-label="Delete {{ action.name }}">
+              {% include "partials/_trash_icon.html" with context %}
+            </button>
           </form>
-        </td>
-      </tr>
-    {% endif %}
+        {% endif %}
+      </div>
+    </div>
   {% endfor %}
 
-  <tr class="new-row">
-    <form method="post" action="/admin/actions" id="new-action"></form>
-    <td></td>
-    <td class="name-cell"><input form="new-action" type="text" name="name" placeholder="Add to library in HD" required></td>
-    <td class="title-cell"><input form="new-action" type="text" name="display_title" maxlength="128" placeholder="Play Now"></td>
-    <td class="icon-cell">
-      <input form="new-action" type="text" name="icon" class="icon-field" maxlength="64"
-             list="icon-symbols" placeholder="arrow.down.circle" autocomplete="off"
+  {# Outside the reorder list on purpose: it has no rank until it exists, and a
+     new action lands at the end of the order anyway. #}
+</div>
+
+<div class="action-card new-action">
+  <form method="post" action="/admin/actions" id="new-action"></form>
+  <span class="drag-handle placeholder" aria-hidden="true"></span>
+
+  <div class="action-fields">
+    <div class="field">
+      <label for="new-name">Name</label>
+      <input form="new-action" id="new-name" type="text" name="name"
+             placeholder="Add to library in HD" required>
+    </div>
+    <div class="field">
+      <label for="new-title">Button title</label>
+      <input form="new-action" id="new-title" type="text" name="display_title"
+             maxlength="128" placeholder="Play Now">
+    </div>
+    <div class="field">
+      <label for="new-icon">Icon</label>
+      <input form="new-action" id="new-icon" type="text" name="icon" class="icon-field"
+             maxlength="64" list="icon-symbols" placeholder="arrow.down.circle"
+             autocomplete="off" spellcheck="false"
              data-known="{{ suggested_icons | join(' ') }}">
       <span class="icon-verdict"></span>
-    </td>
-    <td>
-      <select form="new-action" name="download_client_id" required
+    </div>
+    <div class="field">
+      <label for="new-client">Download client</label>
+      <select form="new-action" id="new-client" name="download_client_id" required
               hx-get="/admin/prowlarr/download-clients?format=html"
               hx-trigger="load" hx-target="this" hx-swap="innerHTML">
       </select>
-    </td>
-    <td>
-      <select form="new-action" name="quality_profile_id" required>
+    </div>
+    <div class="field">
+      <label for="new-profile">Quality profile</label>
+      <select form="new-action" id="new-profile" name="quality_profile_id" required>
         {% for profile in profiles %}
           <option value="{{ profile.id }}">{{ profile.name }}</option>
         {% endfor %}
       </select>
-    </td>
-    <td class="right">
-      <button form="new-action" type="submit" {% if not profiles %}disabled{% endif %}>Add</button>
-    </td>
-  </tr>
-  </tbody>
-</table>
-<p class="hint">
-  <strong>Drag a row</strong> to reorder. Canopy+ draws the first two as
-  buttons on the detail page and folds the rest into a &#8230; menu, so the
-  order here is what decides which two a user sees. The built-in action is
-  ranked like any other — put it wherever it belongs.
-</p>
+    </div>
+  </div>
+
+  <div class="action-controls">
+    <button form="new-action" type="submit" {% if not profiles %}disabled{% endif %}>Add</button>
+  </div>
+</div>
+
 <p class="hint">
   <strong>Icon</strong> is an SF Symbol name. The field suggests the ones we
   know render, and warns on anything else without refusing it: no server can
@@ -172,5 +197,6 @@
 
 {% block scripts %}
 <script src="/static/reorder.js" defer></script>
+<script src="/static/dirty-save.js" defer></script>
 <script src="/static/icon-field.js" defer></script>
 {% endblock %}
