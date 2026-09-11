@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<form class="card" hx-post="/admin/config" hx-target="#save-result" hx-swap="innerHTML">
+<form class="card" id="config-form"
+      hx-post="/admin/config" hx-target="#save-result" hx-swap="innerHTML">
   <h2>Prowlarr</h2>
   <label for="prowlarr_url">Prowlarr URL</label>
   <input type="url" id="prowlarr_url" name="prowlarr_url" value="{{ config.prowlarr_url or '' }}"
+         data-original="{{ config.prowlarr_url or '' }}"
          placeholder="http://prowlarr.local:9696">
 
   <label for="prowlarr_api_key">API key</label>
-  <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off"
+  <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off" data-original=""
          placeholder="{{ '············ (unchanged)' if config.prowlarr_api_key else 'required' }}">
   <p class="hint">
     {% if config.prowlarr_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
@@ -15,12 +17,20 @@
   </p>
 
   <label for="preferred_indexer_id">Preferred indexer</label>
-  <select id="preferred_indexer_id" name="preferred_indexer_id"
+  {# Disabled until the real options arrive, and re-disabled if the fetch
+     fails — a disabled field is not submitted at all, and the handler reads
+     "absent" as "leave the saved indexer alone". Without that, opening this
+     page while Prowlarr is unreachable and saving anything at all (a TMDB
+     token, say) would post the empty select and silently clear the admin's
+     preferred indexer. #}
+  <select id="preferred_indexer_id" name="preferred_indexer_id" disabled
+          data-original="{{ config.preferred_indexer_id or '' }}"
           hx-get="/admin/prowlarr/indexers?format=html"
           hx-trigger="load"
           hx-target="this"
-          hx-swap="innerHTML">
-    <option value="">All indexers</option>
+          hx-swap="innerHTML"
+          hx-on::after-swap="this.disabled = this.querySelector('option[disabled]') !== null">
+    <option value="">Loading indexers…</option>
   </select>
   <p class="hint">
     Applies to every quality profile. When set, a search is scored against this
@@ -38,7 +48,7 @@
 
   <h2>TMDB</h2>
   <label for="tmdb_bearer_token">Bearer token</label>
-  <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off"
+  <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off" data-original=""
          placeholder="{{ '············ (unchanged)' if config.tmdb_bearer_token else 'required' }}">
   <p class="hint">
     {% if config.tmdb_bearer_token %}A token is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
@@ -50,7 +60,10 @@
   </p>
 
   <div class="row">
-    <button type="submit">Save</button>
+    {# Appears once a field differs from what is saved; see
+       static/dirty-save.js. The two secret fields start blank and mean "leave
+       it alone", so typing into one is itself the change. #}
+    <button type="submit" class="hidden" data-save-for="config-form">Save</button>
     <span id="save-result" class="inline-result"></span>
   </div>
 </form>
@@ -75,4 +88,8 @@
     against the old instance.
   </p>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/dirty-save.js" defer></script>
 {% endblock %}

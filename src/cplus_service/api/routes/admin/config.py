@@ -62,7 +62,7 @@ async def save_config(
     admin: AdminPageDep,
     prowlarr_url: str = Form(default=""),
     prowlarr_api_key: str = Form(default=""),
-    preferred_indexer_id: str = Form(default=""),
+    preferred_indexer_id: str | None = Form(default=None),
     tmdb_bearer_token: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
@@ -76,10 +76,16 @@ async def save_config(
     if tmdb_bearer_token.strip():
         config.tmdb_bearer_token = tmdb_bearer_token.strip()
 
-    # Empty means the "All indexers" default, which is null and not a sentinel.
-    config.preferred_indexer_id = (
-        int(preferred_indexer_id) if preferred_indexer_id.strip().isdigit() else None
-    )
+    # Three states, not two. Empty means the "All indexers" default, which is
+    # null and not a sentinel — but *absent* means the page could not offer a
+    # choice at all, because the select is disabled until Prowlarr's indexer
+    # list loads and a disabled field is never submitted. Treating that as
+    # "All indexers" would clear a saved preference every time an admin edited
+    # something else on this page while Prowlarr was down.
+    if preferred_indexer_id is not None:
+        config.preferred_indexer_id = (
+            int(preferred_indexer_id) if preferred_indexer_id.strip().isdigit() else None
+        )
 
     return templates.TemplateResponse(
         request,

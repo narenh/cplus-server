@@ -350,6 +350,33 @@ async def test_a_blank_api_key_and_token_leave_the_saved_ones_alone(
     assert configured.preferred_indexer_id is None
 
 
+async def test_an_absent_indexer_field_leaves_the_saved_one_alone(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Absent is not the same as "All indexers".
+
+    The select is disabled until Prowlarr's indexer list loads, and a disabled
+    field is not submitted — so a page opened while Prowlarr is down posts no
+    indexer at all. Reading that as "All indexers" would clear the admin's
+    saved preference every time they edited something else on the page.
+    """
+    configured.preferred_indexer_id = 3
+    await db.commit()
+    await signed_in(client, db)
+
+    await client.post(
+        "/admin/config",
+        data={
+            "prowlarr_url": PROWLARR_URL,
+            "prowlarr_api_key": "",
+            "tmdb_bearer_token": "",
+        },
+    )
+
+    await db.refresh(configured)
+    assert configured.preferred_indexer_id == 3
+
+
 async def test_the_saved_api_key_and_tmdb_token_are_never_rendered_into_the_page(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
