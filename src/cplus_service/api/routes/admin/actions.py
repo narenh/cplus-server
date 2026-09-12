@@ -336,7 +336,7 @@ async def delete_action(db: DbDep, admin: AdminPageDep, action_id: int) -> Respo
             status.HTTP_403_FORBIDDEN,
             f"'{action.name}' is the built-in request action and cannot be deleted"
             " — the next start would seed it again. Revoke it per user on the"
-            " Permissions page instead.",
+            " Users page instead.",
         )
     await db.delete(action)
     return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)

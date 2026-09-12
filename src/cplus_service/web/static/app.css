@@ -74,15 +74,61 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
    font size. flex: none keeps it from being squeezed when the nav wraps. */
 .brand { font-weight: 600; display: flex; align-items: center; flex: none; }
 .brand img { display: block; height: 28px; width: auto; }
-.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; }
-.topbar nav a { color: var(--muted); text-decoration: none; white-space: nowrap; }
-.topbar nav a:hover { color: var(--ink); }
-.topbar nav a.on { color: var(--accent); font-weight: 600; }
-.signout { display: flex; align-items: center; gap: 10px; }
-.who { color: var(--muted); }
+.nav-links { display: flex; gap: 16px; flex-wrap: wrap; }
+.nav-links a { color: var(--muted); text-decoration: none; white-space: nowrap; }
+.nav-links a:hover { color: var(--ink); }
+.nav-links a.on { color: var(--accent); font-weight: 600; }
 
-/* Who you are and the way out, pinned to the right of the bar. */
+/* The mobile stand-in for .nav-links — hidden until the topbar's own
+   breakpoint takes over (see Small screens, below). */
+.nav-dropdown { display: none; position: relative; }
+.nav-dropdown summary {
+  list-style: none; cursor: pointer; color: var(--ink); font-weight: 600;
+  padding: 6px 28px 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg);
+}
+.nav-dropdown summary::-webkit-details-marker { display: none; }
+/* The disclosure triangle, drawn by hand so it can sit inside the pill
+   rather than in the browser's own default gutter. */
+.nav-dropdown summary::after {
+  content: ""; position: absolute; right: 12px; top: 50%;
+  width: 7px; height: 7px; margin-top: -5px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg); transition: transform .15s;
+}
+.nav-dropdown[open] summary::after { transform: rotate(-135deg); margin-top: -2px; }
+.nav-dropdown-menu {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  z-index: 20; min-width: 200px; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.nav-dropdown-menu a {
+  color: var(--ink); text-decoration: none; padding: 8px 10px; border-radius: 6px;
+  white-space: nowrap;
+}
+.nav-dropdown-menu a:hover { background: var(--bg); }
+.nav-dropdown-menu a.on { color: var(--accent); font-weight: 600; }
+
+/* Who you are and the way out, pinned to the right of the bar. Tapping the
+   name reveals Sign out rather than showing it at all times. */
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.user-menu { position: relative; }
+.user-menu summary {
+  list-style: none; cursor: pointer; color: var(--muted); white-space: nowrap;
+}
+.user-menu summary::-webkit-details-marker { display: none; }
+.user-menu summary:hover { color: var(--ink); }
+.user-menu summary::after {
+  content: "▾"; margin-left: 4px; font-size: 11px; display: inline-block;
+}
+.user-menu-items {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 20;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.user-menu-items form { display: block; }
+.user-menu-items button.link { padding: 6px 10px; white-space: nowrap; }
 
 /* Panels ------------------------------------------------------------------ */
 
@@ -570,25 +616,42 @@ table.preview .dropped-by { color: var(--err); }
   .action-controls { margin-left: auto; }
 }
 
+/* Users ---------------------------------------------------------------- */
+
+/* One card per user rather than one row of a wide table — the same move as
+   .action-card, and for the same reason: a phone has no room for a column
+   per action, but it reflows a grid of checkboxes just fine. */
+.user-card { display: flex; flex-direction: column; gap: 12px; }
+.user-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.user-name { font-weight: 600; }
+.user-card-head .row-controls { margin-left: auto; }
+.perm-grid {
+  display: grid; gap: 8px 18px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.perm-check { font-size: 13px; }
+.perm-input { display: inline-flex; }
+.perm-input input[type=checkbox] { margin: 0; }
+
+/* Quality profiles ------------------------------------------------------- */
+
+.profile-card { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.profile-card .profile-name { font-weight: 600; }
+.profile-card .profile-reading { flex: 1 1 320px; min-width: 0; }
+.profile-card .row-controls { margin-left: auto; }
+
 /* Small screens ----------------------------------------------------------- */
 
 @media (max-width: 760px) {
   .wrap { padding: 18px 14px 56px; }
-  /* One scrolling line rather than three stacked ones: the nav is eight links
-     and it should not cost a third of a phone screen before the page starts. */
+  /* Eight tabs do not fit a phone width as a row, so below this breakpoint
+     they collapse into one dropdown, centred on its own line under the
+     brand and the user menu. */
   .topbar { gap: 8px 14px; padding: 10px 14px; }
-  .topbar nav {
+  .nav-links { display: none; }
+  .nav-dropdown {
+    display: flex; justify-content: center;
     order: 3; flex-basis: 100%;
-    flex-wrap: nowrap; overflow-x: auto; gap: 14px;
-    padding-bottom: 2px; overscroll-behavior-x: contain;
-    scrollbar-width: none;
-  }
-  .topbar nav::-webkit-scrollbar { display: none; }
-  /* Fades the last link out at the right edge, so a nav that continues past
-     the screen looks like it continues rather than like it ends there. */
-  .topbar nav {
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   }
   .topbar-end { gap: 12px; }
   h1 { font-size: 20px; margin: 4px 0 16px; }

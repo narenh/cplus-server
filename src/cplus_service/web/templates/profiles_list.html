@@ -5,18 +5,15 @@
 {% if not profiles %}
   <p class="empty">No quality profiles yet. Every action needs one, so start here.</p>
 {% else %}
-<div class="table-scroll">
-<table>
-  <thead><tr><th class="who">Name</th><th>What it does</th><th class="actions-col"></th></tr></thead>
-  <tbody>
+<div class="action-list">
   {% for profile in profiles %}
     {% set summary = summaries.get(profile.id) %}
-    <tr>
-      <td><a href="/admin/quality-profiles/{{ profile.id }}">{{ profile.name }}</a></td>
+    <div class="card profile-card">
+      <a class="profile-name" href="/admin/quality-profiles/{{ profile.id }}">{{ profile.name }}</a>
       {# The reading, not the rule types: the list is for recognising a profile,
          and "exclude_prerelease → resolution_order" is not how anyone thinks of
          one. #}
-      <td class="muted profile-reading">
+      <span class="muted profile-reading">
         {% if summary.is_empty %}
           <em>takes anything, in indexer order</em>
         {% else %}
@@ -37,8 +34,8 @@
             </span>
           {% endif %}
         {% endif %}
-      </td>
-      <td class="right actions-col">
+      </span>
+      <span class="row-controls">
         {% if profile.id in in_use %}
           <span class="muted" title="Used by at least one action">in use</span>
         {% else %}
@@ -50,11 +47,9 @@
             </button>
           </form>
         {% endif %}
-      </td>
-    </tr>
+      </span>
+    </div>
   {% endfor %}
-  </tbody>
-</table>
 </div>
 {% endif %}
 {% endblock %}

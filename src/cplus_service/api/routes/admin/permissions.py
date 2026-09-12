@@ -34,7 +34,7 @@ router = APIRouter(prefix="/users", tags=["admin"])
 @router.get("", response_class=HTMLResponse)
 async def list_users(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
     users = list(
-        (await db.execute(select(User).order_by(User.plex_username))).scalars().all()
+        (await db.execute(select(User).order_by(User.seerr_user_id))).scalars().all()
     )
     actions = list(
         (await db.execute(select(Action).order_by(Action.is_system, Action.name)))
@@ -54,7 +54,7 @@ async def list_users(request: Request, db: DbDep, admin: AdminPageDep) -> Respon
             "actions": actions,
             "granted": granted,
             "admin": admin,
-            "title": "Permissions",
+            "title": "Users",
             "nav": "users",
         },
     )

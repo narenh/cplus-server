@@ -10,6 +10,19 @@
 </head>
 <body>
 {% if admin is defined and admin %}
+{# One list of tabs drives both the desktop nav and the mobile dropdown, so
+   the two can never drift out of sync with each other. #}
+{% set nav_items = [
+  ("/admin/config", "config", "Configuration"),
+  ("/admin/libraries", "libraries", "Libraries & Home"),
+  ("/admin/quality-profiles", "profiles", "Quality profiles"),
+  ("/admin/actions", "actions", "Actions"),
+  ("/admin/users", "users", "Users"),
+  ("/admin/grabs", "grabs", "Grabs"),
+  ("/admin/activity-log", "activity", "Activity"),
+  ("/admin/notifications", "notifications", "Notifications"),
+] %}
+{% set current = nav_items|selectattr("1", "equalto", nav)|first %}
 <header class="topbar">
   {# The mark stands in for the service's name rather than sitting beside it,
      in the same corner tvOS puts it. Named in alt for the same reason: it is
@@ -24,21 +37,33 @@
            width="62" height="28">
     </picture>
   </div>
-  <nav>
-    <a href="/admin/config" class="{{ 'on' if nav == 'config' }}">Configuration</a>
-    <a href="/admin/libraries" class="{{ 'on' if nav == 'libraries' }}">Libraries &amp; Home</a>
-    <a href="/admin/quality-profiles" class="{{ 'on' if nav == 'profiles' }}">Quality profiles</a>
-    <a href="/admin/actions" class="{{ 'on' if nav == 'actions' }}">Actions</a>
-    <a href="/admin/users" class="{{ 'on' if nav == 'users' }}">Permissions</a>
-    <a href="/admin/grabs" class="{{ 'on' if nav == 'grabs' }}">Grabs</a>
-    <a href="/admin/activity-log" class="{{ 'on' if nav == 'activity' }}">Activity</a>
-    <a href="/admin/notifications" class="{{ 'on' if nav == 'notifications' }}">Notifications</a>
+  <nav class="nav-links">
+    {% for href, key, label in nav_items %}
+      <a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>
+    {% endfor %}
   </nav>
+  {# CSS shows this in place of .nav-links below the topbar's own breakpoint;
+     see .nav-links / .nav-dropdown in app.css. A <details> needs no script
+     and degrades to an ordinary disclosure if the styling doesn't load. #}
+  <details class="nav-dropdown">
+    <summary>{{ current[2] if current else "Menu" }}</summary>
+    <div class="nav-dropdown-menu">
+      {% for href, key, label in nav_items %}
+        <a href="{{ href }}" class="{{ 'on' if nav == key }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </details>
   <div class="topbar-end">
-    <form method="post" action="/admin/logout" class="signout">
-      <span class="who">{{ admin.plex_username }}</span>
-      <button type="submit" class="link">Sign out</button>
-    </form>
+    {# Tap the name to reveal Sign out, rather than showing the button
+       every time — one word of chrome instead of two. #}
+    <details class="user-menu">
+      <summary class="who">{{ admin.plex_username }}</summary>
+      <div class="user-menu-items">
+        <form method="post" action="/admin/logout">
+          <button type="submit" class="link">Sign out</button>
+        </form>
+      </div>
+    </details>
   </div>
 </header>
 {% endif %}
