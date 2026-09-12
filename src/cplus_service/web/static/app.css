@@ -119,23 +119,28 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .nav-dropdown-menu a:hover { background: var(--bg); }
 .nav-dropdown-menu a.on { color: var(--accent); font-weight: 600; }
 
-/* Who you are and the way out, pinned to the right of the bar. Tapping the
-   name reveals Sign out rather than showing it at all times. */
+/* A generic account glyph, pinned to the right of the bar. Tapping it opens
+   the name (inert) and Sign out, rather than showing either at all times. */
 .topbar-end { margin-left: auto; display: flex; align-items: center; gap: 16px; }
 .user-menu { position: relative; }
 .user-menu summary {
-  list-style: none; cursor: pointer; color: var(--muted); white-space: nowrap;
+  list-style: none; cursor: pointer; color: var(--muted);
+  display: flex; align-items: center;
 }
 .user-menu summary::-webkit-details-marker { display: none; }
 .user-menu summary:hover { color: var(--ink); }
-.user-menu summary::after {
-  content: "▾"; margin-left: 4px; font-size: 11px; display: inline-block;
-}
 .user-menu-items {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 20;
+  min-width: 160px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
 }
+/* The name it opens with — who this is, not something to act on. */
+.user-menu-name {
+  padding: 6px 10px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.user-menu-divider { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
 .user-menu-items form { display: block; }
 .user-menu-items button.link { padding: 6px 10px; white-space: nowrap; }
 
@@ -661,14 +666,18 @@ table.preview .dropped-by { color: var(--err); }
 
 @media (max-width: 760px) {
   .wrap { padding: 18px 14px 56px; }
-  /* Eight tabs do not fit a phone width as a row, so below this breakpoint
-     they collapse into one dropdown, centred on its own line under the
-     brand and the user menu. */
-  .topbar { gap: 8px 14px; padding: 10px 14px; }
+  /* Seven tabs do not fit a phone width as a row, so below this breakpoint
+     they collapse into one dropdown — inline between the brand and the
+     account icon rather than wrapping to a line of its own, and centred in
+     whatever room those two leave it. */
+  .topbar { gap: 8px 14px; padding: 10px 14px; flex-wrap: nowrap; }
   .nav-links { display: none; }
   .nav-dropdown {
-    display: flex; justify-content: center;
-    order: 3; flex-basis: 100%;
+    display: flex; flex: 1; min-width: 0; justify-content: center;
+  }
+  .nav-dropdown summary {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .topbar-end { gap: 12px; }
   h1 { font-size: 20px; margin: 4px 0 16px; }

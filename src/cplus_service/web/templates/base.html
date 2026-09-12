@@ -10,6 +10,7 @@
   {# Rewrites every server-rendered UTC <time class="local-time"> to the
      viewer's own timezone — see format_when() in cplus_service/web/__init__.py. #}
   <script src="{{ static_url('local-time.js') }}" defer></script>
+  <script src="{{ static_url('topbar-menus.js') }}" defer></script>
 </head>
 <body>
 {% if admin is defined and admin %}
@@ -56,11 +57,16 @@
     </div>
   </details>
   <div class="topbar-end">
-    {# Tap the name to reveal Sign out, rather than showing the button
-       every time — one word of chrome instead of two. #}
+    {# A generic account glyph rather than the name — the name moved inside
+       the menu itself, as inert text above the Sign out it used to sit
+       beside. #}
     <details class="user-menu">
-      <summary class="who">{{ admin.plex_username }}</summary>
+      <summary aria-label="Account menu">
+        {% include "partials/_user_icon.html" %}
+      </summary>
       <div class="user-menu-items">
+        <div class="user-menu-name">{{ admin.plex_username }}</div>
+        <hr class="user-menu-divider">
         <form method="post" action="/admin/logout">
           <button type="submit" class="link">Sign out</button>
         </form>
