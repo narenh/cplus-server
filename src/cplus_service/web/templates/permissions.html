@@ -12,16 +12,13 @@
     <div class="user-card-head">
       <span class="user-name">{{ user.plex_username }}</span>
       <span class="muted">#{{ user.seerr_user_id }}</span>
-      <span class="row-controls">
-        <a class="button secondary" href="/admin/users/{{ user.id }}/home">Edit Home Screen</a>
-        <form method="post" action="/admin/users/{{ user.id }}/delete"
-              onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
-          <button type="submit" class="icon danger" title="Remove {{ user.plex_username }}"
-                  aria-label="Remove {{ user.plex_username }}">
-            {% include "partials/_trash_icon.html" with context %}
-          </button>
-        </form>
-      </span>
+      <form class="row-controls" method="post" action="/admin/users/{{ user.id }}/delete"
+            onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
+        <button type="submit" class="icon danger" title="Remove {{ user.plex_username }}"
+                aria-label="Remove {{ user.plex_username }}">
+          {% include "partials/_trash_icon.html" with context %}
+        </button>
+      </form>
     </div>
     <div class="perm-grid">
       {% for action in actions %}
@@ -35,6 +32,7 @@
         </label>
       {% endfor %}
     </div>
+    <a class="link-button" href="/admin/users/{{ user.id }}/home">Edit Home Screen</a>
   </div>
   {% endfor %}
 </div>

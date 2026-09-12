@@ -61,6 +61,10 @@ body {
    .hint and .lede, which are the only long-form text here. */
 .wrap { max-width: 1240px; margin: 0 auto; padding: 24px 20px 64px; }
 h1 { font-size: 22px; margin: 8px 0 20px; }
+.breadcrumb { font-size: 13px; margin: 0 0 2px; color: var(--muted); }
+.breadcrumb a { color: var(--muted); text-decoration: none; }
+.breadcrumb a:hover { color: var(--ink); text-decoration: underline; }
+.breadcrumb .crumb-sep { margin: 0 6px; }
 h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
      color: var(--muted); margin: 28px 0 10px; }
 
@@ -82,8 +86,13 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 /* The mobile stand-in for .nav-links — hidden until the topbar's own
    breakpoint takes over (see Small screens, below). */
 .nav-dropdown { display: none; position: relative; }
+/* position: relative here too, not just on .nav-dropdown: on mobile
+   .nav-dropdown becomes a full-width flex row that only centres the pill
+   inside it (see the max-width: 760px block below), and without this the
+   chevron below anchors to that full-width row instead of to the pill. */
 .nav-dropdown summary {
   list-style: none; cursor: pointer; color: var(--ink); font-weight: 600;
+  position: relative;
   padding: 6px 28px 6px 12px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--bg);
 }
@@ -632,6 +641,14 @@ table.preview .dropped-by { color: var(--err); }
 .perm-check { font-size: 13px; }
 .perm-input { display: inline-flex; }
 .perm-input input[type=checkbox] { margin: 0; }
+/* Below the checkboxes rather than beside the name: it's the least common
+   action on this card, so it gets a plain link rather than a bordered
+   button competing with the checkboxes for attention. */
+.link-button {
+  align-self: flex-start; color: var(--accent); text-decoration: none;
+  font-weight: 600; font-size: 13px;
+}
+.link-button:hover { text-decoration: underline; }
 
 /* Quality profiles ------------------------------------------------------- */
 

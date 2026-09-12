@@ -70,7 +70,20 @@
 <main class="wrap {% block wrap_class %}{% endblock %}">
   {# A block, so the sign-in page can put the logo where the page heading goes
      instead of stacking a redundant "Sign in" above it. #}
-  {% block heading %}{% if title %}<h1>{{ title }}</h1>{% endif %}{% endblock %}
+  {% block heading %}
+    {# A subpage (e.g. editing one quality profile, or one user's Home) sets
+       this to say which tab it lives under — the tab itself stays selected
+       in the nav rather than going blank, and this is how the page still
+       says "you are inside X" and offers a way back to it. #}
+    {% if breadcrumb %}
+      <p class="breadcrumb">
+        {% for href, label in breadcrumb %}
+          <a href="{{ href }}">{{ label }}</a><span class="crumb-sep">/</span>
+        {% endfor %}
+      </p>
+    {% endif %}
+    {% if title %}<h1>{{ title }}</h1>{% endif %}
+  {% endblock %}
   {% if errors %}
     <ul class="errors">
       {% for error in errors %}<li>{{ error }}</li>{% endfor %}

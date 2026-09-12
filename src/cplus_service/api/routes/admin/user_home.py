@@ -152,6 +152,7 @@ async def user_home_page(
             "admin": admin,
             "title": f"{user.plex_username}'s Home",
             "nav": "users",
+            "breadcrumb": [("/admin/users", "Users")],
         },
     )
 

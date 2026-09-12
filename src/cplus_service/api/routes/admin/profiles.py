@@ -61,6 +61,11 @@ router = APIRouter(prefix="/quality-profiles", tags=["admin"])
 #: shaped like ``tt1234567`` is treated as the former.
 IMDB_PREFIX = "tt"
 
+#: The builder is a subpage of the Quality profiles tab — it keeps that tab
+#: selected in the nav rather than clearing it, and offers this as the way
+#: back instead.
+BREADCRUMB = [("/admin/quality-profiles", "Quality profiles")]
+
 
 def _draft(rules: list[dict], choices: list[dict]) -> ProfileSchema | None:
     """The draft as the engine would see it, or ``None`` if it is not valid yet.
@@ -145,6 +150,7 @@ async def new_profile(request: Request, admin: AdminPageDep) -> Response:
             "admin": admin,
             "title": "New quality profile",
             "nav": "profiles",
+            "breadcrumb": BREADCRUMB,
         },
     )
 
@@ -164,6 +170,7 @@ async def edit_profile(
             "admin": admin,
             "title": f"Edit {profile.name}",
             "nav": "profiles",
+            "breadcrumb": BREADCRUMB,
         },
     )
 
@@ -298,6 +305,7 @@ async def save_profile(request: Request, db: DbDep, admin: AdminPageDep) -> Resp
                 "admin": admin,
                 "title": "Quality profile",
                 "nav": "profiles",
+                "breadcrumb": BREADCRUMB,
             },
             status_code=422,
         )
