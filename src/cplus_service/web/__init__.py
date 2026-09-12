@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
@@ -29,12 +30,24 @@ def format_size(value: Any) -> str:
     return f"{value / BYTES_PER_GB:.2f} GB"
 
 
-def format_when(value: Any) -> str:
-    """A UTC timestamp rendered for a human, tolerating SQLite's naive datetimes."""
+def format_when(value: Any) -> Markup:
+    """A timestamp rendered for a human, tolerating SQLite's naive datetimes.
+
+    The server only knows UTC, but the admin reading this is in whatever
+    timezone their own device is — so this renders a ``<time>`` element
+    carrying the UTC instant, with the UTC string as its initial text and a
+    ``local-time`` class. ``static/local-time.js`` rewrites that text to the
+    browser's local timezone on load; a browser with JS disabled, or a
+    scraper reading the raw HTML, still gets a correct and unambiguous UTC
+    timestamp rather than nothing.
+    """
     if not isinstance(value, datetime):
-        return "—"
+        return Markup("—")
     stamp = value if value.tzinfo else value.replace(tzinfo=UTC)
-    return stamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    stamp = stamp.astimezone(UTC)
+    iso = stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+    fallback = stamp.strftime("%Y-%m-%d %H:%M UTC")
+    return Markup(f'<time datetime="{iso}" class="local-time">{escape(fallback)}</time>')
 
 
 @cache

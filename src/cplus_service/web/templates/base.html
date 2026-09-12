@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="{{ static_url('app.css') }}">
   {# Vendored, not from a CDN: a self-hosted box may have no outbound access. #}
   <script src="{{ static_url('htmx.min.js') }}" defer></script>
+  {# Rewrites every server-rendered UTC <time class="local-time"> to the
+     viewer's own timezone — see format_when() in cplus_service/web/__init__.py. #}
+  <script src="{{ static_url('local-time.js') }}" defer></script>
 </head>
 <body>
 {% if admin is defined and admin %}
