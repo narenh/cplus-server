@@ -16,6 +16,7 @@ searches on, so anyone who may manage requests needs it too.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -25,6 +26,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ActivityLog, EventType
+from ...search.categorize import categorize_releases
 from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import (
@@ -101,7 +103,11 @@ async def search(
 
     Exactly one of ``imdb_id`` or ``query`` must be given. Never scored — there
     is no action here to score against, and picking a release to grab directly
-    (``POST /manager/grab``) doesn't need one; every result is returned as-is.
+    (``POST /manager/grab``) doesn't need one; instead, every result is
+    categorised, sorted and tagged by
+    :func:`~cplus_service.search.categorize.categorize_releases` — this is the
+    one search path where cplus does that itself rather than leaving it to the
+    client. See that module for the category list and sort/tag rules.
 
     This is the *only* way to search Prowlarr independent of holding an
     action — regular tvOS users only ever see Prowlarr results through an
@@ -154,6 +160,13 @@ async def search(
     await db.commit()
 
     async def body() -> AsyncIterator[str]:
+        # `stream_search`'s `all` phase carries only what the `preferred` phase
+        # had not already sent (see its module docstring) — a delta, not the
+        # full set. Accumulating here before categorising is what turns that
+        # back into "every result seen so far", so the admin app never has to
+        # merge releases across lines itself; it just renders the categories
+        # it was handed.
+        accumulated: list[Any] = []
         async for phase in stream_search(
             prowlarr=prowlarr,
             imdb_id=imdb_id,
@@ -162,7 +175,14 @@ async def search(
             actions=[],
             preferred_indexer_id=preferred_indexer_id,
         ):
-            yield phase.to_ndjson_line()
+            accumulated.extend(phase.releases)
+            payload: dict[str, Any] = {
+                "phase": phase.phase,
+                "categories": categorize_releases(accumulated),
+            }
+            if phase.error is not None:
+                payload["error"] = phase.error
+            yield json.dumps(payload, separators=(",", ":")) + "\n"
 
     return StreamingResponse(
         body(),

@@ -65,6 +65,16 @@ def ndjson(response: httpx.Response) -> list[dict]:
     return [json.loads(line) for line in response.text.splitlines() if line.strip()]
 
 
+def flatten(line: dict) -> list[dict]:
+    """Every release in a ``/manager/search`` line, across all categories."""
+    return [release for category in line["categories"] for release in category["releases"]]
+
+
+def category(line: dict, category_id: str) -> list[dict]:
+    """The releases in one named category of a ``/manager/search`` line."""
+    return next(c["releases"] for c in line["categories"] if c["id"] == category_id)
+
+
 def seerr_rejects_the_token() -> respx.Route:
     return respx.post(f"{SEERR_URL}/api/v1/auth/plex").mock(
         return_value=httpx.Response(401, json={"message": "Unauthorised"})
@@ -335,9 +345,12 @@ async def test_a_request_manager_can_search_by_free_text(
     assert response.status_code == 200
     lines = ndjson(response)
     assert [line["phase"] for line in lines] == ["all"]
-    assert [r["guid"] for r in lines[0]["releases"]] == ["guid-uhd", "guid-fhd"]
-    # Never scored: there is no action here to score against.
-    assert lines[0]["recommendations"] == {}
+    # Never scored: there is no action here to score against — categorised and
+    # sorted instead. WEB_2160 has no Dolby Vision so it lands in "4k", not
+    # "4k_dv"; WEB_1080 in "hd1080".
+    assert [r["guid"] for r in category(lines[0], "4k")] == ["guid-uhd"]
+    assert [r["guid"] for r in category(lines[0], "hd1080")] == ["guid-fhd"]
+    assert "recommendations" not in lines[0]
 
     params = route.calls[0].request.url.params
     assert params["query"] == "the office"
@@ -357,9 +370,10 @@ async def test_a_free_text_result_is_still_parsed_and_full_disc_filtered(
         "/manager/search", params={"query": "dune"}, headers=plex_headers
     )
 
-    releases = ndjson(response)[0]["releases"]
+    releases = flatten(ndjson(response)[0])
     assert [r["guid"] for r in releases] == ["guid-uhd"]
     assert releases[0]["has_atmos"] is True
+    assert releases[0]["tags"] == ["Atmos"]
 
 
 @respx.mock
@@ -377,8 +391,8 @@ async def test_a_request_manager_can_search_by_imdb_id(
 
     assert response.status_code == 200
     lines = ndjson(response)
-    assert [r["guid"] for r in lines[0]["releases"]] == ["guid-uhd"]
-    assert lines[0]["recommendations"] == {}
+    assert [r["guid"] for r in flatten(lines[0])] == ["guid-uhd"]
+    assert "recommendations" not in lines[0]
 
 
 @respx.mock
@@ -465,7 +479,15 @@ async def test_a_search_that_finds_nothing_is_an_empty_200_not_a_500(
     assert response.status_code == 200
     lines = ndjson(response)
     assert [line["phase"] for line in lines] == ["all"]
-    assert lines[0]["releases"] == []
+    assert flatten(lines[0]) == []
+    # Every category is present even when empty.
+    assert [c["id"] for c in lines[0]["categories"]] == [
+        "4k_dv",
+        "4k",
+        "hd1080",
+        "prerelease",
+        "other",
+    ]
     assert "error" not in lines[0]
 
 
@@ -485,7 +507,7 @@ async def test_a_search_answered_with_a_json_object_is_reported_in_band_not_as_a
     assert response.status_code == 200
     (line,) = ndjson(response)
     assert line["phase"] == "all"
-    assert line["releases"] == []
+    assert flatten(line) == []
     assert line["error"] == "Prowlarr returned a response this service could not read."
 
 
