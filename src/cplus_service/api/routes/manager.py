@@ -164,8 +164,8 @@ async def search(
         # had not already sent (see its module docstring) — a delta, not the
         # full set. Accumulating here before categorising is what turns that
         # back into "every result seen so far", so the admin app never has to
-        # merge releases across lines itself; it just renders the categories
-        # it was handed.
+        # merge releases across lines itself; it just renders the flat,
+        # pre-ordered list it was handed.
         accumulated: list[Any] = []
         async for phase in stream_search(
             prowlarr=prowlarr,
@@ -178,7 +178,7 @@ async def search(
             accumulated.extend(phase.releases)
             payload: dict[str, Any] = {
                 "phase": phase.phase,
-                "categories": categorize_releases(accumulated),
+                "releases": categorize_releases(accumulated),
             }
             if phase.error is not None:
                 payload["error"] = phase.error

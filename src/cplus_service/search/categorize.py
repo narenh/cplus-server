@@ -7,10 +7,16 @@ itself. That model is shared with tvOS, where sectioning stays a client-side
 concern driven off the parsed tags (see the module docstring there). The admin
 app's free-text/IMDB-id search has no client-side categorisation at all today,
 Prowlarr fans out to every indexer, and admins were left to make sense of a
-flat, unsorted list themselves — this module is what replaces that.
+flat, unsorted list themselves — this module is what replaces that, without
+changing the *shape* of the response: still one flat ``releases`` list, exactly
+as every existing client already expects it — each release now simply carries
+two extra fields, ``category`` and ``tags``, and the list itself arrives
+pre-ordered. There is no grouping wrapper to unlearn.
 
-Five categories, always present in this order so the client can render fixed
-sections without checking first:
+Five categories, checked in this order and also the order releases are
+returned in — so grouping by ``category`` while preserving list order recovers
+the same sections a wrapped response would have offered, if a client wants
+them:
 
 * ``4k_dv`` — 2160p with any Dolby Vision profile
 * ``4k`` — 2160p, no Dolby Vision (HDR10/HDR10+/SDR)
@@ -21,13 +27,13 @@ sections without checking first:
 Pre-release status is checked first and wins over resolution: a CAM of a
 2160p film is still a CAM, not a 4K release worth offering as one.
 
-Every category sorts by size, largest first — the same "biggest is the least
-compressed copy" reasoning the quality engine's default profile uses — except
-``prerelease``, which sorts by publish date, newest first: size says nothing
-useful about a CAM, but a fresher rip replacing an earlier one does. A release
-missing the sort key (no size, no date) sorts last within its category rather
-than first, so an indexer that reports nothing never wins a slot on that
-account.
+Within each category, releases sort by size, largest first — the same
+"biggest is the least compressed copy" reasoning the quality engine's default
+profile uses — except ``prerelease``, which sorts by publish date, newest
+first: size says nothing useful about a CAM, but a fresher rip replacing an
+earlier one does. A release missing the sort key (no size, no date) sorts
+last within its category rather than first, so an indexer that reports
+nothing never wins a slot on that account.
 
 Each release is also handed a client-facing ``tags`` list — ``dv5``/``dv7``/
 ``dv8``, ``HDR10``, ``hdr10p``, ``Atmos``, ``dtsx`` — for the admin UI to draw
@@ -105,18 +111,21 @@ def _date_key(release: ParsedRelease) -> tuple[int, float]:
     return (0, -published.timestamp())
 
 
-def _release_payload(release: ParsedRelease) -> dict[str, Any]:
+def _release_payload(release: ParsedRelease, category: str) -> dict[str, Any]:
     payload = release.model_dump(mode="json")
+    payload["category"] = category
     payload["tags"] = release_tags(release)
     return payload
 
 
 def categorize_releases(releases: Sequence[ParsedRelease]) -> list[dict[str, Any]]:
-    """Group ``releases`` into categories, sort each, and tag every release.
+    """Order, sort and tag ``releases`` into a single flat list.
 
-    Returns a list ordered per :data:`CATEGORY_ORDER`, one entry per category:
-    ``{"id": ..., "releases": [...]}``. Every category is present even when its
-    list is empty.
+    Still a flat ``releases`` list — the shape every client already expects —
+    just pre-ordered category by category (per :data:`CATEGORY_ORDER`) and,
+    within each, sorted per that category's rule. Each release dict gains a
+    ``category`` field (one of :data:`CATEGORY_ORDER`) and a ``tags`` field;
+    nothing is dropped or wrapped.
     """
     buckets: dict[str, list[ParsedRelease]] = {category: [] for category in CATEGORY_ORDER}
     for release in releases:
@@ -127,10 +136,5 @@ def categorize_releases(releases: Sequence[ParsedRelease]) -> list[dict[str, Any
         bucket = buckets[category]
         key = _date_key if category == CATEGORY_PRERELEASE else _size_key
         bucket.sort(key=key)
-        result.append(
-            {
-                "id": category,
-                "releases": [_release_payload(release) for release in bucket],
-            }
-        )
+        result.extend(_release_payload(release, category) for release in bucket)
     return result

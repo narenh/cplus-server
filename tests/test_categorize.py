@@ -98,13 +98,16 @@ def test_dv_profile_8_tag() -> None:
 
 # --------------------------------------------------------------------------- #
 # categorize_releases
+#
+# Output is a single flat list — same shape as before this module existed —
+# pre-ordered category by category and, within each, by that category's sort
+# rule. Nothing is grouped or wrapped; a release's own ``category`` field is
+# how a client recovers sections, if it wants them.
 # --------------------------------------------------------------------------- #
 
 
-def test_every_category_is_present_even_when_empty() -> None:
-    result = categorize_releases([])
-    assert [c["id"] for c in result] == list(CATEGORY_ORDER)
-    assert all(c["releases"] == [] for c in result)
+def test_empty_input_is_an_empty_list() -> None:
+    assert categorize_releases([]) == []
 
 
 def test_releases_sort_largest_first_within_a_category() -> None:
@@ -113,8 +116,7 @@ def test_releases_sort_largest_first_within_a_category() -> None:
     unknown = release(guid="unknown", resolution=Resolution.FHD_1080P, size_bytes=None)
 
     result = categorize_releases([small, unknown, big])
-    hd1080 = next(c["releases"] for c in result if c["id"] == "hd1080")
-    assert [r["guid"] for r in hd1080] == ["big", "small", "unknown"]
+    assert [r["guid"] for r in result] == ["big", "small", "unknown"]
 
 
 def test_prerelease_sorts_newest_first_by_publish_date_not_size() -> None:
@@ -133,31 +135,25 @@ def test_prerelease_sorts_newest_first_by_publish_date_not_size() -> None:
     undated = release(guid="undated", is_prerelease=True, size_bytes=5_000, publish_date=None)
 
     result = categorize_releases([older, undated, newer])
-    prerelease = next(c["releases"] for c in result if c["id"] == "prerelease")
     # Newer wins despite being the smallest file; undated sorts last.
-    assert [r["guid"] for r in prerelease] == ["newer", "older", "undated"]
+    assert [r["guid"] for r in result] == ["newer", "older", "undated"]
 
 
-def test_each_release_payload_carries_its_tags() -> None:
+def test_each_release_payload_carries_its_category_and_tags() -> None:
     r = release(resolution=Resolution.FHD_1080P, has_atmos=True)
-    result = categorize_releases([r])
-    hd1080 = next(c["releases"] for c in result if c["id"] == "hd1080")
-    assert hd1080[0]["tags"] == ["Atmos"]
+    (payload,) = categorize_releases([r])
+    assert payload["category"] == "hd1080"
+    assert payload["tags"] == ["Atmos"]
 
 
-def test_releases_land_in_distinct_categories() -> None:
+def test_releases_are_ordered_by_category_then_sorted_within_it() -> None:
     dv = release(guid="dv", resolution=Resolution.UHD_2160P, dv_profile=7)
     plain_4k = release(guid="plain-4k", resolution=Resolution.UHD_2160P)
     hd = release(guid="hd", resolution=Resolution.FHD_1080P)
     cam = release(guid="cam", is_prerelease=True)
     sd = release(guid="sd", resolution=Resolution.SD_480P)
 
-    result = categorize_releases([dv, plain_4k, hd, cam, sd])
-    by_id = {c["id"]: [r["guid"] for r in c["releases"]] for c in result}
-    assert by_id == {
-        "4k_dv": ["dv"],
-        "4k": ["plain-4k"],
-        "hd1080": ["hd"],
-        "prerelease": ["cam"],
-        "other": ["sd"],
-    }
+    # Shuffled input order on purpose — the output order is what's asserted.
+    result = categorize_releases([sd, cam, hd, plain_4k, dv])
+    assert [r["guid"] for r in result] == ["dv", "plain-4k", "hd", "cam", "sd"]
+    assert [r["category"] for r in result] == list(CATEGORY_ORDER)

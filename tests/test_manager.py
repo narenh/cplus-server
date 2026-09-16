@@ -66,13 +66,13 @@ def ndjson(response: httpx.Response) -> list[dict]:
 
 
 def flatten(line: dict) -> list[dict]:
-    """Every release in a ``/manager/search`` line, across all categories."""
-    return [release for category in line["categories"] for release in category["releases"]]
+    """Every release in a ``/manager/search`` line — it's a flat list already."""
+    return line["releases"]
 
 
 def category(line: dict, category_id: str) -> list[dict]:
-    """The releases in one named category of a ``/manager/search`` line."""
-    return next(c["releases"] for c in line["categories"] if c["id"] == category_id)
+    """The releases carrying one ``category`` value in a ``/manager/search`` line."""
+    return [r for r in line["releases"] if r["category"] == category_id]
 
 
 def seerr_rejects_the_token() -> respx.Route:
@@ -345,9 +345,12 @@ async def test_a_request_manager_can_search_by_free_text(
     assert response.status_code == 200
     lines = ndjson(response)
     assert [line["phase"] for line in lines] == ["all"]
-    # Never scored: there is no action here to score against — categorised and
-    # sorted instead. WEB_2160 has no Dolby Vision so it lands in "4k", not
-    # "4k_dv"; WEB_1080 in "hd1080".
+    # Still a flat "releases" list — never scored, there is no action here to
+    # score against — but pre-ordered by category (WEB_2160 has no Dolby
+    # Vision so it's "4k", not "4k_dv"; WEB_1080 is "hd1080", which sorts
+    # after "4k") and each release carries its own category and tags.
+    assert [r["guid"] for r in lines[0]["releases"]] == ["guid-uhd", "guid-fhd"]
+    assert [r["category"] for r in lines[0]["releases"]] == ["4k", "hd1080"]
     assert [r["guid"] for r in category(lines[0], "4k")] == ["guid-uhd"]
     assert [r["guid"] for r in category(lines[0], "hd1080")] == ["guid-fhd"]
     assert "recommendations" not in lines[0]
@@ -479,15 +482,7 @@ async def test_a_search_that_finds_nothing_is_an_empty_200_not_a_500(
     assert response.status_code == 200
     lines = ndjson(response)
     assert [line["phase"] for line in lines] == ["all"]
-    assert flatten(lines[0]) == []
-    # Every category is present even when empty.
-    assert [c["id"] for c in lines[0]["categories"]] == [
-        "4k_dv",
-        "4k",
-        "hd1080",
-        "prerelease",
-        "other",
-    ]
+    assert lines[0]["releases"] == []
     assert "error" not in lines[0]
 
 
