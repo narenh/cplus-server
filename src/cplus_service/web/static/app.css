@@ -2,20 +2,61 @@
 
    One small stylesheet, no framework. This is a single-admin tool that gets
    looked at during setup and rarely after, so it aims for legible and quick to
-   scan rather than designed. Respects the OS light/dark preference. */
+   scan first — but "quick to scan" is a visual claim as much as a structural
+   one, so it is also built to be pleasant to sit in front of. Respects the OS
+   light/dark preference.
+
+   Colour, shadow, easing and size primitives come from Open Props (vendored
+   alongside this file; see base.html). Open Props ships variables and nothing
+   else — no component styles, no opinions about how a button should look — so
+   what it buys is the part that is genuinely hard to hand-tune: perceptually
+   even colour ramps and a shadow scale that already knows what to do in dark
+   mode. Everything below is still this file's own.
+
+   Nothing here reads an Open Props variable directly. They are mapped once, in
+   the token block that follows, onto names that say what a colour is *for*
+   rather than what it is — so a component rule reads `var(--panel)`, and
+   re-theming means editing one block rather than every rule that mentions a
+   grey. */
 
 :root {
-  --bg: #f6f7f9;
+  /* Surfaces, from the page backdrop up. --panel sits above --bg, and
+     --panel-raised above that: three steps is all the depth an admin console
+     needs, and it keeps a card-inside-a-card legible without a second border. */
+  --bg: var(--gray-1);
   --panel: #ffffff;
-  --ink: #1b1d21;
-  --muted: #6b7280;
-  --line: #dfe3e8;
-  --accent: #3b6ea5;
-  --ok: #1f7a4d;
-  --warn: #8a6100;
-  --err: #b3261e;
-  --filter: #8a5a00;
-  --preference: #3b6ea5;
+  --panel-raised: var(--gray-0);
+  --ink: var(--gray-9);
+  /* Between gray-6 and gray-7 on purpose. gray-6 is the one that *looks*
+     right for secondary text and lands at 3.3:1 on white, under AA for the
+     amount of hint and lede copy this UI sets in it; gray-7 clears AA easily
+     but reads as ink rather than as a second voice. Mixed, it is 5.6:1 on a
+     panel and 5.0:1 on the page behind one, and still plainly quieter than
+     --ink's 15:1. */
+  --muted: color-mix(in srgb, var(--gray-7) 60%, var(--gray-6));
+  --line: var(--gray-3);
+  /* A second, fainter rule for dividers *inside* a panel, where the full
+     --line strength reads as a seam between two things rather than a break
+     within one. */
+  --line-soft: var(--gray-2);
+
+  --accent: var(--blue-8);
+  --accent-ink: #ffffff;
+  /* The accent at a tint you can lay text over — selected tabs, badges, the
+     built-in action's card. Kept as its own token rather than a color-mix at
+     each use, so every tinted surface in the UI is provably the same tint. */
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  --accent-softer: color-mix(in srgb, var(--accent) 6%, var(--panel));
+
+  /* One rung darker than the ramp step these read as, for the same reason
+     --muted is mixed: green-9 and yellow-10 are the ones that look like "ok"
+     and "warn", and both land just under 4.5:1 on the page background these
+     words are most often set on. */
+  --ok: var(--green-10);
+  --warn: var(--yellow-11);
+  --err: var(--red-9);
+  --filter: var(--orange-10);
+  --preference: var(--blue-8);
   /* Text laid over a solid --err fill. Light mode's red is dark enough to
      carry white; dark mode's is a pastel, which needs dark ink instead. */
   --on-err: #ffffff;
@@ -28,23 +69,62 @@
   --plex: #e5a00d;
   --plex-hover: #cc8e0b;
   --on-plex: #1a1205;
+
+  /* Geometry. Three radii, not one per component: a control, a panel, and a
+     pill. Anything that picks its own number drifts. */
+  --radius-control: 7px;
+  --radius-panel: 10px;
+  --radius-pill: 999px;
+
+  /* Elevation. Panels get -1 (a hairline lift, enough to separate a card from
+     the page without announcing itself); only things that float over other
+     content — menus, the toast — get -2. */
+  --lift-1: var(--shadow-1);
+  --lift-2: var(--shadow-3);
+
+  /* Motion budget, in one place so it can be read as a whole. Everything in
+     this UI is a state change on something already on screen — a hover, a
+     focus ring, a row swapping in — so the only honest duration is one short
+     enough to feel like the thing responded rather than played. */
+  --dur: 120ms;
+  --dur-slow: 400ms;
+  --ease: var(--ease-3);
+
+  /* Every control that is a box with text in it lands on this height, so a
+     button, a select and an input sitting on one row line up without each
+     rule guessing its own padding. */
+  --control-h: 34px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161a;
-    --panel: #1c1f24;
-    --ink: #e6e8eb;
-    --muted: #9aa1ab;
-    --line: #2c3138;
-    --accent: #7aa9dd;
-    --ok: #6ed49b;
-    --warn: #e0b355;
-    --err: #f08a84;
-    --filter: #e0b060;
-    --preference: #7aa9dd;
-    --on-err: #14161a;
+    /* Not the light ramp reversed: the darkest greys are reserved for the
+       page behind everything, so a panel can still be *lighter* than its
+       backdrop and read as raised, the same way it does in light mode. */
+    --bg: var(--gray-10);
+    --panel: var(--gray-9);
+    --panel-raised: var(--gray-8);
+    --ink: var(--gray-1);
+    --muted: var(--gray-5);
+    --line: var(--gray-8);
+    --line-soft: var(--gray-9);
+
+    --accent: var(--blue-3);
+    --accent-ink: var(--gray-10);
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--panel));
+    --accent-softer: color-mix(in srgb, var(--accent) 8%, var(--panel));
+
+    --ok: var(--green-3);
+    --warn: var(--yellow-3);
+    --err: var(--red-3);
+    --filter: var(--orange-3);
+    --preference: var(--blue-3);
+    --on-err: var(--gray-10);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 0ms; --dur-slow: 0ms; }
 }
 
 * { box-sizing: border-box; }
@@ -54,23 +134,60 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Everything an admin reads on this console that is a *quantity* — sizes,
+     ids, ranks, counts, timestamps — reads better with figures that share a
+     width, and nothing here is set in a face where proportional figures are
+     part of the design. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Wide enough for a six-column table to breathe on a laptop without the
    prose in it stretching past a readable line — hence the narrower cap on
    .hint and .lede, which are the only long-form text here. */
-.wrap { max-width: 1240px; margin: 0 auto; padding: 24px 20px 64px; }
-h1 { font-size: 22px; margin: 8px 0 20px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 20px 64px; }
+/* Tighter tracking than the browser's default at this size: a page title is
+   read as a shape, not word by word, and the default spacing at 24px makes it
+   read as a sentence. */
+h1 { font-size: 24px; letter-spacing: -.01em; margin: 6px 0 20px; }
 .breadcrumb { font-size: 13px; margin: 0 0 2px; color: var(--muted); }
 .breadcrumb a { color: var(--muted); text-decoration: none; }
 .breadcrumb a:hover { color: var(--ink); text-decoration: underline; }
 .breadcrumb .crumb-sep { margin: 0 6px; }
-h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
-     color: var(--muted); margin: 28px 0 10px; }
+/* An eyebrow rather than a heading: these label a section of a page whose
+   real title is the h1, so they are set small, spaced and quiet. */
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+     font-weight: 700; color: var(--muted); margin: 28px 0 10px; }
+
+/* Links in the page body. In :where() so this carries no specificity at all:
+   every link that has its own idea of what colour to be — a breadcrumb, a
+   .button, a .link-button, a profile name — keeps it without needing to win a
+   specificity argument first. The underline is offset off the baseline, which
+   is the one thing the browser default gets wrong at this text size. */
+:where(main a) {
+  color: var(--accent);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+:where(main a):hover { text-decoration-thickness: 2px; }
+
+/* Anything focused by the keyboard gets the same ring, once, here — rather
+   than each control inventing its own. Offset rather than flush, so the ring
+   never merges with the control's own border and stays visible on a tinted
+   row as well as a white one. :focus-visible, not :focus — a clicked button
+   should not wear a ring. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
 
 /* Header ------------------------------------------------------------------ */
 
+/* Sticky, so the tabs stay reachable down a long Grabs table — which is the
+   page this console now opens on, and the one most likely to be scrolled. */
 .topbar {
+  position: sticky; top: 0; z-index: 30;
   display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap;
   padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
@@ -78,10 +195,24 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
    font size. flex: none keeps it from being squeezed when the nav wraps. */
 .brand { font-weight: 600; display: flex; align-items: center; flex: none; }
 .brand img { display: block; height: 28px; width: auto; }
-.nav-links { display: flex; gap: 16px; flex-wrap: wrap; }
-.nav-links a { color: var(--muted); text-decoration: none; white-space: nowrap; }
-.nav-links a:hover { color: var(--ink); }
-.nav-links a.on { color: var(--accent); font-weight: 600; }
+
+/* A segmented control, not a row of coloured words. The selected tab used to
+   be told apart only by ink colour and weight, which is the weakest signal
+   available and disappears entirely for anyone who cannot separate the accent
+   from the muted grey; a filled pill is a shape, and reads at a glance. The
+   hover pill is the same shape one step quieter, so the two belong to one
+   idea rather than being two different treatments. */
+.nav-links { display: flex; gap: 2px; flex-wrap: wrap; }
+.nav-links a {
+  color: var(--muted); text-decoration: none; white-space: nowrap;
+  padding: 6px 11px; border-radius: var(--radius-pill);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.nav-links a:hover { color: var(--ink); background: var(--bg); }
+.nav-links a.on {
+  color: var(--accent); font-weight: 600;
+  background: var(--accent-soft);
+}
 
 /* The mobile stand-in for .nav-links — hidden until the topbar's own
    breakpoint takes over (see Small screens, below). */
@@ -93,7 +224,8 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .nav-dropdown summary {
   list-style: none; cursor: pointer; color: var(--ink); font-weight: 600;
   position: relative;
-  padding: 6px 28px 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 28px 6px 12px; border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
   background: var(--bg);
 }
 .nav-dropdown summary::-webkit-details-marker { display: none; }
@@ -109,15 +241,18 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .nav-dropdown-menu {
   position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
   z-index: 20; min-width: 200px; display: flex; flex-direction: column;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: 6px; box-shadow: var(--lift-2);
 }
 .nav-dropdown-menu a {
-  color: var(--ink); text-decoration: none; padding: 8px 10px; border-radius: 6px;
-  white-space: nowrap;
+  color: var(--ink); text-decoration: none; padding: 8px 10px;
+  border-radius: var(--radius-control); white-space: nowrap;
 }
 .nav-dropdown-menu a:hover { background: var(--bg); }
-.nav-dropdown-menu a.on { color: var(--accent); font-weight: 600; }
+/* The same filled pill the desktop tabs use, so "which one am I on" looks
+   the same whichever of the two the viewport is showing. */
+.nav-dropdown-menu a.on { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
 
 /* A generic account glyph, pinned to the right of the bar. Tapping it opens
    the name (inert) and Sign out, rather than showing either at all times. */
@@ -132,8 +267,9 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 .user-menu-items {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 20;
   min-width: 160px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: 6px; box-shadow: var(--lift-2);
 }
 /* The name it opens with — who this is, not something to act on. */
 .user-menu-name {
@@ -146,10 +282,20 @@ h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .04em;
 
 /* Panels ------------------------------------------------------------------ */
 
+/* A hairline border *and* a one-pixel lift. The border is what defines the
+   edge; the shadow is what says the card is on top of the page rather than cut
+   out of it, and at --lift-1 it is small enough that a column of cards still
+   reads as a list rather than a pile. */
 .card {
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; padding: 20px;
+  border-radius: var(--radius-panel); padding: 20px;
+  box-shadow: var(--lift-1);
 }
+/* Two cards stacked on one page are two things, and with the lift they now
+   carry, edge-to-edge reads as one card with a seam across it. Scoped to the
+   page's own top-level cards: a .card inside a list (.action-list, and the
+   user and profile rows built on it) is spaced by that list's own gap. */
+.wrap > .card + .card { margin-top: 16px; }
 .card.narrow { max-width: 460px; margin: 48px auto; }
 /* A settings form is a column, not a banner. Stretching a URL field across a
    1200px window makes it harder to read, not easier — the extra width on a
@@ -220,27 +366,55 @@ label.check { font-weight: 400; display: flex; align-items: center; gap: 8px; }
 
 input[type=text], input[type=url], input[type=password], input[type=number], select,
 textarea {
-  width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+  width: 100%; min-height: var(--control-h); padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
   background: var(--bg); color: var(--ink); font: inherit;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
+/* The field an admin is about to type in should look nearer than the ones
+   they are not. Hover lifts the border only; focus (handled by the shared
+   :focus-visible ring above) also lifts the fill to the panel colour, which
+   reads as the field coming forward out of its own inset. */
+input[type=text]:hover, input[type=url]:hover, input[type=password]:hover,
+input[type=number]:hover, select:hover, textarea:hover {
+  border-color: var(--muted);
+}
+input:focus, select:focus, textarea:focus { background: var(--panel); }
+/* One accent for every native control the browser draws itself — checkboxes,
+   radios, the select's own indicator — rather than leaving them in the
+   platform blue while everything around them is this palette. */
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 /* Prose, not a key: the one textarea left is an action's confirmation copy,
    which is a sentence read off a television and should wrap here the way it
    wraps there. Vertical resize only — a textarea that can be dragged wider
    than its own field breaks the card's grid. */
 textarea { resize: vertical; min-height: 2.6em; }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-input:disabled, select:disabled {
-  color: var(--muted); background: var(--line); cursor: not-allowed;
+input:disabled, select:disabled, textarea:disabled {
+  color: var(--muted); background: var(--line-soft); cursor: not-allowed;
+  border-color: var(--line-soft);
 }
 
 button, .button {
-  font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid transparent;
-  background: var(--accent); color: #fff; cursor: pointer; text-decoration: none;
-  display: inline-block;
+  font: inherit; font-weight: 500;
+  min-height: var(--control-h); padding: 7px 14px;
+  border-radius: var(--radius-control); border: 1px solid transparent;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center;
+  justify-content: center; gap: 6px;
+  transition: filter var(--dur) var(--ease), background var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
+/* Hover and press as one gesture: the fill brightens on approach and the
+   whole control sinks a pixel on the way down. A filter rather than a second
+   colour per tier, so a tier added later gets the same feel for free. */
+button:hover:not(:disabled), .button:hover { filter: brightness(1.08); }
+button:active:not(:disabled), .button:active { transform: translateY(1px); filter: brightness(.96); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 button.secondary, .button.secondary {
-  background: transparent; color: var(--ink); border-color: var(--line);
+  background: var(--panel); color: var(--ink); border-color: var(--line);
+}
+button.secondary:hover:not(:disabled), .button.secondary:hover {
+  filter: none; background: var(--bg); border-color: var(--muted);
 }
 /* Solid red is the committing step of a destructive flow; the outlined variant
    is what offers it in the first place, so arming a change does not look
@@ -257,12 +431,21 @@ button.plex, .button.plex {
 button.plex:hover:not(:disabled), .button.plex:hover { background: var(--plex-hover); }
 
 button.link {
-  background: none; border: none; color: var(--accent); padding: 0 6px; cursor: pointer;
+  background: none; border: none; color: var(--accent); padding: 0 6px;
+  min-height: 0; cursor: pointer; font-weight: 500;
 }
+button.link:hover:not(:disabled) { filter: none; text-decoration: underline; }
 button.link.danger, .danger { color: var(--err); }
+/* A glyph-only control: square-ish, quiet until pointed at, and never the
+   full control height — it sits inside rows, not on them. */
 button.icon {
   background: transparent; border: 1px solid var(--line); color: var(--ink);
-  padding: 2px 8px; line-height: 1.4;
+  padding: 3px 8px; min-height: 0; line-height: 1.4;
+}
+button.icon:hover:not(:disabled) { filter: none; background: var(--bg); border-color: var(--muted); }
+button.icon.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 12%, var(--panel));
+  border-color: var(--err);
 }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0; }
 form.inline { display: inline; }
@@ -289,16 +472,19 @@ form.inline { display: inline; }
   overflow-x: auto;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--lift-1);
   overscroll-behavior-x: contain;
 }
 .table-scroll > table { border: none; border-radius: 0; min-width: 680px; }
 
 table {
   width: 100%; border-collapse: collapse; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius-panel); overflow: hidden;
 }
-th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+/* --line-soft between rows, --line around the table: a row break is a pause
+   inside one object, not an edge between two. */
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
 /* Column minimums, by what the column holds rather than by which page it is
    on: a scene release name and a stack trace both need room to be worth
    showing at all, and a timestamp never does. */
@@ -308,7 +494,22 @@ th.release, td.release { min-width: 300px; }
 th.detail, td.detail { min-width: 320px; }
 th.size, td.size { min-width: 84px; white-space: nowrap; }
 th.actions-col, td.actions-col { min-width: 92px; }
-th { font-size: 13px; color: var(--muted); font-weight: 600; }
+/* Sticky so the column names stay with the rows when a long activity log is
+   scrolled — inside .table-scroll it is the page that scrolls, so this needs
+   the header to stick to the viewport, which is what `top: 0` does once the
+   table itself is not the scroll container vertically. The header keeps its
+   own opaque fill, or the rows would show through it. */
+thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--panel);
+  font-size: 12px; color: var(--muted); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em;
+  border-bottom: 1px solid var(--line);
+}
+tbody tr { transition: background var(--dur) var(--ease); }
+/* Follows the eye across a six-column row. Faint on purpose: it is a reading
+   aid, not a selection. */
+tbody tr:hover td { background: var(--accent-softer); }
 tbody tr:last-child td { border-bottom: none; }
 tr.system td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 tr.new-row td { background: color-mix(in srgb, var(--ok) 6%, transparent); }
@@ -332,7 +533,8 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .row-controls form { display: inline-flex; }
 
 .badge {
-  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
+  display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 600; letter-spacing: .01em;
   background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
 }
 
@@ -380,7 +582,7 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
    admin can picture. */
 .notify-preview {
   display: inline-flex; flex-direction: column; gap: 1px;
-  padding: 8px 12px; border-radius: 10px; max-width: 100%;
+  padding: 8px 12px; border-radius: var(--radius-panel); max-width: 100%;
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 .preview-title { font-size: 13px; font-weight: 600; }
@@ -389,7 +591,7 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 /* Rule builder ------------------------------------------------------------ */
 
 .rule {
-  border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
+  border: 1px solid var(--line); border-left-width: 4px; border-radius: var(--radius-control);
   padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
 }
 .rule.kind-filter { border-left-color: var(--filter); }
@@ -419,7 +621,7 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
    row and its own accent — it is neither a filter nor a tie-breaker. */
 .choice {
   border: 1px solid var(--line); border-left: 4px solid var(--ok);
-  border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
+  border-radius: var(--radius-control); padding: 12px 14px; margin-bottom: 10px; background: var(--bg);
 }
 .choice-reading { font-size: 13px; }
 .choice-grid {
@@ -437,7 +639,7 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 
 /* The profile in plain English, at the top of the builder. */
 .profile-summary {
-  border: 1px solid var(--line); border-radius: 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   padding: 12px 14px; margin-bottom: 24px;
 }
@@ -499,7 +701,7 @@ table.preview .dropped-by { color: var(--err); }
 .reorder-list { margin: 10px 0; }
 .reorder-row {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-control); padding: 10px 12px;
   margin-bottom: 8px; background: var(--bg);
 }
 .reorder-row.dragging { opacity: .4; }
@@ -558,7 +760,7 @@ table.preview .dropped-by { color: var(--err); }
    handle, no list — so .shelf-box gives them the same boxed look a shelf
    row gets from .reorder-row, without actually being one. */
 .shelf-box {
-  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-control); padding: 10px 12px;
   margin: 10px 0;
 }
 /* Same shape as .notify-master. Unlike a plain switch, both of the
@@ -578,11 +780,15 @@ table.preview .dropped-by { color: var(--err); }
 
 .action-card {
   display: flex; align-items: flex-start; gap: 12px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
   padding: 12px 14px;
+  box-shadow: var(--lift-1);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
+.action-card:focus-within { border-color: var(--accent); }
 .action-card + .action-card, .new-action { margin-top: 10px; }
-.action-card.system { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.action-card.system { background: var(--accent-soft); }
 .action-card.new-action { background: color-mix(in srgb, var(--ok) 6%, var(--panel)); }
 .action-card.dragging { opacity: .4; }
 
@@ -604,8 +810,10 @@ table.preview .dropped-by { color: var(--err); }
    sentence rather than a narrow column of two-word lines. */
 .field-note { grid-column: 1 / -1; margin: 0; font-size: 13px; align-self: center; }
 /* Confirmation text is the one field here holding a sentence rather than a
-   word or two, and it carries its own explanatory note underneath. Both want
-   the full width of however many columns the card got. */
+   word or two, and it carries the longest note on the card underneath. Both
+   take the whole row: tried at two columns, and the note's own height pushed
+   Quality profile onto a line of its own anyway, so the card was no shorter
+   and had a hole in it. */
 .field-wide { grid-column: 1 / -1; }
 .field-wide .field-note { margin-top: 4px; }
 
@@ -689,6 +897,45 @@ table.preview .dropped-by { color: var(--err); }
   h1 { font-size: 20px; margin: 4px 0 16px; }
 }
 
+/* Saving ------------------------------------------------------------------ */
+
+/* Every write in this UI now lands in place, which took away the two things a
+   page reload gave for free: the admin could see that something was happening,
+   and could see that something had changed. These three rules give both back,
+   out of classes htmx sets on its own — nothing here is wired up per form.
+
+   htmx-request, while the write is in flight. */
+.htmx-request { cursor: progress; }
+/* A card's own fields are associated by form="…" rather than nesting, so the
+   element htmx marks is an empty <form> somewhere inside it and there is
+   nothing under it to dim. :has() reaches back up to the card the admin is
+   actually looking at. */
+.action-card:has(.htmx-request),
+.reorder-row:has(.htmx-request),
+.shelf-box:has(.htmx-request) {
+  opacity: .65;
+  transition: opacity var(--dur) var(--ease);
+}
+
+/* htmx-added, on content that has just arrived. A tint that fades out over
+   --dur-slow: long enough to catch the eye moving back from the Save button,
+   short enough that it is gone before it becomes decoration. This is the whole
+   of the "it saved" signal on a row edit — there is no toast for success,
+   because the swapped-in row *is* the confirmation: it is showing what the
+   server now holds. */
+@keyframes just-saved {
+  from { background-color: var(--accent-soft); }
+  to { background-color: transparent; }
+}
+.htmx-added { animation: just-saved var(--dur-slow) var(--ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  .htmx-added { animation: none; }
+  .action-card:has(.htmx-request),
+  .reorder-row:has(.htmx-request),
+  .shelf-box:has(.htmx-request) { transition: none; }
+}
+
 /* Error toast ------------------------------------------------------------- */
 
 /* Where a rejected write says why, now that nothing reloads to show it. See
@@ -704,10 +951,10 @@ table.preview .dropped-by { color: var(--err); }
   transform: translateX(-50%) translateY(8px);
   max-width: min(560px, calc(100vw - 32px));
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--err); color: var(--on-err);
   font-size: 14px; line-height: 1.4;
-  box-shadow: 0 6px 20px rgb(0 0 0 / .18);
+  box-shadow: var(--lift-2);
   cursor: pointer;
   /* Not display:none — it has to be able to fade rather than blink, and an
      aria-live region that is removed from the box tree stops announcing. */

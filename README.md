@@ -202,7 +202,7 @@ src/cplus_service/
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
-  web/                  Jinja2 templates + vendored HTMX and CSS
+  web/                  Jinja2 templates + vendored HTMX, Open Props and CSS
   db/models.py          SQLAlchemy 2.0 schema
   home.py               the Home document: whose it is, its wire shape, its stamp
   bootstrap.py          seeds the built-in Request action and the "All" profile
@@ -1062,8 +1062,29 @@ instead — see
 
 ## Admin web UI
 
-Jinja2 + HTMX, server-rendered, no build step and no npm. HTMX is vendored under
-`web/static/`, so a container with no outbound access still works.
+Jinja2 + HTMX, server-rendered, no build step and no npm. Both third-party
+files it loads — `htmx.min.js` and `open-props.min.css` — are vendored under
+`web/static/`, so a container with no outbound access still works. Every asset
+URL carries a hash of the file's own bytes (`static_url()`), so a deploy can
+never land new markup against a cached copy of the old stylesheet.
+
+`app.css` is the whole of the styling: one file, no framework, no component
+library. Open Props contributes variables and nothing else — colour ramps, a
+shadow scale that already knows what to do in dark mode, easing curves — and no
+rule in `app.css` reads one directly. They are mapped once, at the top of the
+file, onto names that say what a colour is *for* (`--panel`, `--muted`,
+`--accent-soft`), which is also where the light and dark palettes are decided
+and where the contrast each one clears is written down.
+
+Three behaviours are worth knowing about because nothing in a template mentions
+them. A control that saves shows its Save button only once one of its own
+fields differs from what is stored (`dirty-save.js`, via `data-original`).
+While a write is in flight the card it belongs to dims, and the fragment that
+comes back flashes the accent tint once as it settles — both out of the classes
+htmx sets on its own (`.htmx-request`, `.htmx-added`), which is the whole of
+the "it saved" signal now that the page does not reload. And a write the server
+refuses surfaces in one toast (`htmx-errors.js`), since htmx will not swap a
+4xx body and the rejection would otherwise be silent.
 
 ### The profile builder
 

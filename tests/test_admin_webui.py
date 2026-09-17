@@ -1043,6 +1043,37 @@ async def test_the_actions_page_lists_request_as_read_only(
     assert "grant per user" in response.text
 
 
+async def test_the_stylesheets_are_served_from_this_image(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Both of them, and from here rather than from a CDN.
+
+    A self-hosted box may have no outbound access at all, which is why htmx and
+    Open Props are vendored — and why a page that silently fell back to loading
+    either over the network would look fine to whoever made the change and be
+    unstyled on the install that matters.
+    """
+    await signed_in(client, db)
+    page = await client.get("/admin/grabs")
+
+    hrefs = re.findall(r'<link rel="stylesheet" href="([^"]+)"', page.text)
+    assert [h.split("?")[0] for h in hrefs] == [
+        "/static/open-props.min.css",
+        "/static/app.css",
+    ]
+    for href in hrefs:
+        asset = await client.get(href)
+        assert asset.status_code == 200
+        assert "text/css" in asset.headers["content-type"]
+
+    # Open Props is variables and nothing else; app.css is what maps them onto
+    # names that say what a colour is for. If that block ever goes, every
+    # component rule below it is reading undefined custom properties.
+    app_css = (await client.get(next(h for h in hrefs if "app.css" in h))).text
+    assert "--panel:" in app_css
+    assert "var(--gray-" in app_css
+
+
 async def test_the_tabs_are_ordered_by_how_often_they_are_opened(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
