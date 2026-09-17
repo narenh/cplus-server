@@ -1,0 +1,86 @@
+{# The action list and the "add an action" card below it.
+
+   Rendered by GET /admin/actions and returned whole by every write that
+   changes the list itself — add, delete, reorder — so ranks, the new-action
+   card's own fields and the list can never disagree. Editing one existing
+   action swaps only that card (partials/action_card.html); nothing else on
+   the page is affected by it.
+
+   Expects: actions, profiles, clients, client_names, suggested_icons,
+   confirm_placeholder, confirm_help. #}
+<div id="actions-section">
+
+{# Cards rather than table rows. Five editable fields per action is more than a
+   phone can put on one line, and a table can only ever answer that by scrolling
+   sideways; a card reflows its fields onto as many lines as it has room for.
+   It also makes these ordinary <div> rows, which is what static/reorder.js
+   drags everywhere else in this UI.
+
+   Dropping a dragged card posts the new order via htmx and swaps this whole
+   section back in — see static/reorder.js. #}
+<div class="action-list" data-reorder-list
+     data-reorder-url="/admin/actions/reorder"
+     data-reorder-target="#actions-section">
+  {% for action in actions %}
+    {% include "partials/action_card.html" %}
+  {% endfor %}
+
+  {# Outside the reorder list on purpose: it has no rank until it exists, and a
+     new action lands at the end of the order anyway. #}
+</div>
+
+<div class="action-card new-action">
+  <form method="post" action="/admin/actions" id="new-action"
+        hx-post="/admin/actions" hx-target="#actions-section" hx-swap="outerHTML"></form>
+  <span class="drag-handle placeholder" aria-hidden="true"></span>
+
+  <div class="action-fields">
+    <div class="field">
+      <label for="new-name">Name</label>
+      <input form="new-action" id="new-name" type="text" name="name"
+             placeholder="Add to library in HD" required>
+    </div>
+    <div class="field">
+      <label for="new-title">Button title</label>
+      <input form="new-action" id="new-title" type="text" name="display_title"
+             maxlength="128" placeholder="Play Now">
+    </div>
+    <div class="field">
+      <label for="new-icon">Icon</label>
+      <input form="new-action" id="new-icon" type="text" name="icon" class="icon-field"
+             maxlength="64" list="icon-symbols" placeholder="arrow.down.circle"
+             autocomplete="off" spellcheck="false"
+             data-known="{{ suggested_icons | join(' ') }}">
+      <span class="icon-verdict"></span>
+    </div>
+    <div class="field field-wide">
+      <label for="new-confirm">Confirmation text</label>
+      <textarea form="new-action" id="new-confirm" name="confirm_body" rows="2"
+                maxlength="512" placeholder="{{ confirm_placeholder }}"></textarea>
+      <p class="field-note muted">
+        Leave blank to let the app word it. {{ confirm_help }}
+      </p>
+    </div>
+    <div class="field">
+      <label for="new-client">Download client</label>
+      <select form="new-action" id="new-client" name="download_client_id" required
+              hx-get="/admin/prowlarr/download-clients?format=html"
+              hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+      </select>
+    </div>
+    <div class="field">
+      <label for="new-profile">Quality profile</label>
+      <select form="new-action" id="new-profile" name="quality_profile_id" required>
+        {% for profile in profiles %}
+          <option value="{{ profile.id }}">{{ profile.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="action-controls">
+    <button form="new-action" type="submit" {% if not profiles %}disabled{% endif %}>Add</button>
+  </div>
+</div>
+
+</div>

@@ -694,6 +694,20 @@ The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
 page swaps straight into the DOM.
 
+**Every write in the admin UI lands in place, with no page reload.** A handler
+answers with the fragment its change actually invalidated — one action's card,
+one permission checkbox, the whole action list after a reorder, the whole
+notification panel after a device is removed — and the page swaps it in by id.
+The only two forms left that navigate are signing out and the quality-profile
+editor's own Save, which is a subpage closing back to its list. Since htmx
+never swaps a 4xx body, a refused write would otherwise be silent: the reason
+comes back through one toast fed from the handler's own `HTTPException` detail
+(`static/htmx-errors.js`).
+
+`/` and a fresh sign-in both land on **Grabs**, which is also the first tab:
+after setup, what the household has been grabbing is the question this console
+gets asked. Configuration is last, being where you go once and rarely again.
+
 ---
 
 ## The Home document

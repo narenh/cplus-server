@@ -59,7 +59,7 @@
     if (body.claimed) {
       clearInterval(timer);
       say("Signed in. Redirecting…", "ok");
-      window.location = body.redirect || "/admin/config";
+      window.location = body.redirect || "/admin/grabs";
       return;
     }
   }

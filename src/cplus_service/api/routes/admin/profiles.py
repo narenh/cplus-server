@@ -106,31 +106,42 @@ async def _load(db: DbDep, profile_id: int) -> QualityProfile:
     return profile
 
 
-@router.get("", response_class=HTMLResponse)
-async def list_profiles(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+async def _list_context(db: DbDep) -> dict[str, object]:
+    """Everything the profile list renders from.
+
+    Shared by the full page and by the partial a deletion swaps back in, so the
+    two cannot drift into disagreeing about which profiles are still in use.
+    """
     result = await db.execute(select(QualityProfile).order_by(QualityProfile.name))
     profiles = list(result.scalars().all())
 
     used = await db.execute(select(Action.quality_profile_id))
     in_use = {row for row in used.scalars().all() if row is not None}
 
+    return {
+        "profiles": profiles,
+        "summaries": {
+            profile.id: summarise(
+                ProfileSchema(
+                    id=profile.id,
+                    name=profile.name,
+                    rules=profile.rules or [],
+                    choices=profile.choices or [],
+                )
+            )
+            for profile in profiles
+        },
+        "in_use": in_use,
+    }
+
+
+@router.get("", response_class=HTMLResponse)
+async def list_profiles(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
     return templates.TemplateResponse(
         request,
         "profiles_list.html",
         {
-            "profiles": profiles,
-            "summaries": {
-                profile.id: summarise(
-                    ProfileSchema(
-                        id=profile.id,
-                        name=profile.name,
-                        rules=profile.rules or [],
-                        choices=profile.choices or [],
-                    )
-                )
-                for profile in profiles
-            },
-            "in_use": in_use,
+            **await _list_context(db),
             "admin": admin,
             "title": "Quality profiles",
             "nav": "profiles",
@@ -333,8 +344,15 @@ async def save_profile(request: Request, db: DbDep, admin: AdminPageDep) -> Resp
     return RedirectResponse("/admin/quality-profiles", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/{profile_id}/delete")
-async def delete_profile(db: DbDep, admin: AdminPageDep, profile_id: int) -> Response:
+@router.post("/{profile_id}/delete", response_class=HTMLResponse)
+async def delete_profile(
+    request: Request, db: DbDep, admin: AdminPageDep, profile_id: int
+) -> Response:
+    """Delete an unused profile and hand the list back, minus its row.
+
+    The list rather than a redirect: deleting is the one write this page does,
+    and it lands in place like every other write in this admin UI.
+    """
     profile = await _load(db, profile_id)
 
     in_use = await db.execute(
@@ -348,4 +366,7 @@ async def delete_profile(db: DbDep, admin: AdminPageDep, profile_id: int) -> Res
         )
 
     await db.delete(profile)
-    return RedirectResponse("/admin/quality-profiles", status_code=status.HTTP_303_SEE_OTHER)
+    await db.flush()
+    return templates.TemplateResponse(
+        request, "partials/profiles_list.html", await _list_context(db)
+    )

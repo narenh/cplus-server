@@ -18,6 +18,15 @@ What the built-in action still refuses is a download client or a quality
 profile — it never touches Prowlarr, so there is nothing for either to mean —
 and deletion, because it is the only route to ``POST /request`` and the next
 startup would seed it straight back anyway.
+
+**Everything here writes in place, with no page reload**, the same way
+:mod:`.libraries` and :mod:`.notifications` do. Saving one action gets that
+action's card back (``partials/action_card.html``); adding, deleting or
+reordering gets the whole list and the "add" card back
+(``partials/actions_section.html``), because each of those changes rows other
+than the one that was touched. A card's Save control only appears once one of
+its own fields differs from what is stored (``static/dirty-save.js``), and it
+goes away by itself when the saved card swaps in.
 """
 
 from __future__ import annotations
@@ -26,7 +35,7 @@ import logging
 import re
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -192,17 +201,13 @@ def _reject_reserved_word(value: str | None, *, field: str) -> None:
     )
 
 
-async def _load(db: DbDep, action_id: int) -> Action:
-    action = await db.get(Action, action_id)
-    if action is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such action")
-    return action
+async def _section_context(state: StateDep, db: DbDep) -> dict[str, object]:
+    """Everything the action list and the cards in it render from.
 
-
-@router.get("", response_class=HTMLResponse)
-async def list_actions(
-    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep
-) -> Response:
+    Shared by the full page and by every partial a write swaps back in, so the
+    two cannot drift into showing different download clients or profiles for
+    the same action.
+    """
     # The order the client is sent them in, which is the whole point of the
     # ranking: the admin should be looking at the same list their users get.
     actions = list(
@@ -216,20 +221,59 @@ async def list_actions(
         .all()
     )
     clients, client_error = await _download_clients(state, db)
-    client_names = {client["id"]: client["name"] for client in clients}
+    return {
+        "actions": actions,
+        "profiles": profiles,
+        "clients": clients,
+        "client_names": {client["id"]: client["name"] for client in clients},
+        "client_error": client_error,
+        "suggested_icons": SUGGESTED_ICONS,
+        "confirm_placeholder": CONFIRM_EXAMPLE,
+        "confirm_help": CONFIRM_HELP,
+    }
 
+
+async def _section(request: Request, state: StateDep, db: DbDep) -> Response:
+    """The whole list plus the "add" card, for a write that changes the list.
+
+    Add, delete and reorder all get this back rather than a redirect: every one
+    of them changes the ranking of rows other than the one that was touched, so
+    there is nothing narrower that would still be true afterwards.
+    """
+    return templates.TemplateResponse(
+        request, "partials/actions_section.html", await _section_context(state, db)
+    )
+
+
+async def _card(request: Request, state: StateDep, db: DbDep, action: Action) -> Response:
+    """One saved action's card, for an edit that touched only that action.
+
+    Narrower than :func:`_section` on purpose: swapping the whole list would
+    throw away an edit another card had half-typed into it.
+    """
+    return templates.TemplateResponse(
+        request,
+        "partials/action_card.html",
+        {**await _section_context(state, db), "action": action},
+    )
+
+
+async def _load(db: DbDep, action_id: int) -> Action:
+    action = await db.get(Action, action_id)
+    if action is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such action")
+    return action
+
+
+@router.get("", response_class=HTMLResponse)
+async def list_actions(
+    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep
+) -> Response:
     return templates.TemplateResponse(
         request,
         "actions.html",
         {
-            "actions": actions,
-            "profiles": profiles,
-            "clients": clients,
-            "client_names": client_names,
-            "client_error": client_error,
-            "suggested_icons": SUGGESTED_ICONS,
-            "confirm_placeholder": CONFIRM_EXAMPLE,
-            "confirm_help": CONFIRM_HELP,
+            **await _section_context(state, db),
             "admin": admin,
             "title": "Actions",
             "nav": "actions",
@@ -237,8 +281,10 @@ async def list_actions(
     )
 
 
-@router.post("")
+@router.post("", response_class=HTMLResponse)
 async def create_action(
+    request: Request,
+    state: StateDep,
     db: DbDep,
     admin: AdminPageDep,
     name: str = Form(...),
@@ -283,16 +329,22 @@ async def create_action(
             status.HTTP_409_CONFLICT, f"An action named '{clean}' already exists."
         ) from exc
 
-    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+    return await _section(request, state, db)
 
 
-@router.post("/reorder")
-async def reorder_actions(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
+@router.post("/reorder", response_class=HTMLResponse)
+async def reorder_actions(
+    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep
+) -> Response:
     """Rewrite every rank from the order the ids arrive in.
 
     **Declared above ``POST /{action_id}``**, which would otherwise match this
     path and reject "reorder" as a malformed id — FastAPI takes the first
     route that matches, not the first that validates.
+
+    Answers with the whole list rather than a redirect: a drop moves every
+    card between where the row was and where it landed, so nothing narrower
+    would still be true afterwards.
 
     Positions are reassigned from zero rather than the submitted ids being
     trusted to carry ranks, so a dragged list can never leave gaps or an id
@@ -316,11 +368,13 @@ async def reorder_actions(request: Request, db: DbDep, admin: AdminPageDep) -> R
             action.sort_order = position
 
     await db.flush()
-    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+    return await _section(request, state, db)
 
 
-@router.post("/{action_id}")
+@router.post("/{action_id}", response_class=HTMLResponse)
 async def update_action(
+    request: Request,
+    state: StateDep,
     db: DbDep,
     admin: AdminPageDep,
     action_id: int,
@@ -337,6 +391,11 @@ async def update_action(
     The Prowlarr targets are optional here rather than required: the built-in
     action's row has no such fields to submit, and offering it a download client
     would be offering it something it can never use.
+
+    Answers with this action's card alone, which the page swaps over the one
+    that submitted it — no reload, and no disturbance to an edit half-typed
+    into another card. The ranking is untouched by a rename, so there is
+    nothing else on the page a wider answer would correct.
     """
     action = await _load(db, action_id)
     clean = name.strip()
@@ -386,11 +445,13 @@ async def update_action(
             status.HTTP_409_CONFLICT, f"An action named '{clean}' already exists."
         ) from exc
 
-    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+    return await _card(request, state, db, action)
 
 
-@router.post("/{action_id}/delete")
-async def delete_action(db: DbDep, admin: AdminPageDep, action_id: int) -> Response:
+@router.post("/{action_id}/delete", response_class=HTMLResponse)
+async def delete_action(
+    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep, action_id: int
+) -> Response:
     action = await _load(db, action_id)
     if action.is_system:
         raise HTTPException(
@@ -400,4 +461,5 @@ async def delete_action(db: DbDep, admin: AdminPageDep, action_id: int) -> Respo
             " Users page instead.",
         )
     await db.delete(action)
-    return RedirectResponse("/admin/actions", status_code=status.HTTP_303_SEE_OTHER)
+    await db.flush()
+    return await _section(request, state, db)

@@ -1,0 +1,127 @@
+{# One action's card, and the only place an action's fields are written.
+
+   Returned on its own by POST /admin/actions/{id} and swapped over the card
+   that submitted it, which is what makes a save an in-place write rather than
+   a page reload: the freshly rendered fields carry whatever is now stored as
+   their own data-original, so static/dirty-save.js hides Save again by itself.
+   partials/actions_section.html renders the same partial for the whole list.
+
+   Expects: action, clients, client_names, profiles, confirm_placeholder,
+   confirm_help, suggested_icons. #}
+<div class="action-card{% if action.is_system %} system{% endif %}"
+     draggable="true" data-reorder-id="{{ action.id }}">
+  {# hx-target is the card itself, so one card's save never disturbs an edit
+     half-typed into another one. #}
+  <form method="post" action="/admin/actions/{{ action.id }}" id="action-{{ action.id }}"
+        hx-post="/admin/actions/{{ action.id }}"
+        hx-target="closest .action-card" hx-swap="outerHTML"></form>
+
+  <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+
+  <div class="action-fields">
+    <div class="field">
+      <label for="name-{{ action.id }}">
+        Name
+        {% if action.is_system %}<span class="badge">built in</span>{% endif %}
+      </label>
+      <input form="action-{{ action.id }}" id="name-{{ action.id }}" type="text" name="name"
+             value="{{ action.name }}" data-original="{{ action.name }}" required>
+    </div>
+
+    <div class="field">
+      <label for="title-{{ action.id }}">Button title</label>
+      <input form="action-{{ action.id }}" id="title-{{ action.id }}" type="text"
+             name="display_title" value="{{ action.display_title or '' }}"
+             data-original="{{ action.display_title or '' }}"
+             maxlength="128" placeholder="{{ action.name }}">
+    </div>
+
+    <div class="field">
+      <label for="icon-{{ action.id }}">Icon</label>
+      <input form="action-{{ action.id }}" id="icon-{{ action.id }}" type="text" name="icon"
+             class="icon-field" value="{{ action.icon or '' }}"
+             data-original="{{ action.icon or '' }}"
+             maxlength="64" list="icon-symbols" placeholder="arrow.down.circle"
+             autocomplete="off" spellcheck="false"
+             data-known="{{ suggested_icons | join(' ') }}">
+      <span class="icon-verdict"></span>
+    </div>
+
+    <div class="field field-wide">
+      <label for="confirm-{{ action.id }}">Confirmation text</label>
+      {# A textarea, not a one-line input: this is a sentence or two of copy
+         read from a sofa, and it wraps here the way it wraps on the
+         television. Enter inserts a newline rather than submitting, so the
+         Save button (or another field's change) is what commits it. #}
+      <textarea form="action-{{ action.id }}" id="confirm-{{ action.id }}"
+                name="confirm_body" rows="2"
+                data-original="{{ action.confirm_body or '' }}"
+                maxlength="512" placeholder="{{ confirm_placeholder }}"
+                >{{ action.confirm_body or '' }}</textarea>
+      <p class="field-note muted">
+        Shown when the user confirms this action. Leave blank to let the app
+        word it. {{ confirm_help }}
+      </p>
+    </div>
+
+    {% if action.is_system %}
+      <p class="field-note muted">
+        Files a request in Seerr. Never touches Prowlarr, so it has no
+        download client or quality profile — and it is the only action that
+        supports TV as well as films.
+      </p>
+    {% else %}
+      <div class="field">
+        <label for="client-{{ action.id }}">Download client</label>
+        <select form="action-{{ action.id }}" id="client-{{ action.id }}"
+                name="download_client_id" data-original="{{ action.download_client_id }}" required>
+          {% for client in clients %}
+            <option value="{{ client.id }}" {% if client.id == action.download_client_id %}selected{% endif %}>
+              {{ client.name }}
+            </option>
+          {% endfor %}
+          {% if action.download_client_id not in client_names %}
+            <option value="{{ action.download_client_id }}" selected>
+              #{{ action.download_client_id }} (not in Prowlarr)
+            </option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="profile-{{ action.id }}">Quality profile</label>
+        <select form="action-{{ action.id }}" id="profile-{{ action.id }}"
+                name="quality_profile_id" data-original="{{ action.quality_profile_id }}" required>
+          {% for profile in profiles %}
+            <option value="{{ profile.id }}" {% if profile.id == action.quality_profile_id %}selected{% endif %}>
+              {{ profile.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="action-controls">
+    {# Hidden until one of this card's own fields differs from what is
+       saved; see static/dirty-save.js. #}
+    <button form="action-{{ action.id }}" type="submit" class="hidden"
+            data-save-for="action-{{ action.id }}">Save</button>
+
+    {% if action.is_system %}
+      <span class="muted nowrap">grant per user</span>
+    {% else %}
+      {# The list comes back whole: deleting a card changes the ranking of
+         every card below it. #}
+      <form method="post" action="/admin/actions/{{ action.id }}/delete" class="remove-form"
+            hx-post="/admin/actions/{{ action.id }}/delete"
+            hx-target="#actions-section" hx-swap="outerHTML"
+            hx-confirm="Delete {{ action.name }}?">
+        <button type="submit" class="icon danger" title="Delete {{ action.name }}"
+                aria-label="Delete {{ action.name }}">
+          {% include "partials/_trash_icon.html" with context %}
+        </button>
+      </form>
+    {% endif %}
+  </div>
+</div>

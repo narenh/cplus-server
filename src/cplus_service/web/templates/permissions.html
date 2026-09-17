@@ -1,46 +1,4 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not users %}
-  <p class="empty">
-    No users yet. A user appears here the first time their client signs in —
-    identity comes from Seerr, so there is nobody to grant access to until then.
-  </p>
-{% else %}
-<div class="action-list">
-  {% for user in users %}
-  <div class="card user-card">
-    <div class="user-card-head">
-      <span class="user-name">{{ user.plex_username }}</span>
-      <span class="muted">#{{ user.seerr_user_id }}</span>
-      <form class="row-controls" method="post" action="/admin/users/{{ user.id }}/delete"
-            onsubmit="return confirm('Remove {{ user.plex_username }} and revoke access now?')">
-        <button type="submit" class="icon danger" title="Remove {{ user.plex_username }}"
-                aria-label="Remove {{ user.plex_username }}">
-          {% include "partials/_trash_icon.html" with context %}
-        </button>
-      </form>
-    </div>
-    <div class="perm-grid">
-      {% for action in actions %}
-        <label class="check perm-check">
-          <span class="perm-input">
-            {% with is_granted = (user.id, action.id) in granted %}
-              {% include "partials/permission_cell.html" %}
-            {% endwith %}
-          </span>
-          {{ action.name }}{% if action.is_system %} <span class="badge">built in</span>{% endif %}
-        </label>
-      {% endfor %}
-    </div>
-    <a class="link-button" href="/admin/users/{{ user.id }}/home">Edit Home Screen</a>
-  </div>
-  {% endfor %}
-</div>
-<p class="hint">
-  Granting takes effect at the user's next app launch, when their client calls
-  <code>/register</code> again — actions and searches authenticate from a
-  cache rather than re-checking Seerr on every request. Removing a user is
-  immediate.
-</p>
-{% endif %}
+{% include "partials/users_list.html" %}
 {% endblock %}

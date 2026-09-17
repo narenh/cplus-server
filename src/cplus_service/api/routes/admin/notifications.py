@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -328,9 +328,9 @@ def _test_result(report: DispatchReport) -> dict[str, object]:
     }
 
 
-@router.post("/devices/delete")
+@router.post("/devices/delete", response_class=HTMLResponse)
 async def delete_device(
-    db: DbDep, admin: AdminPageDep, device_token: str = Form(...)
+    request: Request, db: DbDep, admin: AdminPageDep, device_token: str = Form(...)
 ) -> Response:
     """Remove a device from the admin console.
 
@@ -344,10 +344,18 @@ async def delete_device(
     reverse proxy's access log. The app's own endpoint keeps it in the path —
     that caller is sending back a token it already holds, over an API where the
     resource shape is worth more than the log hygiene.
+
+    Answers with the whole panel rather than a redirect, the same as the master
+    switch: the device table is only one of the things a removal changes — the
+    "no devices registered" note takes over when the last one goes.
     """
     device = await db.get(ApnsDevice, device_token)
     if device is not None:
         await db.delete(device)
         await db.flush()
 
-    return RedirectResponse("/admin/notifications", status_code=status.HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse(
+        request,
+        "partials/notification_panel.html",
+        await _page_context(db, await get_config(db)),
+    )

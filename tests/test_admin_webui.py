@@ -780,7 +780,7 @@ async def test_an_unused_profile_can_be_deleted(
     response = await client.post(
         f"/admin/quality-profiles/{profile.id}/delete", follow_redirects=False
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert await profile_named(db, "Spare") is None
 
 
@@ -1043,6 +1043,195 @@ async def test_the_actions_page_lists_request_as_read_only(
     assert "grant per user" in response.text
 
 
+async def test_the_tabs_are_ordered_by_how_often_they_are_opened(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Grabs first and Configuration last, in both the nav and the dropdown.
+
+    One list in base.html drives both, so this checks the order it produces
+    rather than each copy of it.
+    """
+    await signed_in(client, db)
+    page = await client.get("/admin/grabs")
+
+    order = re.findall(r'<a href="(/admin/[a-z-]+)" class="[^"]*">', page.text)
+    assert order[:7] == [
+        "/admin/grabs",
+        "/admin/users",
+        "/admin/quality-profiles",
+        "/admin/actions",
+        "/admin/libraries",
+        "/admin/notifications",
+        "/admin/config",
+    ]
+
+
+async def test_confirmation_copy_is_edited_in_a_textarea(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Two sentences of copy, not a name — so it wraps rather than scrolling."""
+    respx.get(f"{PROWLARR_URL}/api/v1/downloadclient").mock(
+        return_value=httpx.Response(200, json=[{"id": 5, "name": "qBittorrent"}])
+    )
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now", confirm_body="{release} will stream.")
+
+    page = await client.get("/admin/actions")
+
+    assert f'<textarea form="action-{action.id}"' in page.text
+    assert "{release} will stream." in page.text
+    assert 'name="confirm_body"' in page.text
+    # And no one-line input left behind for the same field.
+    assert 'type="text" name="confirm_body"' not in page.text
+
+
+# --------------------------------------------------------------------------- #
+# Writes land in place
+# --------------------------------------------------------------------------- #
+
+#: Whatever the page is served by ``base.html`` carries and a fragment never
+#: should. A write that answered with this would be a whole page, which is
+#: what a reload used to be.
+PAGE_ONLY = "<!DOCTYPE html>"
+
+
+async def test_saving_one_action_answers_with_that_card_alone(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Not a redirect, and not the whole list.
+
+    The card is what the page swaps over the one that submitted it, so an edit
+    half-typed into another card survives someone else's save.
+    """
+    await signed_in(client, db)
+    edited = await make_action(db, "Stream Now")
+    untouched = await make_action(db, "Add to Library")
+
+    response = await client.post(
+        f"/admin/actions/{edited.id}",
+        data={
+            "name": "Stream It",
+            "download_client_id": "5",
+            "quality_profile_id": str(edited.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert PAGE_ONLY not in response.text
+    assert f'data-reorder-id="{edited.id}"' in response.text
+    assert f'data-reorder-id="{untouched.id}"' not in response.text
+    # The fields come back carrying what is now stored, which is what lets
+    # static/dirty-save.js hide Save again without being told to.
+    assert 'data-original="Stream It"' in response.text
+
+
+@pytest.mark.parametrize("op", ["add", "delete", "reorder"])
+async def test_a_write_that_changes_the_ranking_answers_with_the_whole_list(
+    client: httpx.AsyncClient, db: AsyncSession, op: str
+) -> None:
+    """Add, delete and reorder each move rows other than the one touched."""
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    if op == "add":
+        response = await client.post(
+            "/admin/actions",
+            data={
+                "name": "Add 4K",
+                "download_client_id": "5",
+                "quality_profile_id": str(action.quality_profile_id),
+            },
+            follow_redirects=False,
+        )
+    elif op == "delete":
+        response = await client.post(
+            f"/admin/actions/{action.id}/delete", follow_redirects=False
+        )
+    else:
+        response = await client.post(
+            "/admin/actions/reorder",
+            data={"order": [str(action.id)]},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 200
+    assert PAGE_ONLY not in response.text
+    assert 'id="actions-section"' in response.text
+
+
+async def test_removing_a_user_answers_with_the_list_minus_their_card(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    admin = await signed_in(client, db)
+    departing = User(seerr_user_id=99, plex_username="departing")
+    db.add(departing)
+    await db.commit()
+
+    response = await client.post(
+        f"/admin/users/{departing.id}/delete", follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert PAGE_ONLY not in response.text
+    assert 'id="users-list"' in response.text
+    assert "departing" not in response.text
+    assert admin.plex_username in response.text
+
+
+async def test_deleting_a_profile_answers_with_the_list_minus_its_row(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    profile = QualityProfile(name="Spare", rules=[])
+    db.add(profile)
+    await db.commit()
+
+    response = await client.post(
+        f"/admin/quality-profiles/{profile.id}/delete", follow_redirects=False
+    )
+
+    assert response.status_code == 200
+    assert PAGE_ONLY not in response.text
+    assert 'id="profiles-list"' in response.text
+    assert "Spare" not in response.text
+
+
+async def test_no_admin_page_saves_by_reloading(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Every write posts via htmx, so no form is left submitting natively.
+
+    A ``<form method="post">`` with no ``hx-post`` beside it is the shape a
+    reload-on-save has: the browser navigates and the whole page comes back.
+    The two exceptions are deliberate and not saves of this kind — signing out,
+    and the quality-profile editor's own Save, which is a subpage that closes
+    back to the list.
+    """
+    await signed_in(client, db)
+    await make_action(db, "Stream Now")
+
+    allowed = {"/admin/logout", "/admin/quality-profiles"}
+    for path in (
+        "/admin/grabs",
+        "/admin/users",
+        "/admin/quality-profiles",
+        "/admin/actions",
+        "/admin/libraries",
+        "/admin/notifications",
+        "/admin/config",
+    ):
+        page = await client.get(path)
+        assert page.status_code == 200
+        for form in re.findall(r"<form\b[^>]*>", page.text):
+            if 'method="post"' not in form:
+                continue
+            if "hx-post" in form:
+                continue
+            action = re.search(r'action="([^"]*)"', form)
+            assert action and action.group(1) in allowed, f"{path}: {form}"
+
+
 async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -> None:
     await signed_in(client, db)
     profile = QualityProfile(name="P", rules=[])
@@ -1054,7 +1243,7 @@ async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -
         data={"name": "Add 4K", "download_client_id": "5", "quality_profile_id": str(profile.id)},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     action = (
         await db.execute(select(Action).where(Action.name == "Add 4K"))
@@ -1130,7 +1319,7 @@ async def test_the_reserved_word_is_the_whole_label_not_a_substring(
         },
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
 
 async def test_the_built_in_action_keeps_the_word_it_is_named_after(
@@ -1149,7 +1338,7 @@ async def test_the_built_in_action_keeps_the_word_it_is_named_after(
         data={"name": "Request", "display_title": "Request"},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     await db.refresh(system)
     assert system.name == "Request"
@@ -1172,7 +1361,7 @@ async def test_the_built_in_action_can_be_renamed(
         data={"name": "Ask the household", "display_title": "Ask for this"},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     await db.refresh(system)
     assert system.name == "Ask the household"
@@ -1261,7 +1450,7 @@ async def test_a_new_admin_can_create_an_action_without_building_a_profile_first
         },
         follow_redirects=False,
     )
-    assert created.status_code == 303
+    assert created.status_code == 200
 
 
 async def test_an_action_can_carry_button_copy_separate_from_its_name(
@@ -1282,7 +1471,7 @@ async def test_an_action_can_carry_button_copy_separate_from_its_name(
         },
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     action = (
         await db.execute(select(Action).where(Action.name == "Add to library in HD"))
@@ -1376,7 +1565,7 @@ async def test_dragging_actions_rewrites_every_rank(
         data={"order": [str(first.id), str(system.id), str(second.id)]},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     db.expunge_all()
     assert (await db.get(Action, first.id)).sort_order == 0
@@ -1397,7 +1586,7 @@ async def test_reorder_ignores_ids_that_are_not_actions(
         data={"order": ["4242", str(action.id)]},
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     db.expunge_all()
     assert (await db.get(Action, action.id)).sort_order == 1
@@ -1464,7 +1653,7 @@ async def test_an_unknown_icon_is_saved_rather_than_refused(
         },
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     await db.refresh(action)
     assert action.icon == "sparkle.magnifyingglass.badge"
@@ -1532,7 +1721,7 @@ async def test_confirmation_copy_is_saved_with_its_placeholders_intact(
         },
         follow_redirects=False,
     )
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     await db.refresh(action)
     assert action.confirm_body == "{release} will stream, using {size}."
@@ -1827,7 +2016,7 @@ async def test_activity_log_renders_searches_grabs_and_requests(
 async def test_the_root_path_goes_to_the_admin_ui(client: httpx.AsyncClient) -> None:
     response = await client.get("/", follow_redirects=False)
     assert response.status_code == 307
-    assert response.headers["location"] == "/admin/config"
+    assert response.headers["location"] == "/admin/grabs"
 
 
 # --------------------------------------------------------------------------- #

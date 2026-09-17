@@ -223,10 +223,11 @@ textarea {
   width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--ink); font: inherit;
 }
-/* A pasted .p8 is one long unbroken base64 run; monospace and no wrapping keeps
-   it from reflowing into something that looks like a different key. */
-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-  resize: vertical; white-space: pre; overflow-x: auto; }
+/* Prose, not a key: the one textarea left is an action's confirmation copy,
+   which is a sentence read off a television and should wrap here the way it
+   wraps there. Vertical resize only — a textarea that can be dragged wider
+   than its own field breaks the card's grid. */
+textarea { resize: vertical; min-height: 2.6em; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 input:disabled, select:disabled {
   color: var(--muted); background: var(--line); cursor: not-allowed;
@@ -602,6 +603,11 @@ table.preview .dropped-by { color: var(--err); }
 /* Spans the row it lands on, so the built-in action's note reads as a
    sentence rather than a narrow column of two-word lines. */
 .field-note { grid-column: 1 / -1; margin: 0; font-size: 13px; align-self: center; }
+/* Confirmation text is the one field here holding a sentence rather than a
+   word or two, and it carries its own explanatory note underneath. Both want
+   the full width of however many columns the card got. */
+.field-wide { grid-column: 1 / -1; }
+.field-wide .field-note { margin-top: 4px; }
 
 .action-controls {
   display: flex; align-items: center; gap: 8px; flex: none;
@@ -681,4 +687,34 @@ table.preview .dropped-by { color: var(--err); }
   }
   .topbar-end { gap: 12px; }
   h1 { font-size: 20px; margin: 4px 0 16px; }
+}
+
+/* Error toast ------------------------------------------------------------- */
+
+/* Where a rejected write says why, now that nothing reloads to show it. See
+   static/htmx-errors.js: htmx never swaps a 4xx body, so without this a save
+   the server refused would simply appear to do nothing.
+
+   Fixed to the bottom of the viewport rather than placed near the control that
+   failed: the control might be a checkbox in a grid, a drag that has already
+   ended, or a card that is no longer where the pointer is. */
+.error-toast {
+  position: fixed; z-index: 50;
+  left: 50%; bottom: 20px;
+  transform: translateX(-50%) translateY(8px);
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--err); color: var(--on-err);
+  font-size: 14px; line-height: 1.4;
+  box-shadow: 0 6px 20px rgb(0 0 0 / .18);
+  cursor: pointer;
+  /* Not display:none — it has to be able to fade rather than blink, and an
+     aria-live region that is removed from the box tree stops announcing. */
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s ease, transform .15s ease;
+}
+.error-toast.on { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) {
+  .error-toast { transition: none; transform: translateX(-50%); }
 }

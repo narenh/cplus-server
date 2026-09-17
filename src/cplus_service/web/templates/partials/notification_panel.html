@@ -152,9 +152,12 @@
             <td class="nowrap">{{ device.last_seen_at.strftime("%Y-%m-%d %H:%M") }}</td>
             <td class="right">
               {# The token goes in the body, not the URL: it is a 64-character
-                 device address and has no business in an access log. #}
+                 device address and has no business in an access log. The whole
+                 panel comes back, the same as every other write here. #}
               <form method="post" action="/admin/notifications/devices/delete"
-                    onsubmit="return confirm('Stop sending notifications to this device?')">
+                    hx-post="/admin/notifications/devices/delete"
+                    hx-target="#notify-panel" hx-swap="outerHTML"
+                    hx-confirm="Stop sending notifications to this device?">
                 <input type="hidden" name="device_token" value="{{ device.device_token }}">
                 <button type="submit" class="link danger">Remove</button>
               </form>

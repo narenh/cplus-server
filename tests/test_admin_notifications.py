@@ -528,11 +528,13 @@ async def test_an_admin_can_remove_any_device(
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    # The panel comes back rather than a redirect: the removal lands in place.
+    assert response.status_code == 200
+    assert 'id="notify-panel"' in response.text
     assert (await db.execute(select(ApnsDevice))).scalars().all() == []
 
 
-async def test_removing_a_device_that_is_already_gone_still_redirects(
+async def test_removing_a_device_that_is_already_gone_is_not_an_error(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
     await signed_in(client, db)
@@ -543,7 +545,8 @@ async def test_removing_a_device_that_is_already_gone_still_redirects(
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
+    assert 'id="notify-panel"' in response.text
 
 
 async def test_deleting_a_user_takes_their_devices_with_them(
@@ -560,5 +563,5 @@ async def test_deleting_a_user_takes_their_devices_with_them(
         f"/admin/users/{user.id}/delete", follow_redirects=False
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 200
     assert (await db.execute(select(ApnsDevice))).scalars().all() == []

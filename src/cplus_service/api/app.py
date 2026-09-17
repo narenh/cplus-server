@@ -172,8 +172,13 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
-        """There is no public web page; the only UI is the admin one."""
-        return RedirectResponse("/admin/config")
+        """There is no public web page; the only UI is the admin one.
+
+        Grabs, not Configuration: an admin opening this console after setup is
+        almost always asking what their household has been grabbing, and that
+        is the first tab in the nav for the same reason.
+        """
+        return RedirectResponse("/admin/grabs")
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

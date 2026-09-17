@@ -11,19 +11,27 @@
      viewer's own timezone — see format_when() in cplus_service/web/__init__.py. #}
   <script src="{{ static_url('local-time.js') }}" defer></script>
   <script src="{{ static_url('topbar-menus.js') }}" defer></script>
+  {# Every write in this UI lands in place, and htmx never swaps a 4xx body —
+     so without this, a save the server refused would look like nothing
+     happened. See static/htmx-errors.js. #}
+  <script src="{{ static_url('htmx-errors.js') }}" defer></script>
 </head>
 <body>
 {% if admin is defined and admin %}
 {# One list of tabs drives both the desktop nav and the mobile dropdown, so
    the two can never drift out of sync with each other. #}
+{# Ordered by how often an admin has reason to open one, not by how the
+   service is layered: Grabs is the landing page and answers "what happened?",
+   which is the question this console gets asked most after setup; Configuration
+   is last because it is where you go once and rarely again. #}
 {% set nav_items = [
-  ("/admin/config", "config", "Configuration"),
-  ("/admin/libraries", "libraries", "Libraries & Home"),
+  ("/admin/grabs", "grabs", "Grabs"),
+  ("/admin/users", "users", "Users"),
   ("/admin/quality-profiles", "profiles", "Quality profiles"),
   ("/admin/actions", "actions", "Actions"),
-  ("/admin/users", "users", "Users"),
-  ("/admin/grabs", "grabs", "Grabs"),
+  ("/admin/libraries", "libraries", "Libraries & Home"),
   ("/admin/notifications", "notifications", "Notifications"),
+  ("/admin/config", "config", "Configuration"),
 ] %}
 {% set current = nav_items|selectattr("1", "equalto", nav)|first %}
 <header class="topbar">

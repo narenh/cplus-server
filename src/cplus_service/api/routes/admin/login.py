@@ -195,6 +195,8 @@ async def poll_pin(
 
     user = await upsert_user(db, auth)
     token = await create_session(db, user.id)
-    response = JSONResponse({"claimed": True, "redirect": "/admin/config"})
+    # Where "/" goes too, and the first tab in the nav: what the household has
+    # been grabbing, rather than the settings you already finished.
+    response = JSONResponse({"claimed": True, "redirect": "/admin/grabs"})
     set_session_cookie(response, request, token)
     return response
