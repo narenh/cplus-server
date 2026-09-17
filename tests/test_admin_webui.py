@@ -2000,7 +2000,9 @@ async def test_grabs_page_tells_an_admin_grab_from_a_deleted_action(
 
     page = await client.get("/admin/grabs")
 
-    assert "admin grab" in page.text
+    # The badge is what marks an admin's own grab; the word "admin" is left to
+    # its tooltip rather than repeated in a pill on every such row.
+    assert '<span class="badge" title="Grabbed by an admin' in page.text
     assert page.text.count("deleted action") == 1
 
 

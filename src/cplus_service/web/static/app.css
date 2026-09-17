@@ -311,6 +311,18 @@ form.card, .card form { max-width: 760px; }
 .nowrap { white-space: nowrap; }
 .hidden { display: none !important; }
 
+/* Separates a card's editable half from what follows its Save button. Full
+   bleed through the card's own padding, so it reads as the card being divided
+   rather than as a line drawn inside it. */
+.card-divider {
+  border: none; border-top: 1px solid var(--line);
+  margin: 24px -20px 0;
+}
+/* What sits below that rule: a subject the page shows but cannot write. Its
+   own h2 already has the usual top margin, so nothing more is needed here
+   than making sure the section does not add a second one. */
+.readonly-section > h2:first-child { margin-top: 20px; }
+
 /* A setting this UI shows but cannot change — currently just the Seerr host,
    which lives in the environment. Deliberately not a disabled <input>: that
    reads as "a field you may be able to edit", and this one is never editable

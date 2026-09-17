@@ -66,28 +66,32 @@
     <button type="submit" class="hidden" data-save-for="config-form">Save</button>
     <span id="save-result" class="inline-result"></span>
   </div>
-</form>
 
-{# Read-only, and not a form. The Seerr host decides who is admin, so it is set
-   in the deployment's environment and changed by redeploying — there is no
-   endpoint that can change it, which is the point. #}
-<section class="card">
-  <h2>Seerr</h2>
-  {% if seerr_url %}
-    <p class="readonly-value">{{ seerr_url }}</p>
-  {% else %}
-    <p class="readonly-value unset">Not set — no one can sign in.</p>
-  {% endif %}
-  <p class="hint">
-    Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
-    what authenticates every user and files requests on their behalf, and it is
-    what decides who counts as an admin — so it is deliberately not something
-    any request to this service can change. To point at a different instance,
-    change the variable and redeploy; on the next start every device and browser
-    session is signed out, since permissions and the admin bit were all resolved
-    against the old instance.
-  </p>
-</section>
+  {# Inside the form element, below its Save, but holding no field — this is
+     the one thing on the page that cannot be edited, and there is no endpoint
+     that could. It sits in the same card as Prowlarr and TMDB because it is
+     the third of the three services this install talks to, and a card of its
+     own said it was a separate subject; below the Save button because that
+     button has nothing to do with it. The rule above it is what says so. #}
+  <hr class="card-divider">
+  <section class="readonly-section">
+    <h2>Seerr</h2>
+    {% if seerr_url %}
+      <p class="readonly-value">{{ seerr_url }}</p>
+    {% else %}
+      <p class="readonly-value unset">Not set — no one can sign in.</p>
+    {% endif %}
+    <p class="hint">
+      Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
+      what authenticates every user and files requests on their behalf, and it is
+      what decides who counts as an admin — so it is deliberately not something
+      any request to this service can change. To point at a different instance,
+      change the variable and redeploy; on the next start every device and browser
+      session is signed out, since permissions and the admin bit were all resolved
+      against the old instance.
+    </p>
+  </section>
+</form>
 {% endblock %}
 
 {% block scripts %}

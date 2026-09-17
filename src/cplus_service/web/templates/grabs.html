@@ -22,7 +22,11 @@
          action has since been deleted. #}
       <td>
         {% if grab.via_manager %}
-          <span class="badge">admin grab</span>
+          {# Just "grab": the badge itself is what says this was not one of the
+             admin's own actions — every other row in this column is an action
+             name in plain text. The full sentence stays in the tooltip rather
+             than in a pill the eye has to read on every admin row. #}
+          <span class="badge" title="Grabbed by an admin from the admin app, without an action">grab</span>
         {% else %}
           {{ action_names.get(grab.action_id, "deleted action") }}
         {% endif %}
