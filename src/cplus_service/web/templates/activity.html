@@ -20,10 +20,18 @@
         {# event_type is search|grab|request|admin, for every row: the backfill
            migration retyped the history, and it runs before the app serves
            (docker/entrypoint.sh), so no request can still be sitting here as a
-           grab. Admin operations also name the operation in the detail's kind. #}
-        <span class="badge">{{ entry.event_type }}</span>
-        {% if entry.event_type == "admin" and detail.get("kind") %}
-          <span class="muted">{{ detail.get("kind") }}</span>
+           grab.
+
+           One pill per row, coloured by who caused it — see .by-admin /
+           .by-user in app.css, the same convention the Grabs page uses. An
+           admin row's pill names the operation (the detail's own kind) rather
+           than the word "admin", because the colour has already said that;
+           without a kind there is nothing more specific to name, so it falls
+           back to the event type it was filed under. #}
+        {% if entry.event_type == "admin" %}
+          <span class="badge by-admin">{{ (detail.get("kind") or "admin")|replace("_", " ") }}</span>
+        {% else %}
+          <span class="badge by-user">{{ entry.event_type }}</span>
         {% endif %}
         {% if detail.get("success") is false %}<span class="err">failed</span>{% endif %}
       </td>

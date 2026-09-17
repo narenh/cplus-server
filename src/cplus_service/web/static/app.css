@@ -550,6 +550,20 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
   background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
 }
 
+/* Who caused an event, in the Grabs table and the activity log. Every row in
+   those columns is a pill, and the colour is the whole of the answer: blue for
+   the admin's own work through the admin app, green for something one of their
+   users did in the tvOS client.
+
+   This is why neither pill has to contain the word "admin". Saying it in the
+   text as well would be the badge's job done twice, and it cost the pill the
+   room to say the thing only it can — which operation, or which action. The
+   colour is not carrying it alone, though: the blue pill's own text is a bare
+   verb ("grab", "search") where the green pill's is an action's name or the
+   event type, and the admin one keeps a tooltip. */
+.badge.by-admin { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge.by-user { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+
 /* Says who a column is for, in the header, so the difference between the
    admin's own name for an action and the copy its button carries is visible
    without reading the note under the table. */

@@ -2000,9 +2000,11 @@ async def test_grabs_page_tells_an_admin_grab_from_a_deleted_action(
 
     page = await client.get("/admin/grabs")
 
-    # The badge is what marks an admin's own grab; the word "admin" is left to
-    # its tooltip rather than repeated in a pill on every such row.
-    assert '<span class="badge" title="Grabbed by an admin' in page.text
+    # Both rows are pills, and the colour is what separates them: the admin's
+    # own grab is blue and says only what happened, the user's grab is green
+    # and says which action. Neither says the word "admin".
+    assert '<span class="badge by-admin"' in page.text
+    assert '<span class="badge by-user">deleted action</span>' in page.text
     assert page.text.count("deleted action") == 1
 
 
@@ -2042,7 +2044,11 @@ async def test_activity_log_renders_searches_grabs_and_requests(
     assert "tmdb 1399" in response.text
     assert "boom" in response.text
     assert "request" in response.text
-    assert '<span class="badge">admin</span>' in response.text
+    # The admin row's pill names the operation, not the word "admin" — the
+    # colour is what says whose work it was. The three user rows are green.
+    assert '<span class="badge by-admin">search</span>' in response.text
+    assert '<span class="badge">admin</span>' not in response.text
+    assert response.text.count('<span class="badge by-user">') == 3
     assert "the office" in response.text
 
 
