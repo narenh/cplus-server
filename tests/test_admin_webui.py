@@ -1514,6 +1514,79 @@ async def test_a_blank_icon_clears_it(
     assert action.icon is None
 
 
+async def test_confirmation_copy_is_saved_with_its_placeholders_intact(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Stored as written. The client fills the braces in, against the release
+    actually in front of the user — which this service does not know."""
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "confirm_body": "  {release} will stream, using {size}.  ",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await db.refresh(action)
+    assert action.confirm_body == "{release} will stream, using {size}."
+
+
+async def test_an_unknown_placeholder_in_the_confirmation_copy_is_refused(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Unlike an icon, a typo here is not recoverable at the client.
+
+    Nothing can fill in {relase}, so the braces would reach a television
+    verbatim. The admin is told while they can still fix it.
+    """
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now")
+
+    response = await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "confirm_body": "Grabbing {relase} now.",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+    )
+    assert response.status_code == 400
+    assert "{relase}" in response.text
+
+    await db.refresh(action)
+    assert action.confirm_body is None
+
+
+async def test_blank_confirmation_copy_clears_it(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """Back to the client's own wording, which is what null has always meant."""
+    await signed_in(client, db)
+    action = await make_action(db, "Stream Now", confirm_body="Grabbing {release}.")
+
+    await client.post(
+        f"/admin/actions/{action.id}",
+        data={
+            "name": "Stream Now",
+            "confirm_body": "   ",
+            "download_client_id": "5",
+            "quality_profile_id": str(action.quality_profile_id),
+        },
+        follow_redirects=False,
+    )
+
+    await db.refresh(action)
+    assert action.confirm_body is None
+
+
 async def test_static_assets_are_served_under_a_content_hash(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:

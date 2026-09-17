@@ -63,6 +63,18 @@
           <span class="icon-verdict"></span>
         </div>
 
+        <div class="field">
+          <label for="confirm-{{ action.id }}">Confirmation text</label>
+          <input form="action-{{ action.id }}" id="confirm-{{ action.id }}" type="text"
+                 name="confirm_body" value="{{ action.confirm_body or '' }}"
+                 data-original="{{ action.confirm_body or '' }}"
+                 maxlength="512" placeholder="{{ confirm_placeholder }}">
+          <p class="field-note muted">
+            Shown when the user confirms this action. Leave blank to let the app
+            word it. {{ confirm_help }}
+          </p>
+        </div>
+
         {% if action.is_system %}
           <p class="field-note muted">
             Files a request in Seerr. Never touches Prowlarr, so it has no
@@ -148,6 +160,14 @@
              autocomplete="off" spellcheck="false"
              data-known="{{ suggested_icons | join(' ') }}">
       <span class="icon-verdict"></span>
+    </div>
+    <div class="field">
+      <label for="new-confirm">Confirmation text</label>
+      <input form="new-action" id="new-confirm" type="text" name="confirm_body"
+             maxlength="512" placeholder="{{ confirm_placeholder }}">
+      <p class="field-note muted">
+        Leave blank to let the app word it. {{ confirm_help }}
+      </p>
     </div>
     <div class="field">
       <label for="new-client">Download client</label>

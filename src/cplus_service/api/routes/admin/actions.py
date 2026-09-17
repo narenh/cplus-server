@@ -23,6 +23,7 @@ startup would seed it straight back anyway.
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -61,6 +62,30 @@ MAX_DISPLAY_TITLE = 128
 
 #: Matches ``Action.icon``'s column width.
 MAX_ICON = 64
+
+#: Matches ``Action.confirm_body``'s column width.  Roomy enough for two
+#: sentences and no more: this is copy on a television, read from a sofa.
+MAX_CONFIRM_BODY = 512
+
+#: What the confirmation copy may ask to have filled in.
+#:
+#: **Filled in by the client, not here.** The copy has to work for a release
+#: this service was never asked about — one the user picked by hand out of the
+#: full list — and at that moment there is no request in flight to fill it in
+#: from. So the template is stored and shipped as written, and the client
+#: substitutes against the release actually in front of the user.
+CONFIRM_PLACEHOLDERS = ("release", "size")
+
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+
+#: What the field shows when empty, and the sentence under it. Both name the
+#: placeholders, so the one list above stays the only place they are decided.
+CONFIRM_EXAMPLE = "{release} will be added, using {size} of storage."
+CONFIRM_HELP = (
+    "You can use "
+    + " and ".join(f"{{{name}}}" for name in CONFIRM_PLACEHOLDERS)
+    + ", which the app fills in from the release being confirmed."
+)
 
 #: SF Symbols the icon field offers, and the only ones it can vouch for.
 #:
@@ -122,6 +147,34 @@ def _clean_display_title(raw: str) -> str | None:
     return clean
 
 
+def _clean_confirm_body(raw: str) -> str | None:
+    """Normalise the confirmation copy. Blank means "let the client word it"."""
+    clean = raw.strip()
+    if not clean:
+        return None
+    if len(clean) > MAX_CONFIRM_BODY:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Confirmation text can be at most {MAX_CONFIRM_BODY} characters.",
+        )
+
+    # A typo in a placeholder is silent otherwise: the client cannot fill in
+    # {relase}, so it prints the braces verbatim on someone's television.
+    unknown = sorted({
+        name for name in _PLACEHOLDER.findall(clean)
+        if name not in CONFIRM_PLACEHOLDERS
+    })
+    if unknown:
+        listed = ", ".join(f"{{{name}}}" for name in unknown)
+        offered = " and ".join(f"{{{name}}}" for name in CONFIRM_PLACEHOLDERS)
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Nothing can be filled in for {listed}. The placeholders are"
+            f" {offered}.",
+        )
+    return clean
+
+
 def _reject_reserved_word(value: str | None, *, field: str) -> None:
     """Keep "Request", however capitalised, to the built-in action.
 
@@ -175,6 +228,8 @@ async def list_actions(
             "client_names": client_names,
             "client_error": client_error,
             "suggested_icons": SUGGESTED_ICONS,
+            "confirm_placeholder": CONFIRM_EXAMPLE,
+            "confirm_help": CONFIRM_HELP,
             "admin": admin,
             "title": "Actions",
             "nav": "actions",
@@ -191,12 +246,14 @@ async def create_action(
     quality_profile_id: int = Form(...),
     display_title: str = Form(default=""),
     icon: str = Form(default=""),
+    confirm_body: str = Form(default=""),
 ) -> Response:
     clean = name.strip()
     if not clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
     clean_title = _clean_display_title(display_title)
     clean_icon = _clean_icon(icon)
+    clean_body = _clean_confirm_body(confirm_body)
     _reject_reserved_word(clean, field="name")
     _reject_reserved_word(clean_title, field="button title")
     if await db.get(QualityProfile, quality_profile_id) is None:
@@ -212,6 +269,7 @@ async def create_action(
             name=clean,
             display_title=clean_title,
             icon=clean_icon,
+            confirm_body=clean_body,
             sort_order=(last or 0) + 1,
             download_client_id=download_client_id,
             quality_profile_id=quality_profile_id,
@@ -269,6 +327,7 @@ async def update_action(
     name: str = Form(...),
     display_title: str = Form(default=""),
     icon: str = Form(default=""),
+    confirm_body: str = Form(default=""),
     download_client_id: int | None = Form(default=None),
     quality_profile_id: int | None = Form(default=None),
 ) -> Response:
@@ -285,6 +344,7 @@ async def update_action(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a name.")
     clean_title = _clean_display_title(display_title)
     clean_icon = _clean_icon(icon)
+    clean_body = _clean_confirm_body(confirm_body)
 
     if action.is_system:
         # The reserved word is its own — this is the action the word describes.
@@ -313,6 +373,7 @@ async def update_action(
     action.name = clean
     action.display_title = clean_title
     action.icon = clean_icon
+    action.confirm_body = clean_body
     if not action.is_system:
         action.download_client_id = download_client_id
         action.quality_profile_id = quality_profile_id
