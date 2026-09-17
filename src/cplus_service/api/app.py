@@ -150,7 +150,8 @@ def create_app(
         title="cplus-service",
         description=(
             "A permissioned Prowlarr front door for Seerr users. "
-            "Talks to Prowlarr and Seerr only — never Sonarr or Radarr."
+            "Talks to Prowlarr and Seerr only — never Sonarr, and, so far, "
+            "nothing of Radarr beyond proving the connection works."
         ),
         version="1.0.0",
         lifespan=lifespan,

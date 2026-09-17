@@ -7,9 +7,12 @@ permissioned subset of Prowlarr search/grab functionality to their Seerr users �
 without those users ever seeing the Prowlarr API key. It is consumed by the
 Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 
-**Out of scope, for now:** Sonarr and Radarr. This service talks to Prowlarr
-(search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
-set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
+**Out of scope, for now:** Sonarr, and everything Radarr does. This service
+talks to Prowlarr (search, grab, indexers, download clients) and Seerr (auth,
+plus an allowlisted set of request operations) and nothing else. A Radarr URL
+and API key can be configured and verified on the config page, but nothing
+reads them yet — the connection is there to be set up ahead of the features
+that will use it. No library sync. The Prowlarr-backed side is
 **movies-only** when driven by IMDB ID. Two things sit outside that: the
 built-in **Request** action, which supports TV, is keyed by TMDB id and never
 touches Prowlarr at all; and **free-text search**, which is not category-scoped
@@ -64,6 +67,9 @@ your proxy's TLS.
    the web UI has no non-admin use case.
 4. **Configure Prowlarr**: URL and API key, then *Verify Prowlarr connection*.
    Optionally pick a preferred indexer; the default, *All indexers*, is fine.
+   A **Radarr** URL and API key sit on the same page with their own *Verify
+   Radarr connection* button. Both are optional and nothing depends on them
+   yet — set them if you want the connection proved now, skip them otherwise.
 5. **Quality profiles.** Every Prowlarr-backed action needs one, so a fresh
    install is seeded with a profile called **All** — it filters nothing and
    ranks by the conventional order (resolution, source, HDR, audio, size), so
@@ -118,7 +124,9 @@ so upgrading is pull-and-restart.
 ### Securing a self-hosted deployment
 
 The one secret this service can't avoid persisting is the Prowlarr API key
-(`config.prowlarr_api_key`), stored in plaintext in the SQLite file. Nothing
+(`config.prowlarr_api_key`), stored in plaintext in the SQLite file. The
+Radarr key (`config.radarr_api_key`) is stored and handled identically, and
+everything below applies to it word for word where it is set. Nothing
 in the app itself leaks it — it travels only as a request header, is never
 rendered back into a page, and never appears in an error message or log line
 — but the database file it lives in is not encrypted at rest, so two things
@@ -158,7 +166,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 871 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 921 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -190,6 +198,7 @@ src/cplus_service/
   quality/describe.py   the same profile in plain English, for the admin UI
   quality/samples.py    the fixed release cast the profile preview ranks
   prowlarr/client.py    async Prowlarr API wrapper
+  radarr/client.py      async Radarr API wrapper — verify only, so far
   seerr/client.py       async Seerr API wrapper (auth + allowlisted request ops)
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
   auth/sessions.py      webui browser sessions
@@ -426,6 +435,27 @@ async with ProwlarrClient(url, api_key) as prowlarr:
 callers of this wrapper never see a raw Prowlarr release dict. Transport errors
 and non-2xx responses both surface as `ProwlarrError`, which carries
 `status_code` (`None` when no response arrived).
+
+---
+
+## Radarr client
+
+A deliberately thin sibling. Radarr's API is `v3` where Prowlarr's is `v1`, so
+it is its own module rather than the same client pointed elsewhere, and its
+whole surface is the one call the config page's *Verify Radarr connection*
+button makes:
+
+```python
+async with RadarrClient(url, api_key) as radarr:
+    await radarr.verify_connection()              # backs the admin Verify button
+```
+
+Failures surface as `RadarrError`, same shape as `ProwlarrError`: a diagnostic
+`str(exc)` naming the URL for the admin page and the log, a user-safe
+`summary` with the host and body left out, and `status_code` (`None` when no
+response arrived). A 200 carrying something other than a JSON object is
+rejected rather than validated into an empty status — a URL pointing at
+something that is not Radarr would otherwise read as a successful verify.
 
 ---
 
@@ -679,8 +709,9 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 |---|---|
 | `GET /admin/login` | The only ungated admin route. Shows the Seerr host; cannot set it |
 | `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow. Ungated, and so takes no parameters at all |
-| `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
+| `GET/POST /admin/config` | Prowlarr, preferred indexer, Radarr, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
+| `POST /admin/config/verify-radarr` | The same, for Radarr |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
 | `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, builder rebuild, delete |

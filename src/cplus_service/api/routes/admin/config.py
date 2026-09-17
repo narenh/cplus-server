@@ -1,6 +1,6 @@
-"""Configuration page and the Prowlarr proxy endpoints.
+"""Configuration page, the Prowlarr proxy endpoints and the Radarr verify.
 
-The three proxy/verify endpoints answer JSON by default and HTML when asked with
+The proxy/verify endpoints answer JSON by default and HTML when asked with
 ``?format=html``. JSON keeps them usable as a real API; the HTML variant is what
 the page itself consumes, so a dropdown can refresh straight into the DOM after
 the Prowlarr connection changes, with no glue JavaScript.
@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
+from ....radarr.client import RadarrClient, RadarrError
 from ....settings import SEERR_URL_ENV, seerr_url
 from ....web import templates
 from ...deps import DbDep, StateDep
@@ -34,6 +35,14 @@ async def _prowlarr(state: StateDep, db: DbDep) -> ProwlarrClient | None:
     if not config.prowlarr_url or not config.prowlarr_api_key:
         return None
     return ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
+
+
+async def _radarr(state: StateDep, db: DbDep) -> RadarrClient | None:
+    """A client for the configured Radarr, or ``None`` if it is not set up."""
+    config = await get_config(db)
+    if not config.radarr_url or not config.radarr_api_key:
+        return None
+    return RadarrClient(config.radarr_url, config.radarr_api_key, client=state.http)
 
 
 @router.get("/config", response_class=HTMLResponse)
@@ -63,15 +72,21 @@ async def save_config(
     prowlarr_url: str = Form(default=""),
     prowlarr_api_key: str = Form(default=""),
     preferred_indexer_id: str | None = Form(default=None),
+    radarr_url: str = Form(default=""),
+    radarr_api_key: str = Form(default=""),
     tmdb_bearer_token: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
     config.prowlarr_url = prowlarr_url.strip().rstrip("/") or None
+    config.radarr_url = radarr_url.strip().rstrip("/") or None
 
     # An empty key field means "leave it alone", so the saved key is never
     # rendered back into the page and cannot be blanked by a careless save.
     if prowlarr_api_key.strip():
         config.prowlarr_api_key = prowlarr_api_key.strip()
+
+    if radarr_api_key.strip():
+        config.radarr_api_key = radarr_api_key.strip()
 
     if tmdb_bearer_token.strip():
         config.tmdb_bearer_token = tmdb_bearer_token.strip()
@@ -109,6 +124,28 @@ async def verify_prowlarr(
             version = status_info.version or "unknown version"
             result = {"ok": True, "message": f"Connected to {name} {version}."}
         except ProwlarrError as exc:
+            result = {"ok": False, "message": str(exc)}
+
+    if format == "html":
+        return templates.TemplateResponse(request, "partials/verify.html", result)
+    return JSONResponse(result)
+
+
+@router.post("/config/verify-radarr")
+async def verify_radarr(
+    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep, format: Format = "json"
+) -> Response:
+    """Ping Radarr's system status with the saved credentials."""
+    radarr = await _radarr(state, db)
+    if radarr is None:
+        result = {"ok": False, "message": "Set the Radarr URL and API key first, then save."}
+    else:
+        try:
+            status_info = await radarr.verify_connection()
+            name = status_info.app_name or "Radarr"
+            version = status_info.version or "unknown version"
+            result = {"ok": True, "message": f"Connected to {name} {version}."}
+        except RadarrError as exc:
             result = {"ok": False, "message": str(exc)}
 
     if format == "html":

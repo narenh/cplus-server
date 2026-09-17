@@ -36,7 +36,15 @@ from cplus_service.db.models import (
 from cplus_service.quality.models import QualityProfile as ProfileSchema
 from cplus_service.settings import SEERR_URL_ENV
 
-from .conftest import PROWLARR_URL, SEERR_URL, TMDB_BEARER_TOKEN, make_action, mock_plex_no_server
+from .conftest import (
+    PROWLARR_URL,
+    RADARR_API_KEY,
+    RADARR_URL,
+    SEERR_URL,
+    TMDB_BEARER_TOKEN,
+    make_action,
+    mock_plex_no_server,
+)
 
 GB = 1024**3
 PLEX_API = "https://plex.tv/api/v2"
@@ -318,6 +326,8 @@ async def test_saving_config_stores_the_values(
             "prowlarr_url": f"{PROWLARR_URL}/",
             "prowlarr_api_key": "the-key",
             "preferred_indexer_id": "3",
+            "radarr_url": f"{RADARR_URL}/",
+            "radarr_api_key": "the-radarr-key",
             "tmdb_bearer_token": "the-tmdb-token",
         },
     )
@@ -327,12 +337,15 @@ async def test_saving_config_stores_the_values(
     assert config.prowlarr_url == PROWLARR_URL  # trailing slash normalised away
     assert config.prowlarr_api_key == "the-key"
     assert config.preferred_indexer_id == 3
+    assert config.radarr_url == RADARR_URL  # trailing slash normalised away
+    assert config.radarr_api_key == "the-radarr-key"
     assert config.tmdb_bearer_token == "the-tmdb-token"
 
 
 async def test_a_blank_api_key_and_token_leave_the_saved_ones_alone(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+    client: httpx.AsyncClient, db: AsyncSession, radarr_configured: Config
 ) -> None:
+    configured = radarr_configured
     await signed_in(client, db)
     await client.post(
         "/admin/config",
@@ -340,12 +353,15 @@ async def test_a_blank_api_key_and_token_leave_the_saved_ones_alone(
             "prowlarr_url": PROWLARR_URL,
             "prowlarr_api_key": "",
             "preferred_indexer_id": "",
+            "radarr_url": RADARR_URL,
+            "radarr_api_key": "",
             "tmdb_bearer_token": "",
         },
     )
 
     await db.refresh(configured)
     assert configured.prowlarr_api_key == "prowlarr-key"
+    assert configured.radarr_api_key == RADARR_API_KEY
     assert configured.tmdb_bearer_token == TMDB_BEARER_TOKEN
     # Empty means "All indexers", which is null rather than a sentinel.
     assert configured.preferred_indexer_id is None
@@ -379,11 +395,12 @@ async def test_an_absent_indexer_field_leaves_the_saved_one_alone(
 
 
 async def test_the_saved_api_key_and_tmdb_token_are_never_rendered_into_the_page(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+    client: httpx.AsyncClient, db: AsyncSession, radarr_configured: Config
 ) -> None:
     await signed_in(client, db)
     response = await client.get("/admin/config")
     assert "prowlarr-key" not in response.text
+    assert RADARR_API_KEY not in response.text
     assert TMDB_BEARER_TOKEN not in response.text
 
 
@@ -487,6 +504,56 @@ async def test_verify_prowlarr_before_configuring_is_not_a_crash(
     response = await client.post("/admin/config/verify-prowlarr")
     assert response.status_code == 200
     assert response.json()["ok"] is False
+
+
+@respx.mock
+async def test_verify_radarr_reports_success(
+    client: httpx.AsyncClient, db: AsyncSession, radarr_configured: Config
+) -> None:
+    respx.get(f"{RADARR_URL}/api/v3/system/status").mock(
+        return_value=httpx.Response(200, json={"appName": "Radarr", "version": "5.14.0"})
+    )
+    await signed_in(client, db)
+
+    as_json = await client.post("/admin/config/verify-radarr")
+    assert as_json.json()["ok"] is True
+    assert "5.14.0" in as_json.json()["message"]
+
+    as_html = await client.post("/admin/config/verify-radarr?format=html")
+    assert "5.14.0" in as_html.text
+
+
+@respx.mock
+async def test_verify_radarr_reports_a_bad_key(
+    client: httpx.AsyncClient, db: AsyncSession, radarr_configured: Config
+) -> None:
+    respx.get(f"{RADARR_URL}/api/v3/system/status").mock(
+        return_value=httpx.Response(401, text="Unauthorized")
+    )
+    await signed_in(client, db)
+
+    response = await client.post("/admin/config/verify-radarr")
+    assert response.json()["ok"] is False
+    assert "401" in response.json()["message"]
+
+
+async def test_verify_radarr_before_configuring_is_not_a_crash(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """``configured`` sets Prowlarr up but not Radarr — the button still answers."""
+    await signed_in(client, db)
+    response = await client.post("/admin/config/verify-radarr")
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+
+
+async def test_the_config_page_offers_a_radarr_verify_button(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    response = await client.get("/admin/config")
+    assert "Verify Radarr connection" in response.text
+    assert "/admin/config/verify-radarr" in response.text
 
 
 @respx.mock

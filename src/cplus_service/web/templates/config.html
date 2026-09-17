@@ -46,6 +46,30 @@
     <span id="verify-result" class="inline-result"></span>
   </div>
 
+  <h2>Radarr</h2>
+  <label for="radarr_url">Radarr URL</label>
+  <input type="url" id="radarr_url" name="radarr_url" value="{{ config.radarr_url or '' }}"
+         data-original="{{ config.radarr_url or '' }}"
+         placeholder="http://radarr.local:7878">
+
+  <label for="radarr_api_key">API key</label>
+  <input type="password" id="radarr_api_key" name="radarr_api_key" autocomplete="off" data-original=""
+         placeholder="{{ '············ (unchanged)' if config.radarr_api_key else 'optional' }}">
+  <p class="hint">
+    {% if config.radarr_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
+    Your users never see this key. Nothing uses the connection yet beyond the
+    button below — it is here so it can be set up and proved ahead of the
+    features that will need it.
+  </p>
+
+  <div class="row">
+    <button type="button" class="secondary"
+            hx-post="/admin/config/verify-radarr?format=html"
+            hx-target="#verify-radarr-result"
+            hx-swap="innerHTML">Verify Radarr connection</button>
+    <span id="verify-radarr-result" class="inline-result"></span>
+  </div>
+
   <h2>TMDB</h2>
   <label for="tmdb_bearer_token">Bearer token</label>
   <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off" data-original=""
@@ -61,18 +85,18 @@
 
   <div class="row">
     {# Appears once a field differs from what is saved; see
-       static/dirty-save.js. The two secret fields start blank and mean "leave
-       it alone", so typing into one is itself the change. #}
+       static/dirty-save.js. The three secret fields start blank and mean
+       "leave it alone", so typing into one is itself the change. #}
     <button type="submit" class="hidden" data-save-for="config-form">Save</button>
     <span id="save-result" class="inline-result"></span>
   </div>
 
   {# Inside the form element, below its Save, but holding no field — this is
      the one thing on the page that cannot be edited, and there is no endpoint
-     that could. It sits in the same card as Prowlarr and TMDB because it is
-     the third of the three services this install talks to, and a card of its
-     own said it was a separate subject; below the Save button because that
-     button has nothing to do with it. The rule above it is what says so. #}
+     that could. It sits in the same card as the sections above because it is
+     one more of the services this install talks to, and a card of its own said
+     it was a separate subject; below the Save button because that button has
+     nothing to do with it. The rule above it is what says so. #}
   <hr class="card-divider">
   <section class="readonly-section">
     <h2>Seerr</h2>

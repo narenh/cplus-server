@@ -96,6 +96,15 @@ class Config(Base):
     prowlarr_api_key: Mapped[str | None] = mapped_column(String(256))
     preferred_indexer_id: Mapped[int | None] = mapped_column(Integer)
 
+    #: Radarr, stored exactly as Prowlarr is: URL plus key, plaintext in this
+    #: row, never rendered back into a page.
+    #:
+    #: Configured but not yet wired into anything — the Verify button on the
+    #: config page is currently the only thing that reads it. It is here so an
+    #: admin can prove the connection before the features that need it land.
+    radarr_url: Mapped[str | None] = mapped_column(String(512))
+    radarr_api_key: Mapped[str | None] = mapped_column(String(256))
+
     #: TMDB's v4 read-access bearer token. Stored the same way as
     #: ``prowlarr_api_key`` — plaintext in this row, never rendered back into a
     #: page. Unlike the Prowlarr key it is also exposed verbatim over the API

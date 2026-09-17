@@ -27,6 +27,8 @@ from cplus_service.settings import SEERR_URL_ENV
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
 PROWLARR_API_KEY = "prowlarr-key"
+RADARR_URL = "http://radarr.test:7878"
+RADARR_API_KEY = "radarr-key"
 TMDB_BEARER_TOKEN = "tmdb-bearer-token"
 PLEX_TOKEN = "plex-token-abc"
 
@@ -123,6 +125,21 @@ async def configured(db: AsyncSession) -> Config:
     config.tmdb_bearer_token = TMDB_BEARER_TOKEN
     await db.commit()
     return config
+
+
+@pytest_asyncio.fixture
+async def radarr_configured(db: AsyncSession, configured: Config) -> Config:
+    """Everything ``configured`` sets, plus a Radarr connection.
+
+    Separate from ``configured`` rather than folded into it: most tests post the
+    config form, and the form clears any field it does not carry. A test that
+    has no interest in Radarr would then be silently unsetting it, which is a
+    confusing thing for an unrelated test to be doing.
+    """
+    configured.radarr_url = RADARR_URL
+    configured.radarr_api_key = RADARR_API_KEY
+    await db.commit()
+    return configured
 
 
 async def make_action(
