@@ -85,6 +85,7 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
             display_title=action.button_title,
             sort_order=action.sort_order,
             icon=action.icon,
+            confirm_body=action.confirm_body,
             profile=ProfileSchema(
                 id=profile.id,
                 name=profile.name,
@@ -108,6 +109,7 @@ def request_offer_for(action: Action) -> dict[str, Any]:
         "display_title": action.button_title,
         "kind": KIND_REQUEST,
         "icon": action.icon,
+        "confirm_body": action.confirm_body,
         "recommended_release_guid": None,
     }
 
@@ -153,6 +155,7 @@ def _ranked_offers(
                     "display_title": action.display_title or action.name,
                     "kind": KIND_GRAB,
                     "icon": action.icon,
+                    "confirm_body": action.confirm_body,
                     "recommended_release_guid": recommendations.get(str(action.id)),
                 },
             )

@@ -409,6 +409,12 @@ class Action(Base):
     #: than refused, and the client falls back when it cannot render it.
     icon: Mapped[str | None] = mapped_column(String(64))
 
+    #: Copy the client prints when it asks the user to confirm this action, or
+    #: ``None`` for the client's own wording.  May carry ``{release}`` and
+    #: ``{size}``, which the *client* substitutes — see ``CONFIRM_PLACEHOLDERS``
+    #: in the admin routes for why the filling in does not happen here.
+    confirm_body: Mapped[str | None] = mapped_column(String(512))
+
     download_client_id: Mapped[int | None] = mapped_column(Integer)
     quality_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("quality_profiles.id", ondelete="RESTRICT")

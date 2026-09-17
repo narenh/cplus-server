@@ -440,7 +440,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `user_home_settings` | one user's own Home — the five content fields plus one `home_modified_at` for the whole document. Absent until they fork; see below |
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
-| `actions` | `name`, `display_title` (optional button copy), `sort_order`, `icon`, `download_client_id`, `quality_profile_id` |
+| `actions` | `name`, `display_title` (optional button copy), `confirm_body` (optional confirmation copy), `sort_order`, `icon`, `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
@@ -619,6 +619,21 @@ dozen it suggests rather than refusing it, and **the client is expected to fall
 back** (Canopy+ uses `arrow.down.circle`) when it cannot draw one. Null means
 the client picks for itself, which is what every action did before the field
 existed.
+
+**`confirm_body` is the copy the client shows when confirming, or null.** A
+client asks before it grabs, and the sentence it asks with is the admin's to
+write: "Add to Library" and "Stream Now" are not the same promise and should
+not read the same way. Null means the client uses its own wording, which is
+what every action did before the field existed.
+
+Two placeholders may appear in it, `{release}` and `{size}`, and **the client
+substitutes them, not this service.** The copy has to work for a release this
+service was never asked about — one the user picked by hand out of the full
+list — so there is no request in flight to fill it in from. The text is stored
+and shipped exactly as written; a client that meets a placeholder it does not
+know should print nothing for it rather than the braces. Anything outside those
+two is refused when the admin saves, because a typo is otherwise silent until
+it reaches a television.
 
 **Holding a Prowlarr-backed action is what grants Prowlarr access at all.** A
 caller with none — zero actions, or only the built-in Request action, which
@@ -916,8 +931,8 @@ For an `imdb_id`-scoped search with a preferred indexer and
 The response is NDJSON, one object per line:
 
 ```
-{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"recommended_release_guid":null}]}
-{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"recommended_release_guid":"guid-b"},{"id":3,"name":"Request","display_title":"Request","kind":"request","icon":"plus","recommended_release_guid":null}]}
+{"phase":"preferred","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","confirm_body":"{release} will be added, using {size} of storage.","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"confirm_body":null,"recommended_release_guid":null}]}
+{"phase":"all","releases":[…],"actions":[{"id":1,"name":"Stream Now","display_title":"Stream Now","kind":"grab","icon":"play.fill","confirm_body":"{release} will be added, using {size} of storage.","recommended_release_guid":"guid-a"},{"id":2,"name":"Add to library in HD","display_title":"Play Now","kind":"grab","icon":null,"confirm_body":null,"recommended_release_guid":"guid-b"},{"id":3,"name":"Request","display_title":"Request","kind":"request","icon":"plus","confirm_body":null,"recommended_release_guid":null}]}
 ```
 
 **Client merge rule: apply the last line you received, wholesale.** Union the

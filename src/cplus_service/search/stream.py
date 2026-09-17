@@ -91,6 +91,10 @@ class ScorableAction:
     sort_order: int = 0
     #: SF Symbol the client should draw, or None for the client's own default.
     icon: str | None = None
+    #: Confirmation copy the client prints, or None for the client's own
+    #: wording. Carried for the same reason as ``icon``: the caller builds the
+    #: offer from this and should not have to go back to the database for it.
+    confirm_body: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

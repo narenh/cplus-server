@@ -132,6 +132,7 @@ async def make_action(
     download_client_id: int = 5,
     sort_order: int = 0,
     icon: str | None = None,
+    confirm_body: str | None = None,
 ) -> Action:
     """An ordinary Prowlarr-backed action with a permissive profile."""
     profile = QualityProfile(name=f"{name} profile", rules=[])
@@ -143,6 +144,7 @@ async def make_action(
         quality_profile_id=profile.id,
         sort_order=sort_order,
         icon=icon,
+        confirm_body=confirm_body,
     )
     db.add(action)
     await db.flush()

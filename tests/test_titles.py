@@ -130,6 +130,7 @@ async def test_titles_streams_ndjson_with_action_offers(
             "display_title": "Stream Now",
             "kind": "grab",
             "icon": None,
+            "confirm_body": None,
             "recommended_release_guid": "guid-uhd",
         }
     ]
@@ -193,6 +194,7 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
         "display_title": "Request",
         "kind": "request",
         "icon": None,
+        "confirm_body": None,
         "recommended_release_guid": None,
     }
     assert actions[grab_action.id]["kind"] == "grab"
@@ -270,6 +272,33 @@ async def test_an_actions_icon_reaches_the_client(
     response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
 
     assert ndjson(response)[0]["actions"][0]["icon"] == "play.fill"
+
+
+@respx.mock
+async def test_an_actions_confirmation_copy_rides_along_unsubstituted(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    """Shipped exactly as the admin wrote it, braces and all.
+
+    The client fills them in, because the copy also has to describe a release
+    picked by hand out of the full list — one no request here ever named.
+    """
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_2160])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(
+        db, "Stream Now", confirm_body="{release} will stream, using {size}."
+    )
+    await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    assert (
+        ndjson(response)[0]["actions"][0]["confirm_body"]
+        == "{release} will stream, using {size}."
+    )
 
 
 @respx.mock
@@ -415,6 +444,7 @@ async def test_a_user_with_only_the_request_action_never_triggers_a_search(
                     "display_title": "Request",
                     "kind": "request",
                     "icon": None,
+                    "confirm_body": None,
                     "recommended_release_guid": None,
                 }
             ],
