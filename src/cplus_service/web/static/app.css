@@ -879,10 +879,13 @@ table.preview .dropped-by { color: var(--err); }
 .user-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .user-name { font-weight: 600; }
 .user-card-head .row-controls { margin-left: auto; }
-.perm-grid {
-  display: grid; gap: 8px 18px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-}
+/* One action per line, in the order the actions are ranked. It used to reflow
+   into as many columns as the card afforded, which meant the list read left to
+   right on a laptop and top to bottom on a phone — and the ranking is the one
+   thing about this list that is worth reading in order, since it is the order
+   the user's own client draws the buttons in. A column says that; a grid that
+   rewraps at every width cannot. */
+.perm-grid { display: flex; flex-direction: column; gap: 8px; }
 .perm-check { font-size: 13px; }
 .perm-input { display: inline-flex; }
 .perm-input input[type=checkbox] { margin: 0; }

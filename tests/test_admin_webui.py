@@ -1043,6 +1043,33 @@ async def test_the_actions_page_lists_request_as_read_only(
     assert "grant per user" in response.text
 
 
+async def test_the_users_page_lists_actions_in_rank_order(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """The order the user's own client draws them, not an alphabetical one.
+
+    Named so the two disagree: alphabetically this is Alpha, Request, Zulu;
+    by rank it is Zulu, Alpha, Request. An admin deciding what someone may do
+    should be reading the list that person will see.
+    """
+    await signed_in(client, db)
+    system = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    system.sort_order = 30
+    await make_action(db, "Zulu", sort_order=10)
+    await make_action(db, "Alpha", sort_order=20)
+    db.add(User(seerr_user_id=99, plex_username="someone"))
+    await db.commit()
+
+    page = (await client.get("/admin/users")).text
+    shown = [
+        page.index(f">{name}<") if f">{name}<" in page else page.index(name)
+        for name in ("Zulu", "Alpha", system.name)
+    ]
+    assert shown == sorted(shown)
+
+
 async def test_the_stylesheets_are_served_from_this_image(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:

@@ -44,8 +44,12 @@ async def _list_context(db: DbDep) -> dict[str, object]:
     users = list(
         (await db.execute(select(User).order_by(User.seerr_user_id))).scalars().all()
     )
+    # The ranking, the same order GET /admin/actions lists them in and the same
+    # order the user's own client draws them: an admin deciding what someone may
+    # do should be reading the list that person will see, not an alphabetical
+    # one that agrees with no other screen.
     actions = list(
-        (await db.execute(select(Action).order_by(Action.is_system, Action.name)))
+        (await db.execute(select(Action).order_by(Action.sort_order, Action.id)))
         .scalars()
         .all()
     )
