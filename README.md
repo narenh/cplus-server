@@ -200,7 +200,7 @@ src/cplus_service/
   api/routes/           register, home, titles, tmdb_actions, grab, manager,
                         request, seerr
   api/routes/admin/     the admin webui: config, profiles, actions,
-                        permissions, activity, login (Plex PIN flow)
+                        permissions, activity, devices, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
   web/                  Jinja2 templates + vendored HTMX, Open Props and CSS
   db/models.py          SQLAlchemy 2.0 schema
@@ -442,8 +442,9 @@ stage 2; they exist now so the migration history has one starting point.
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
 | `actions` | `name`, `display_title` (optional button copy), `confirm_body` (optional confirmation copy), `sort_order`, `icon`, `download_client_id`, `quality_profile_id` |
 | `permissions` | user ↔ action, composite PK |
-| `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
-| `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
+| `grabs` | user, action, `via_manager`, `device_identifier`, release title/guid/indexer/size, `created_at` |
+| `activity_log` | user, `device_identifier`, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
+| `plex_devices` | one client install, keyed by its own `X-Plex-Client-Identifier`: the admin's `nickname`, the `device_name` the client reports, `first_seen_at`, `last_seen_at`. No `user_id` — the same screen serves whoever is signed in on it |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
 
@@ -455,6 +456,13 @@ matter because requests here are not uniformly short — see *Streaming and the
 request transaction* below. Deleting a user cascades to permissions; deleting
 an action nulls the reference but keeps the grab history; a quality profile in
 use by an action cannot be deleted.
+
+`device_identifier` is the one denormalised join key with **no** foreign key
+behind it, on purpose. A `plex_devices` row holds a nickname and nothing else,
+so removing a screen that was sold must not cascade the grab history away,
+must not be refused because history mentions it, and must not quietly blank
+which device a grab came from. It is read the way `action_id` is: through a
+lookup that tolerates a missing row.
 
 `cplus_service.db.QualityProfile` (ORM row) and
 `cplus_service.quality.QualityProfile` (pydantic rule schema) share a name.
@@ -496,6 +504,34 @@ is that a Plex token revoked upstream keeps working on
 the user in the admin UI is the immediate lever. Revoking a single
 *permission* likewise takes effect at their next `/register` call, not at
 once.
+
+#### Two optional headers: which device is calling
+
+`X-Plex-Token` says *who*. A client may also send Plex's own
+`X-Plex-Client-Identifier` — the stable per-install id it already computes for
+plex.tv, which CanopyPlus keeps in `UserDefaults` under `PlexClientIdKey` — and
+`X-Plex-Device-Name`, whatever that install calls itself ("Living Room Apple
+TV"). Both say *which screen*, which is a different question: the same Apple TV
+serves whoever is signed in on it.
+
+Neither header authenticates or authorises anything, and neither is required:
+
+* Sending them records the identifier on every `grabs` and `activity_log` row
+  the call writes, and enters the install in `plex_devices` so an admin can
+  nickname it. There is no enrollment step — the row appears on first sighting.
+* Sending nothing is served identically and recorded with no device, which is
+  what every client predating the headers does.
+* Sending something unusable (blank, over 128 characters, control characters
+  only) is treated as sending nothing. It is **dropped, never truncated**: a
+  truncated identifier is a different device to every lookup, so truncating
+  would silently merge two installs into one row. A client bug must not cost a
+  user their grab.
+
+They are read on the endpoints that record an event — `/titles/{imdb_id}/actions`,
+`/grab`, `/request`, `/manager/search`, `/manager/grab`, `/seerr/requests/*` — plus
+`/register`, which is where a device first becomes known. Deliberately **not** on
+`/home` or `/capabilities`: refreshing a last-seen stamp is not worth turning a
+home sync into a write.
 
 ### Webui — Plex OAuth PIN flow + browser session
 
@@ -689,6 +725,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/users/{id}/home`, `POST .../shelves`, `.../carousel`, `.../top-shelf` (and their move/remove/reorder/enabled variants) | One user's own Home — same Carousel/Top Shelf/Shelves editor as the Libraries & Home tab, but scoped to a single user's own copy rather than the install-wide default |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+| `GET /admin/devices`, `POST /admin/devices/nickname`, `/delete` | The device registry: name a screen, or forget one. A subpage of Grabs, linked from both tables that print a device |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
@@ -1085,6 +1122,30 @@ htmx sets on its own (`.htmx-request`, `.htmx-added`), which is the whole of
 the "it saved" signal now that the page does not reload. And a write the server
 refuses surfaces in one toast (`htmx-errors.js`), since htmx will not swap a
 4xx body and the rejection would otherwise be silent.
+
+### Devices and nicknames
+
+Grabs and Activity both print a **Device** column beside the user, because they
+answer different questions: the same Apple TV serves whoever is signed in on it.
+Three states, and the cell says exactly as much as is known — a name with the
+head of the identifier after it, the head alone for a device nobody has named,
+or an em dash for a call that sent no identifier at all (every client predating
+the headers, and the admin's own actions in this web UI, which are not a
+device's).
+
+`/admin/devices` is where the naming happens: a subpage of Grabs rather than a
+tab, linked from both tables, listing every install that has talked to this
+service with the most recently seen first. Each row is little more than a text
+field — type "Living Room", and it is used everywhere that device appears.
+Clearing the field puts the row back to whatever the client calls itself
+(`X-Plex-Device-Name`), and then to the bare identifier.
+
+There is no "add device": a row appears on first sighting. **Remove** forgets a
+screen that was sold or reinstalled; it deletes a label and nothing else — no
+grab history is touched, and a device still in use reappears, unnamed, on its
+next request. Naming is also the only thing an admin can do here, on purpose:
+the identifier is client-supplied and nothing is authorised by it, so there is
+nothing to grant or revoke per device.
 
 ### The profile builder
 

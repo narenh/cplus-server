@@ -47,7 +47,7 @@ from ...auth.identity import authenticate_plex_token
 from ...db.models import Config
 from ...db.session import get_config
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep
+from ..deps import DbDep, DeviceDep, PlexTokenDep, SeerrDep
 from .defaults import defaults_payload
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ async def register(
     db: DbDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    device: DeviceDep,
     first_run: bool | None = Query(default=None),
 ) -> Response:
     """Validate the caller's Plex token and prime the cache-only endpoints.
@@ -90,6 +91,15 @@ async def register(
     The rest is additive and safe for a client that has never heard of it to
     ignore: ``plex_server`` on every call, and the ``first_run`` bundle on the
     one call that asks for it. Both are described above.
+
+    ``device`` is taken and not read. The dependency's *side effect* is the
+    point — it enters the caller's install in the device registry and stamps it
+    as seen, and this is the call to do it on: every client makes it at launch,
+    it is the only one guaranteed to happen before anything a device could be
+    blamed for, and it is infrequent. ``GET``/``PUT /home`` and
+    ``/capabilities`` deliberately do *not* take it: a home sync several times
+    a session would turn a read into a write for nothing but a fresher
+    timestamp. See :func:`cplus_service.api.deps.get_calling_device`.
     """
     try:
         user, _auth = await authenticate_plex_token(db, seerr, plex_token)

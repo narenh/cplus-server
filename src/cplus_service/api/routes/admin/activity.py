@@ -12,6 +12,7 @@ from ....db.models import Action, ActivityLog, Grab, User
 from ....web import templates
 from ...deps import DbDep
 from .deps import AdminPageDep
+from .devices import device_index
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,10 @@ async def list_grabs(
             "users": users,
             "usernames": usernames,
             "action_names": action_names,
+            # Keyed by identifier, not joined: the identifier on a grab is a
+            # denormalised copy with no foreign key behind it, so a row may name
+            # a device an admin has since removed. See ``device_index``.
+            "devices": await device_index(db),
             "selected_user": user_id,
             "admin": admin,
             "title": "Grabs",
@@ -82,6 +87,7 @@ async def list_activity(
             "entries": entries,
             "users": users,
             "usernames": usernames,
+            "devices": await device_index(db),
             "selected_user": user_id,
             "admin": admin,
             "title": "Activity log",

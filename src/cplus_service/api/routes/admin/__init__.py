@@ -14,6 +14,7 @@ from . import (
     actions,
     activity,
     config,
+    devices,
     libraries,
     login,
     notifications,
@@ -31,6 +32,7 @@ router.include_router(actions.router)
 router.include_router(permissions.router)
 router.include_router(user_home.router)
 router.include_router(activity.router)
+router.include_router(devices.router)
 router.include_router(notifications.router)
 router.include_router(libraries.router)
 

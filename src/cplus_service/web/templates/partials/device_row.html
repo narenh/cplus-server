@@ -1,0 +1,52 @@
+{# One device: its nickname form, what it calls itself, and its identifier.
+
+   Returned on its own by POST /admin/devices/nickname — a nickname changes
+   nothing else on the page, not the ordering and not the empty state, so
+   swapping the whole list would only cost the admin their place in it.
+
+   Same shape as renaming a library on the Libraries tab, deliberately: a text
+   field whose Save appears only once the value differs from what is stored
+   (data-original, static/dirty-save.js), and no "saved" text — the accent flash
+   htmx puts on the swapped-in row is the confirmation.
+
+   No id on the <tr>: the form targets "closest tr", so the row does not have to
+   be addressable, and this partial renders identically inside the list loop and
+   on its own.
+
+   Expects: device. #}
+{% set form_id = "nickname-" ~ device.client_identifier|dom_id %}
+<tr>
+  <td class="nickname">
+    {# The form wraps the row's own fields, and its id is a hash of the
+       identifier rather than the identifier itself: dirty-save.js reads that id
+       back through a CSS attribute selector, and a client is free to send an
+       identifier with a quote in it. #}
+    <form id="{{ form_id }}" class="device-nickname"
+          method="post" action="/admin/devices/nickname"
+          hx-post="/admin/devices/nickname"
+          hx-target="closest tr" hx-swap="outerHTML">
+      <input type="hidden" name="client_identifier" value="{{ device.client_identifier }}">
+      {# aria-label rather than a visible <label>: the column heading already
+         names this field, and repeating it on every row would be noise. #}
+      <input type="text" name="nickname" maxlength="64" placeholder="Living Room"
+             value="{{ device.nickname or '' }}" data-original="{{ device.nickname or '' }}"
+             aria-label="Nickname for this device">
+      <button type="submit" class="link hidden" data-save-for="{{ form_id }}">Save</button>
+    </form>
+  </td>
+  {# What the client itself reported, never overwritten by the nickname and
+     never shown in place of one: an admin needs both to tell which Apple TV
+     they are naming. #}
+  <td class="device-name">{{ device.device_name or "—" }}</td>
+  <td class="identifier muted">{{ device.client_identifier }}</td>
+  <td class="when muted">{{ device.last_seen_at|when }}</td>
+  <td class="right">
+    <form method="post" action="/admin/devices/delete"
+          hx-post="/admin/devices/delete"
+          hx-target="#devices-list" hx-swap="outerHTML"
+          hx-confirm="Forget this device? Its nickname is removed from the grabs it already made. Nothing else is deleted.">
+      <input type="hidden" name="client_identifier" value="{{ device.client_identifier }}">
+      <button type="submit" class="link danger">Remove</button>
+    </form>
+  </td>
+</tr>

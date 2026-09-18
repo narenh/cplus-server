@@ -34,7 +34,7 @@ from fastapi.responses import JSONResponse
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ActivityLog, EventType
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep, require_request_manager
+from ..deps import DbDep, DeviceDep, PlexTokenDep, SeerrDep, require_request_manager
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,7 @@ async def decide_request(
     db: DbDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    device: DeviceDep,
     request_id: int,
     decision: Literal["approve", "decline"],
 ) -> Any:
@@ -143,6 +144,7 @@ async def decide_request(
         db.add(
             ActivityLog(
                 user_id=user.id,
+                device_identifier=device,
                 event_type=EventType.ADMIN,
                 detail={
                     "kind": f"request_{decision}",
@@ -158,6 +160,7 @@ async def decide_request(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device,
             event_type=EventType.ADMIN,
             detail={
                 "kind": f"request_{decision}",
@@ -171,7 +174,11 @@ async def decide_request(
 
 @router.delete("/requests/{request_id}")
 async def delete_request(
-    db: DbDep, seerr: SeerrDep, plex_token: PlexTokenDep, request_id: int
+    db: DbDep,
+    seerr: SeerrDep,
+    plex_token: PlexTokenDep,
+    device: DeviceDep,
+    request_id: int,
 ) -> Response:
     """Delete a request.
 
@@ -193,6 +200,7 @@ async def delete_request(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device,
             event_type=(
                 EventType.ADMIN if auth.user.can_manage_requests else EventType.REQUEST
             ),

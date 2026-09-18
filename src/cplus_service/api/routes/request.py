@@ -26,7 +26,7 @@ from ...bootstrap import REQUEST_ACTION_NAME, get_request_action
 from ...db.models import ActivityLog, EventType, Permission
 from ...notify.messages import MediaSummary, user_requested
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
+from ..deps import DbDep, DeviceDep, PlexTokenDep, SeerrDep, StateDep
 from ..notifications import media_of, schedule
 from ..schemas import RequestCreate, RequestResponse
 
@@ -41,6 +41,7 @@ async def create_request(
     state: StateDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    device: DeviceDep,
     background: BackgroundTasks,
     body: RequestCreate,
 ) -> RequestResponse | JSONResponse:
@@ -89,6 +90,7 @@ async def create_request(
         db.add(
             ActivityLog(
                 user_id=user.id,
+                device_identifier=device,
                 event_type=EventType.REQUEST,
                 detail={
                     "kind": "request",
@@ -115,6 +117,7 @@ async def create_request(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device,
             event_type=EventType.REQUEST,
             detail={
                 "kind": "request",

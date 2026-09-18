@@ -1,0 +1,29 @@
+{# One table cell naming the device an event came from.
+
+   Shared by the Grabs and Activity tables so the two can never disagree about
+   how a device is printed. Three states, and each one says as much as is
+   actually known:
+
+   * named (an admin's nickname, or failing that what the client calls itself) —
+     the name, with the head of the identifier after it, the same shape the
+     Notifications tab prints an APNs device in;
+   * seen but unnamed — the head of the identifier alone, and /admin/devices is
+     where it gets a name;
+   * no identifier at all — an em dash. Every grab from before the header
+     existed looks like this, as does any client that does not send it.
+
+   The full identifier is always in the title attribute: the head is enough to
+   tell two devices apart at a glance, and not enough to copy one out of.
+
+   Expects: identifier (may be None), devices (identifier -> PlexDevice). #}
+{% set device = devices.get(identifier) if identifier else None %}
+<td class="device">
+  {% if not identifier %}
+    <span class="muted">—</span>
+  {% elif device and device.label %}
+    <span title="{{ identifier }}">{{ device.label }}</span>
+    <span class="muted nowrap">{{ identifier[:8] }}…</span>
+  {% else %}
+    <span class="muted nowrap" title="{{ identifier }}">{{ identifier[:8] }}…</span>
+  {% endif %}
+</td>

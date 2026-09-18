@@ -32,6 +32,7 @@ from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import (
     ConfigDep,
     DbDep,
+    DeviceDep,
     PlexTokenDep,
     ProwlarrDep,
     SeerrDep,
@@ -55,6 +56,7 @@ async def grab(
     prowlarr: ProwlarrDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    device: DeviceDep,
     background: BackgroundTasks,
     body: ManagerGrabRequest,
 ) -> GrabResponse | JSONResponse:
@@ -82,6 +84,7 @@ async def grab(
         # action on the Actions page, and an action-free grab has no such
         # setting to read, so Prowlarr picks its own default.
         download_client_id=None,
+        device_identifier=device,
         body=body,
         state=state,
         background=background,
@@ -95,6 +98,7 @@ async def search(
     prowlarr: ProwlarrDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
+    device: DeviceDep,
     imdb_id: str | None = Query(default=None, min_length=1),
     query: str | None = Query(default=None, min_length=1),
     preferred_only: bool = Query(default=False),
@@ -138,6 +142,7 @@ async def search(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device,
             event_type=EventType.ADMIN,
             detail={
                 "kind": "search",

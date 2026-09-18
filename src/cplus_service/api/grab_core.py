@@ -32,6 +32,7 @@ async def execute_grab(
     user: User,
     action: Action | None,
     download_client_id: int | None,
+    device_identifier: str | None,
     body: ReleaseFields,
     state: AppState,
     background: BackgroundTasks,
@@ -47,6 +48,12 @@ async def execute_grab(
     row's ``action_id`` is nullable for exactly that reason, and its
     ``via_manager`` records which of the two reasons applies here. It is also
     what decides whether this raises a notification — see below.
+
+    ``device_identifier`` is which install pressed the button, from
+    :func:`~cplus_service.api.deps.get_calling_device`, or ``None`` if it did
+    not say. Recorded on the ``grabs`` row *and* the log row: the grabs page
+    reads the former and never the latter, the same reason ``via_manager``
+    exists on both.
     """
     # An action-free grab is the admin app's own work, not a user exercising an
     # action, so it is filed under ADMIN (with a ``kind``) rather than GRAB. The
@@ -70,6 +77,7 @@ async def execute_grab(
         db.add(
             ActivityLog(
                 user_id=user.id,
+                device_identifier=device_identifier,
                 event_type=event_type,
                 detail={
                     **kind,
@@ -97,6 +105,7 @@ async def execute_grab(
         user_id=user.id,
         action_id=action.id if action else None,
         via_manager=admin,
+        device_identifier=device_identifier,
         release_title=body.release_title,
         release_guid=body.release_guid,
         indexer_id=body.indexer_id,
@@ -108,6 +117,7 @@ async def execute_grab(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device_identifier,
             event_type=event_type,
             detail={
                 **kind,

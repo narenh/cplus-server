@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<p class="row"><a href="/admin/devices">Name devices &rarr;</a></p>
 {% include "partials/user_filter.html" %}
 
 {% if not entries %}
@@ -8,7 +9,7 @@
 <div class="table-scroll">
 <table>
   <thead>
-    <tr><th class="when">When</th><th class="who">User</th><th>Event</th><th class="detail">Detail</th></tr>
+    <tr><th class="when">When</th><th class="who">User</th><th class="device">Device</th><th>Event</th><th class="detail">Detail</th></tr>
   </thead>
   <tbody>
   {% for entry in entries %}
@@ -16,6 +17,12 @@
     <tr>
       <td class="when muted">{{ entry.created_at|when }}</td>
       <td class="who">{{ usernames.get(entry.user_id, "—") }}</td>
+      {# Which screen, alongside which person — see partials/_device_cell.html.
+         An admin's own action from the web UI has no device, which is why the
+         column is often empty on `admin` rows. #}
+      {% with identifier = entry.device_identifier %}
+        {% include "partials/_device_cell.html" %}
+      {% endwith %}
       <td>
         {# event_type is search|grab|request|admin, for every row: the backfill
            migration retyped the history, and it runs before the app serves

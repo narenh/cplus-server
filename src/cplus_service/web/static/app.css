@@ -506,6 +506,18 @@ th.release, td.release { min-width: 300px; }
 th.detail, td.detail { min-width: 320px; }
 th.size, td.size { min-width: 84px; white-space: nowrap; }
 th.actions-col, td.actions-col { min-width: 92px; }
+/* A nickname plus the head of an identifier, on one line. */
+th.device, td.device { min-width: 150px; white-space: nowrap; }
+/* The Devices page, where the identifier is shown in full rather than
+   truncated: it is the thing being named, and an admin matching one against a
+   client's own settings screen needs all of it. */
+th.identifier, td.identifier {
+  min-width: 300px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  word-break: break-all;
+}
+th.nickname, td.nickname { min-width: 260px; }
+th.device-name, td.device-name { min-width: 160px; }
 /* Sticky so the column names stay with the rows when a long activity log is
    scrolled — inside .table-scroll it is the page that scrolls, so this needs
    the header to stick to the viewport, which is what `top: 0` does once the
@@ -537,6 +549,13 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 }
 .filter { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
 .filter select { width: auto; }
+
+/* One device's nickname field and its Save on a single line, with the input
+   taking the slack: a text box that shrinks to fit "Living Room" is a text box
+   nobody can see what they typed in. */
+.device-nickname { display: flex; gap: 8px; align-items: center; }
+.device-nickname input[type=text] { flex: 1; min-width: 0; margin: 0; }
+.device-nickname button { flex: none; }
 
 /* A row's controls on one line — a link and an icon button are different
    elements with different default display, and side by side is how they read

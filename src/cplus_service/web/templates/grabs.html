@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<p class="row"><a href="/admin/activity-log">View all activity &rarr;</a></p>
+<p class="row">
+  <a href="/admin/activity-log">View all activity &rarr;</a>
+  {# Next to the table that prints devices, because that is where an admin
+     notices a UUID they cannot read. #}
+  <a href="/admin/devices">Name devices &rarr;</a>
+</p>
 {% include "partials/user_filter.html" %}
 
 {% if not grabs %}
@@ -9,13 +14,18 @@
 <div class="table-scroll">
 <table>
   <thead>
-    <tr><th class="when">When</th><th class="who">User</th><th>Action</th><th class="release">Release</th><th class="size">Size</th></tr>
+    <tr><th class="when">When</th><th class="who">User</th><th class="device">Device</th><th>Action</th><th class="release">Release</th><th class="size">Size</th></tr>
   </thead>
   <tbody>
   {% for grab in grabs %}
     <tr>
       <td class="when muted">{{ grab.created_at|when }}</td>
       <td class="who">{{ usernames.get(grab.user_id, "—") }}</td>
+      {# Which screen, alongside which person: the same Apple TV is used by
+         whoever is signed in on it, so neither column answers the other. #}
+      {% with identifier = grab.device_identifier %}
+        {% include "partials/_device_cell.html" %}
+      {% endwith %}
       {# A null `action_id` means one of two different things, and `via_manager`
          is what tells them apart: an admin grabbing a release directly from
          the admin app (no action was ever involved), or an ordinary grab whose

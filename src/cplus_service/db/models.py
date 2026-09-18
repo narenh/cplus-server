@@ -480,6 +480,18 @@ class Grab(Base):
     #: stays true no matter what happens to the actions table afterwards.
     via_manager: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
+    #: The ``X-Plex-Client-Identifier`` of the install that grabbed this — see
+    #: :class:`PlexDevice`. ``None`` for a caller that sent none, which is every
+    #: grab recorded before the header existed.
+    #:
+    #: **Deliberately not a foreign key.** The device row exists only to hold a
+    #: nickname, and an admin clearing out a screen they no longer own should
+    #: not take the grab history with it (``CASCADE``) or be refused
+    #: (``RESTRICT``) — nor should the history quietly forget which device it
+    #: was (``SET NULL``). So this is a plain denormalised copy, read the same
+    #: way ``action_id`` is: through a lookup that tolerates a missing row.
+    device_identifier: Mapped[str | None] = mapped_column(String(128))
+
     release_title: Mapped[str] = mapped_column(String(1024))
     release_guid: Mapped[str] = mapped_column(String(1024))
     indexer_id: Mapped[int | None] = mapped_column(Integer)
@@ -582,6 +594,64 @@ class ApnsDevice(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class PlexDevice(Base):
+    """One client install, as identified by the Plex client identifier it sends.
+
+    Keyed by that identifier rather than by an id of our own: it is already a
+    stable per-install value (CanopyPlus generates a UUID on first launch and
+    keeps it in ``UserDefaults`` forever, because a changing one registers a
+    fresh device on the user's Plex account every sign-in), and it is the only
+    thing a grab row has to join on.
+
+    **Not a user's device.** The identifier belongs to the install, and the
+    same Apple TV is used by whoever is signed in on it — so this table has no
+    ``user_id``. Which *person* did something is already on the ``grabs`` and
+    ``activity_log`` rows; this answers the other half of the question, which
+    of the household's screens it happened on. That is also why it is a
+    separate table from :class:`ApnsDevice`, whose rows are per admin and keyed
+    by an Apple-issued token that has nothing to do with this one.
+
+    Rows appear on their own, the first time a request arrives carrying the
+    header — there is nothing for an admin to enter by hand and no enrollment
+    step. ``nickname`` is the one field an admin writes: the identifier is a
+    UUID and ``device_name`` is whatever the client chose to call itself, so
+    "Living Room" is the only version of this a person can read at a glance.
+    """
+
+    __tablename__ = "plex_devices"
+
+    #: The client's own ``X-Plex-Client-Identifier``. Client-supplied and
+    #: therefore not trusted for anything but labelling: two installs that
+    #: claim the same identifier are one row here, which is a display
+    #: inaccuracy and nothing more — no permission, no grant and no user
+    #: identity is keyed on this.
+    client_identifier: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+    #: The admin's own label — "Living Room", "Kids' iPad". ``None`` until they
+    #: set one, which is the normal state of a device nobody has looked at yet.
+    nickname: Mapped[str | None] = mapped_column(String(64))
+
+    #: What the client called itself in ``X-Plex-Device-Name``, e.g. "Living
+    #: Room Apple TV". Refreshed on every sighting, so a renamed device catches
+    #: up on its own; kept separate from ``nickname`` because an admin's label
+    #: should not be silently overwritten by a client, and because a client
+    #: that sends nothing still needs the nickname to survive.
+    device_name: Mapped[str | None] = mapped_column(String(256))
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    @property
+    def label(self) -> str | None:
+        """What to print for this device, or ``None`` if it has no name at all.
+
+        The one place the nickname-beats-self-reported-name fallback lives.
+        ``None`` is a real answer — the caller shows the identifier itself,
+        since that is then all anyone knows about it.
+        """
+        return self.nickname or self.device_name
+
+
 class ActivityLog(Base):
     """Append-only audit trail of searches, grabs, requests and admin operations.
 
@@ -595,6 +665,17 @@ class ActivityLog(Base):
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+
+    #: Which install this came from — see :class:`PlexDevice`. A column rather
+    #: than another key in ``detail`` for the same reason ``user_id`` is one:
+    #: it applies to every event whatever its type, and it is a join key, not
+    #: free-form description of what happened.
+    #:
+    #: ``None`` means the caller sent no identifier: every client that predates
+    #: the header, and the admin webui, whose own actions are not a device's.
+    #: Deliberately **not** a foreign key — see ``Grab.device_identifier``.
+    device_identifier: Mapped[str | None] = mapped_column(String(128))
+
     event_type: Mapped[EventType] = mapped_column(String(32))
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(

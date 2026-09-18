@@ -1,0 +1,42 @@
+{# The device list, whole.
+
+   Rendered by GET /admin/devices and returned entire by POST
+   /admin/devices/delete, because losing the last row hands the page over to the
+   empty state below. A nickname save is narrower and swaps only its own row
+   (partials/device_row.html).
+
+   Expects: devices. #}
+<div id="devices-list">
+{% if not devices %}
+  <p class="empty">
+    No devices seen yet. One appears here the first time a client sends its Plex
+    client identifier — there is nothing to enter by hand. Clients that predate
+    the header never send one, and their grabs are recorded with no device.
+  </p>
+{% else %}
+<div class="table-scroll">
+<table>
+  <thead>
+    <tr>
+      <th class="nickname">Nickname</th>
+      <th class="device-name">Calls itself</th>
+      <th class="identifier">Identifier</th>
+      <th class="when">Last seen</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for device in devices %}
+      {% include "partials/device_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="hint">
+  Clearing the nickname field and saving puts a device back to whatever it calls
+  itself. Removing one forgets its name everywhere, including on grabs it
+  already made — and if it is still in use it comes back, unnamed, on its next
+  request. No history is deleted either way.
+</p>
+{% endif %}
+</div>

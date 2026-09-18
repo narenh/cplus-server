@@ -50,6 +50,23 @@ def format_when(value: Any) -> Markup:
     return Markup(f'<time datetime="{iso}" class="local-time">{escape(fallback)}</time>')
 
 
+def dom_id(value: Any) -> str:
+    """A short, always-safe HTML id fragment derived from an arbitrary string.
+
+    For ids built out of values this service did not choose — a Plex client
+    identifier is whatever the client sent, and may contain any printable
+    character, quotes included. Those ids are read back by
+    ``static/dirty-save.js`` through a CSS attribute selector, where one quote
+    is enough to throw and take the page's scripting with it.
+
+    A hash is unambiguous (two devices never collide in practice at 12 hex
+    characters), stable — the same device gets the same id every render,
+    including when one row is re-rendered on its own after a save — and cannot
+    contain a character that breaks a selector.
+    """
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]
+
+
 @cache
 def static_url(name: str) -> str:
     """``/static/<name>`` with a content hash on the end.
@@ -81,11 +98,13 @@ def static_url(name: str) -> str:
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["size"] = format_size
 templates.env.filters["when"] = format_when
+templates.env.filters["dom_id"] = dom_id
 templates.env.globals["static_url"] = static_url
 
 __all__ = [
     "STATIC_DIR",
     "TEMPLATES_DIR",
+    "dom_id",
     "format_size",
     "format_when",
     "static_url",

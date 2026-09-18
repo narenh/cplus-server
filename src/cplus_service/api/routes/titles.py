@@ -52,7 +52,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.models import Action, ActivityLog, EventType, Permission, QualityProfile
 from ...quality.models import QualityProfile as ProfileSchema
 from ...search.stream import PHASE_ALL, ScorableAction, stream_search
-from ..deps import CachedUserDep, ConfigDep, DbDep, ProwlarrDep
+from ..deps import CachedUserDep, ConfigDep, DbDep, DeviceDep, ProwlarrDep
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +172,7 @@ async def title_actions(
     config: ConfigDep,
     prowlarr: ProwlarrDep,
     user: CachedUserDep,
+    device: DeviceDep,
     preferred_only: bool = Query(default=False),
 ) -> StreamingResponse:
     """Stream this title's releases plus the caller's action offers, as NDJSON.
@@ -200,6 +201,7 @@ async def title_actions(
     db.add(
         ActivityLog(
             user_id=user.id,
+            device_identifier=device,
             event_type=EventType.SEARCH,
             detail={
                 "imdb_id": imdb_id,

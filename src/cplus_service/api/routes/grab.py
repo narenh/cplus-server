@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.models import Action, Permission
-from ..deps import CachedUserDep, DbDep, ProwlarrDep, StateDep
+from ..deps import CachedUserDep, DbDep, DeviceDep, ProwlarrDep, StateDep
 from ..grab_core import execute_grab
 from ..schemas import GrabRequest, GrabResponse
 
@@ -52,6 +52,7 @@ async def grab(
     state: StateDep,
     prowlarr: ProwlarrDep,
     user: CachedUserDep,
+    device: DeviceDep,
     background: BackgroundTasks,
     body: GrabRequest,
 ) -> GrabResponse | JSONResponse:
@@ -83,6 +84,7 @@ async def grab(
         user=user,
         action=action,
         download_client_id=action.download_client_id,
+        device_identifier=device,
         body=body,
         state=state,
         background=background,

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="card">
+  <h2>Nicknames</h2>
+  <p class="hint">
+    Every client that talks to this service sends its own Plex client
+    identifier, and that identifier is what the Grabs and Activity tables print
+    per row. A name you give one here is used everywhere it appears, so
+    &ldquo;Living Room&rdquo; shows up instead of a UUID. Nothing else changes —
+    the identifier itself is still what everything is recorded against.
+  </p>
+  {% include "partials/devices_list.html" %}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+{# Each row's Save stays hidden until its nickname actually differs from what is
+   stored — see partials/device_row.html. #}
+<script src="{{ static_url('dirty-save.js') }}" defer></script>
+{% endblock %}
