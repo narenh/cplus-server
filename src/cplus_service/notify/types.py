@@ -24,7 +24,8 @@ class NotificationType(StrEnum):
     """A kind of event an admin can be notified about."""
 
     USER_REQUESTED = "user_requested"
-    """A user filed a request through the built-in Request action."""
+    """A user filed a request — through the built-in Request action, or in
+    Seerr itself if this install has Seerr's webhook pointed at it."""
 
     USER_ACTION = "user_action"
     """A user ran one of the admin's Prowlarr-backed actions on a release."""
@@ -51,7 +52,9 @@ NOTIFICATION_TYPES: tuple[NotificationTypeInfo, ...] = (
         label="A user requested something",
         description=(
             "Sent when someone files a request through the built-in Request "
-            "action, whether or not you go on to approve it."
+            "action, whether or not you go on to approve it. Covers requests "
+            "made in Seerr's own UI too, once you have set up its webhook on "
+            "the Configuration tab."
         ),
         example_subtitle="Requested by Robin Example",
     ),

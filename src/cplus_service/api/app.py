@@ -49,6 +49,7 @@ from .routes import (
     seerr,
     titles,
     tmdb_actions,
+    webhooks,
 )
 from .state import AppState
 
@@ -166,6 +167,7 @@ def create_app(
     app.include_router(push_devices.router)
     app.include_router(request.router)
     app.include_router(seerr.router)
+    app.include_router(webhooks.router)
     app.include_router(admin.router)
 
     app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")

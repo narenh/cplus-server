@@ -86,6 +86,10 @@ your proxy's TLS.
 7. **Assign permissions.** Users appear on the Permissions page the first time
    their client signs in, so have each user open the app once, then tick the
    actions they may use — including the built-in *Request* action.
+8. *Optional:* **set up the Seerr webhook**, on the Configuration tab, if you
+   want requests people file in Seerr's own UI logged and pushed to you the way
+   in-app ones already are. It generates a secret to paste into Seerr's webhook
+   settings — see [Requests filed in Seerr](#requests-filed-in-seerr).
 
 ### Environment variables
 
@@ -148,6 +152,14 @@ copy of the same key. It is accepted only because the key is low-impact (a TMDB
 read token, unrelated to this service's own data) and trivially rotated from
 TMDB's side. Don't reuse this pattern for anything higher-stakes than that.
 
+The **Seerr webhook secret** (`config.seerr_webhook_secret`) is a third kind
+again: stored in plaintext *and* shown on the Configuration page, because an
+admin who cannot read it cannot paste it into Seerr. Holding it buys exactly one
+thing — the ability to post a fabricated "someone requested this" to
+`POST /webhooks/seerr`, which writes an activity row and sends a notification.
+It reads nothing, changes no configuration, and files nothing with Seerr. Rotate
+it from the same button that issued it; nothing else has to be torn down.
+
 Both assume the port/proxy guidance above (`CPLUS_FORWARDED_ALLOW_IPS`, not
 publishing the app's port directly) is already in place — that's what keeps
 the admin UI itself from being the softer target.
@@ -191,6 +203,7 @@ src/cplus_service/
   quality/samples.py    the fixed release cast the profile preview ranks
   prowlarr/client.py    async Prowlarr API wrapper
   seerr/client.py       async Seerr API wrapper (auth + allowlisted request ops)
+  seerr/webhook.py      reading Seerr's outbound webhook, forgivingly
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
   auth/sessions.py      webui browser sessions
   auth/identity.py      Seerr user -> local user upsert
@@ -198,7 +211,7 @@ src/cplus_service/
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
   api/routes/           register, home, titles, tmdb_actions, grab, manager,
-                        request, seerr
+                        request, seerr, webhooks
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
   plex/client.py        plex.tv PIN flow — webui sign-in only
@@ -436,7 +449,7 @@ stage 2; they exist now so the migration history has one starting point.
 
 | Table | Contents |
 |---|---|
-| `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`, `plex_admin_token`, `plex_server_base_url`, `plex_server_client_identifier`, `plex_server_name`, `default_libraries`, and the install-wide Home default (`home_shelves`, `home_carousel`, `home_carousel_enabled`, `home_carousel_include_on_deck`, `home_top_shelf`, `home_modified_at`). Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
+| `config` | singleton row (CHECK-enforced): `seerr_url_fingerprint`, `prowlarr_url`, `prowlarr_api_key`, `preferred_indexer_id`, `tmdb_bearer_token`, `seerr_webhook_secret`, `plex_client_identifier`, `notifications_enabled`, `notification_relay_instance_id`, `notification_relay_api_key`, `plex_admin_token`, `plex_server_base_url`, `plex_server_client_identifier`, `plex_server_name`, `default_libraries`, and the install-wide Home default (`home_shelves`, `home_carousel`, `home_carousel_enabled`, `home_carousel_include_on_deck`, `home_top_shelf`, `home_modified_at`). Neither the Seerr URL nor the relay URL is here — those are `CPLUS_SEERR_URL` and `CPLUS_RELAY_URL`; the Seerr fingerprint exists only to detect a change across restarts |
 | `users` | `seerr_user_id` (unique), `plex_username` |
 | `user_home_settings` | one user's own Home — the five content fields plus one `home_modified_at` for the whole document. Absent until they fork; see below |
 | `quality_profiles` | `name`, `rules` (ordered JSON list), `choices` (ordered JSON list, empty for profiles predating them) |
@@ -444,6 +457,7 @@ stage 2; they exist now so the migration history has one starting point.
 | `permissions` | user ↔ action, composite PK |
 | `grabs` | user, action, `via_manager`, release title/guid/indexer/size, `created_at` |
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
+| `seerr_request_notices` | Seerr request ids this service has already logged and pushed about, written by `POST /request` and by the webhook. One integer each; it is what stops an in-app request being announced twice |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
 | `admin_sessions` | opaque browser session tokens for the web UI |
 
@@ -671,6 +685,17 @@ handed an `action_id`.
 Because the grab body is self-contained, the server keeps **no state between
 a search/actions call and a grab** — a restart in between is harmless.
 
+### Inbound webhook (Seerr)
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `POST /webhooks/seerr` | shared secret | Seerr telling us a request was filed in its own UI. 503 until an admin generates a secret; 401 on a wrong one; 200 with `{"handled": false}` for the event types it ignores |
+
+The only endpoint here that is not called by one of this service's own clients,
+and the only one authenticated by something other than a Plex token or a browser
+session — Seerr's webhook has exactly one credential, an `Authorization` header
+whose value the admin types in. See [Requests filed in Seerr](#requests-filed-in-seerr).
+
 ### Admin
 
 Session-gated, ADMIN-bit-gated, all server-rendered:
@@ -681,6 +706,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow. Ungated, and so takes no parameters at all |
 | `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
+| `POST /admin/config/seerr-webhook`, `/seerr-webhook/disable` | Issue (or rotate) the secret Seerr presents at `POST /webhooks/seerr`, and forget it again. Generated here, never typed — the page shows it because the next step is pasting it into Seerr |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
 | `POST /admin/quality-profiles`, `/rows`, `/{id}/delete` | Save, builder rebuild, delete |
@@ -1060,6 +1086,119 @@ instead — see
 
 ---
 
+## Requests filed in Seerr
+
+`POST /request` covers one door: a user presses Request in the app, this service
+files it with Seerr, writes an `activity_log` row and pushes to the admin.
+Anyone who instead opens Seerr in a browser and requests there came through the
+other door, and used to be invisible — no row, no notification, nothing saying
+something was waiting for approval.
+
+`POST /webhooks/seerr` is that other door. Seerr already notifies webhook
+subscribers about every request; this accepts those posts and does exactly what
+the in-app path does with them.
+
+### Setting it up
+
+Configuration tab → **Requests made in Seerr** → *Set up the Seerr webhook*.
+That generates a secret and shows it alongside the URL to post to. In Seerr:
+**Settings → Notifications → Webhook**, paste both, leave the JSON payload at
+its default, and tick **Request Pending Approval** and **Request Automatically
+Approved**.
+
+The URL the page prints is the address the *admin* reached the console on, which
+is a guess at the one Seerr can resolve and is labelled as such — a reverse
+proxy or a container network makes them different, and nothing this process can
+see would know that.
+
+Pressing the button again rotates the secret, which refuses deliveries until the
+new value is pasted over the old one in Seerr. *Turn off* forgets it, and
+forgetting it **is** the off switch: with nothing stored there is no value a
+caller could present, so the endpoint refuses everyone. There is deliberately no
+unauthenticated mode — all the endpoint does is believe what it is told about
+who requested what.
+
+### What it accepts
+
+`MEDIA_PENDING` and `MEDIA_AUTO_APPROVED` are acted on: both are somebody asking
+for something, and the difference between them is only whether there is anything
+left for an admin to do.
+
+Every other notification type — approved, available, declined, issues — gets
+`200 {"handled": false}`. Answering an error would have Seerr record failed
+deliveries and retry events that are being ignored on purpose.
+
+Seerr's own **Test** button is acknowledged and nothing more. Reaching that
+branch is the entire result it can report: the URL resolves and the secret
+matches, which is what an admin pressing Test is asking.
+
+### Reading the payload
+
+Seerr's webhook body is a **user-editable JSON template**, so
+`cplus_service.seerr.webhook` is forgiving by design. Three things about it are
+not obvious:
+
+* Every value arrives as a **string**, ids included — the template is
+  substituted into JSON text, so `"request_id": "42"` is the normal case.
+* `{{media}}`/`{{request}}` are markers Seerr rewrites into real keys when the
+  event has such an object and drops entirely when it does not. A test
+  notification genuinely has no `request` object.
+* A variable Seerr does not recognise is left in the body verbatim, braces and
+  all, so `{{requestedBy_username}}` is a value to reject rather than a name.
+
+Anything missing reads as unknown rather than as an error. A notification that
+says slightly less beats a 400 that makes Seerr retry and then give up.
+
+### Whose request it is
+
+**The payload carries no Seerr user id.** Seerr's template vocabulary offers a
+username, an email and an avatar, and this service cannot go and ask who that is
+— it holds no Seerr credential of its own, which is the whole point of
+[the `/seerr/*` passthrough](#the-seerr-passthrough).
+
+So the requester is matched by name: both names Seerr sends are compared,
+case-insensitively, against `users.plex_username`, which is itself whichever of
+Seerr's several names was best at that user's sign-in. A miss is ordinary rather
+than exceptional — someone who has never opened the app has no row here at all —
+and it is not fatal:
+
+* the `activity_log` row is written with a null `user_id` and carries
+  `requested_by`, so the activity page can still name them;
+* the notification says *Requested by <whoever Seerr called them>* either way;
+* nothing is created to paper over the miss. A `users` row without a Seerr user
+  id could never be matched to the same person again when they do sign in.
+
+The one thing a miss costs is the "never notify the person who caused it" rule,
+which needs a local id to exclude. An admin requesting in Seerr's own UI — the
+ordinary case — is matched and so is not told about their own request.
+
+### Announced exactly once
+
+A request filed through `POST /request` **comes back at us as a webhook**. Seerr
+has no idea the request it just accepted arrived through this service; it
+notifies its subscribers either way. Left alone, every in-app request would push
+twice and appear in the log twice.
+
+`seerr_request_notices` is what prevents that: one row per request id this
+service has already announced, written by both paths. It also makes a
+redelivered webhook — Seerr retrying, or an admin pressing Test twice — inert.
+
+It cannot close one gap, and does not pretend to: a webhook that overtakes the
+`POST /request` that caused it sees no row yet, because the row is written as
+that request commits. The race needs Seerr to be faster than our own commit, and
+costs one duplicate notification, which is not worth a lock to avoid.
+
+### Logging and notifying are separate promises
+
+Only the notification needs push switched on. With notifications off, a request
+filed in Seerr is still logged — the delivery rules live in
+`notify.service.deliver` and stop there, exactly as they do for an in-app
+request. Which is also why the webhook's setup lives on the Configuration tab
+rather than the Notifications one: that page hides everything below its master
+switch, and this works whether or not that switch is on.
+
+---
+
 ## Admin web UI
 
 Jinja2 + HTMX, server-rendered, no build step and no npm. Both third-party
@@ -1194,7 +1333,10 @@ Prowlarr grab, so filing one (`POST /request`) and deleting one's own
 "request"`, with `detail.kind == "request"` / `"request_delete"`. A request gets
 no `grabs` row — nothing reached Prowlarr. Before this type existed, a filed
 request was stored as `grab` with `detail.kind == "request"`; the backfill
-migration rewrites those rows.
+migration rewrites those rows. A request filed in Seerr's own UI and relayed
+back by `POST /webhooks/seerr` is that same type and kind, with
+`detail.source == "seerr"` saying where it came from — see
+[Requests filed in Seerr](#requests-filed-in-seerr).
 
 **Admin operations are their own event type.** The action-free grab
 (`POST /manager/grab`), the unrestricted manager search (`GET /manager/search`),

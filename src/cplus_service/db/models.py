@@ -141,6 +141,22 @@ class Config(Base):
     #: replaced by enrolling again rather than looked up.
     notification_relay_api_key: Mapped[str | None] = mapped_column(String(256))
 
+    #: The shared secret Seerr presents when it posts to ``/webhooks/seerr``.
+    #:
+    #: Generated here, never typed by anyone: the admin presses a button on the
+    #: Configuration tab and pastes the result into Seerr's own "Authorization
+    #: Header" field. ``None`` means the webhook is switched off, and the
+    #: endpoint refuses every caller — there is deliberately no "accept
+    #: unauthenticated posts" state, since all the endpoint does is believe
+    #: what it is told about who requested what.
+    #:
+    #: Unlike every other credential in this row it **is** rendered back into
+    #: the page, because an admin who cannot read it cannot configure Seerr with
+    #: it. That is safe in a way a Prowlarr key is not: it authenticates one
+    #: direction of one endpoint on this service, grants nothing anywhere else,
+    #: and is replaced by pressing the button again.
+    seerr_webhook_secret: Mapped[str | None] = mapped_column(String(128))
+
     #: The admin's own Plex auth token, kept from their most recent sign-in.
     #:
     #: Every other admin-facing use of Plex in this service resolves through
@@ -580,6 +596,39 @@ class ApnsDevice(Base):
     device_name: Mapped[str | None] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class SeerrRequestNotice(Base):
+    """A Seerr request this service has already logged and pushed about.
+
+    Exists for exactly one reason: **a request filed through ``POST /request``
+    comes back at us as a webhook.** Seerr does not know, and should not have to
+    know, that the request it just accepted arrived through this service — it
+    notifies its webhook subscribers either way. Without a record of what we
+    have already announced, every in-app request would land on the admin's phone
+    twice and appear in the activity log twice.
+
+    Written by both paths, keyed by Seerr's own request id, which is the only
+    identifier the two sides share. ``POST /request`` writes one because it just
+    filed the request itself; the webhook writes one so a redelivery (Seerr
+    retries, or an admin pressing Test twice) is inert.
+
+    A row means "announced", not "exists" — it is never read as a request
+    listing, which is what ``GET /seerr/requests`` is for, and nothing cleans it
+    up because one integer per request is not a table that grows into a problem.
+
+    The one gap it cannot close is a webhook that overtakes the ``POST
+    /request`` that caused it: the row is written as that request commits, so a
+    delivery arriving in the microseconds before sees nothing and announces the
+    request a second time. That costs one duplicate notification in a race that
+    needs Seerr to be faster than our own commit, which is not worth a
+    distributed lock to avoid.
+    """
+
+    __tablename__ = "seerr_request_notices"
+
+    seerr_request_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class ActivityLog(Base):

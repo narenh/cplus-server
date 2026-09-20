@@ -401,6 +401,78 @@ async def test_the_config_page_shows_the_seerr_host_read_only(
     assert 'name="seerr_url"' not in response.text
 
 
+async def test_the_seerr_webhook_starts_off(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    await signed_in(client, db)
+
+    response = await client.get("/admin/config")
+
+    assert "/webhooks/seerr" in response.text
+    assert "Set up the Seerr webhook" in response.text
+
+
+async def test_generating_a_webhook_secret_switches_the_endpoint_on(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """The secret is shown, unlike every other credential on this page.
+
+    It has to be: the admin's next step is pasting it into Seerr, and a value
+    they cannot read is a value they cannot configure anything with.
+    """
+    await signed_in(client, db)
+
+    response = await client.post("/admin/config/seerr-webhook")
+
+    assert response.status_code == 200
+    await db.refresh(configured)
+    secret = configured.seerr_webhook_secret
+    assert secret
+    assert secret in response.text
+    assert "Authorization Header" in response.text
+
+
+async def test_generating_again_replaces_the_secret(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    await signed_in(client, db)
+
+    await client.post("/admin/config/seerr-webhook")
+    await db.refresh(configured)
+    first = configured.seerr_webhook_secret
+
+    await client.post("/admin/config/seerr-webhook")
+    await db.refresh(configured)
+
+    assert configured.seerr_webhook_secret != first
+
+
+async def test_disabling_the_webhook_forgets_the_secret(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    """Forgetting it *is* the off switch — with none stored, nothing can present one."""
+    configured.seerr_webhook_secret = "a-secret"
+    await db.commit()
+    await signed_in(client, db)
+
+    response = await client.post("/admin/config/seerr-webhook/disable")
+
+    assert response.status_code == 200
+    assert "a-secret" not in response.text
+    await db.refresh(configured)
+    assert configured.seerr_webhook_secret is None
+
+
+@pytest.mark.parametrize(
+    "path", ["/admin/config/seerr-webhook", "/admin/config/seerr-webhook/disable"]
+)
+async def test_the_webhook_controls_need_an_admin_session(
+    client: httpx.AsyncClient, configured: Config, path: str
+) -> None:
+    response = await client.post(path, follow_redirects=False)
+    assert response.status_code == 303
+
+
 async def test_there_is_no_endpoint_that_changes_the_seerr_host(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config
 ) -> None:
@@ -2077,6 +2149,41 @@ async def test_activity_log_renders_searches_grabs_and_requests(
     assert '<span class="badge">admin</span>' not in response.text
     assert response.text.count('<span class="badge by-user">') == 3
     assert "the office" in response.text
+
+
+async def test_activity_log_names_a_request_that_came_from_seerr(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    """The one request row whose User column can be empty and still say who.
+
+    The webhook payload carries a username but no user id, so a requester with
+    no local row is logged unattributed — and the name Seerr sent is what keeps
+    the row readable.
+    """
+    await signed_in(client, db)
+    db.add(
+        ActivityLog(
+            user_id=None,
+            event_type=EventType.REQUEST,
+            detail={
+                "kind": "request",
+                "source": "seerr",
+                "tmdb_id": 603,
+                "type": "movie",
+                "requested_by": "Robin Example",
+                "unmatched_user": True,
+                "success": True,
+            },
+        )
+    )
+    await db.commit()
+
+    response = await client.get("/admin/activity-log")
+
+    assert response.status_code == 200
+    assert "tmdb 603" in response.text
+    assert "via Seerr" in response.text
+    assert "Robin Example" in response.text
 
 
 async def test_the_root_path_goes_to_the_admin_ui(client: httpx.AsyncClient) -> None:

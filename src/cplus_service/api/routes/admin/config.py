@@ -9,11 +9,13 @@ the Prowlarr connection changes, with no glue JavaScript.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from ....db.models import Config
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
 from ....settings import SEERR_URL_ENV, seerr_url
@@ -27,6 +29,16 @@ router = APIRouter(tags=["admin"])
 
 Format = Annotated[Literal["json", "html"], Query()]
 
+#: Where Seerr posts. Named here rather than written out in the template, so
+#: the path an admin is told to paste into Seerr and the path the router
+#: actually serves cannot drift apart without this line being wrong.
+SEERR_WEBHOOK_PATH = "/webhooks/seerr"
+
+#: How many bytes of entropy a generated webhook secret carries. Comfortably
+#: more than the 128 bits that would do, because nobody has to type it: it is
+#: copied out of this page and pasted into Seerr once.
+SEERR_WEBHOOK_SECRET_BYTES = 32
+
 
 async def _prowlarr(state: StateDep, db: DbDep) -> ProwlarrClient | None:
     """A client for the configured Prowlarr, or ``None`` if it is not set up."""
@@ -36,6 +48,23 @@ async def _prowlarr(state: StateDep, db: DbDep) -> ProwlarrClient | None:
     return ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
 
 
+def _webhook_context(request: Request, config: Config) -> dict[str, object]:
+    """What the Seerr-webhook section renders from.
+
+    The URL is assembled from the request the admin is making *right now*,
+    which is the only address this process has any evidence about. It is a
+    suggestion and the page says so: an admin reaching the console over a LAN
+    address while Seerr sees it through a reverse proxy has to substitute the
+    one Seerr can actually resolve, and no amount of guessing here would know
+    that.
+    """
+    return {
+        "config": config,
+        "webhook_url": str(request.base_url).rstrip("/") + SEERR_WEBHOOK_PATH,
+        "webhook_path": SEERR_WEBHOOK_PATH,
+    }
+
+
 @router.get("/config", response_class=HTMLResponse)
 async def config_page(request: Request, db: DbDep, admin: AdminPageDep) -> Response:
     config = await get_config(db)
@@ -43,7 +72,7 @@ async def config_page(request: Request, db: DbDep, admin: AdminPageDep) -> Respo
         request,
         "config.html",
         {
-            "config": config,
+            **_webhook_context(request, config),
             "admin": admin,
             # Straight from the environment, never from the database — the page
             # shows the one live answer rather than a copy that could drift.
@@ -91,6 +120,54 @@ async def save_config(
         request,
         "partials/saved.html",
         {"message": "Configuration saved."},
+    )
+
+
+@router.post("/config/seerr-webhook", response_class=HTMLResponse)
+async def generate_seerr_webhook_secret(
+    request: Request, db: DbDep, admin: AdminPageDep
+) -> Response:
+    """Issue a new secret for ``POST /webhooks/seerr``, replacing any it had.
+
+    One button for both "switch this on" and "rotate it", because they are the
+    same operation and an admin who wants a fresh secret wants exactly what an
+    admin switching it on wants. Rotating breaks the existing Seerr
+    configuration until the new value is pasted over the old one, which is the
+    point of rotating and is said on the page.
+
+    Generated rather than typed: there is no second party to agree a value with
+    — Seerr accepts whatever string it is given — so a human-chosen one would
+    only ever be weaker.
+    """
+    config = await get_config(db)
+    config.seerr_webhook_secret = secrets.token_urlsafe(SEERR_WEBHOOK_SECRET_BYTES)
+    await db.flush()
+
+    logger.info("issued a new Seerr webhook secret")
+    return templates.TemplateResponse(
+        request, "partials/seerr_webhook.html", _webhook_context(request, config)
+    )
+
+
+@router.post("/config/seerr-webhook/disable", response_class=HTMLResponse)
+async def disable_seerr_webhook(
+    request: Request, db: DbDep, admin: AdminPageDep
+) -> Response:
+    """Forget the secret, which is what switches the endpoint off.
+
+    Nothing else has to be torn down: with no secret stored there is no value
+    any caller could present, so the endpoint refuses everyone. Seerr goes on
+    posting until someone turns its webhook off there as well, and gets a 503
+    for its trouble — harmless, and visible in Seerr's own logs, which is the
+    right place for an admin to notice they only did half of it.
+    """
+    config = await get_config(db)
+    config.seerr_webhook_secret = None
+    await db.flush()
+
+    logger.info("switched the Seerr webhook off")
+    return templates.TemplateResponse(
+        request, "partials/seerr_webhook.html", _webhook_context(request, config)
     )
 
 

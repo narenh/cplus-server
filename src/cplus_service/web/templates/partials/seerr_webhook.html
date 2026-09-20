@@ -1,0 +1,77 @@
+{# The Seerr webhook, whole.
+
+   Returned entire by both POST /admin/config/seerr-webhook and its /disable
+   sibling, so the secret, the buttons and the instructions can never disagree
+   about whether the webhook is on.
+
+   No form element and no input: the buttons post on their own (type="button"
+   with hx-post), because this section sits inside the Configuration form and a
+   nested form is not a thing HTML has. That also keeps it out of
+   dirty-save.js's reckoning — there is no field here to be dirty, only two
+   values to copy out. #}
+<section id="seerr-webhook">
+  <h2>Requests made in Seerr</h2>
+
+  {% if config.seerr_webhook_secret %}
+    <p class="hint">
+      On. In Seerr, open <strong>Settings → Notifications → Webhook</strong>,
+      switch it on, and fill in these two fields. Leave the JSON payload as
+      Seerr's default — it already carries everything this reads.
+    </p>
+
+    <p class="field-label">Webhook URL</p>
+    <p class="readonly-value">{{ webhook_url }}</p>
+    <p class="hint">
+      This is the address <em>you</em> reached this page on. If Seerr sees this
+      service under a different name — a reverse proxy, a container network, a
+      LAN address — use the one Seerr can resolve, keeping
+      <code>{{ webhook_path }}</code> on the end.
+    </p>
+
+    <p class="field-label">Authorization Header</p>
+    <p class="readonly-value">{{ config.seerr_webhook_secret }}</p>
+    <p class="hint">
+      Paste this into Seerr's <strong>Authorization Header</strong> field
+      verbatim. It is the whole of what proves a post really came from your
+      Seerr, so treat it like a password — though note that it authenticates
+      that one endpoint and nothing else, and that endpoint can do nothing but
+      log a request and notify you about it.
+    </p>
+
+    <p class="hint">
+      Under <strong>Notification Types</strong>, tick <strong>Request Pending
+      Approval</strong> and <strong>Request Automatically Approved</strong>.
+      Anything else you tick is accepted and ignored, so Seerr will not record
+      a failed delivery for it.
+    </p>
+
+    <div class="row">
+      <button type="button" class="secondary"
+              hx-post="/admin/config/seerr-webhook"
+              hx-target="#seerr-webhook"
+              hx-swap="outerHTML"
+              hx-confirm="Issue a new secret? Seerr keeps sending the old one until you paste the new value over it there, and those deliveries are refused in the meantime.">Generate a new secret</button>
+      <button type="button" class="destructive secondary"
+              hx-post="/admin/config/seerr-webhook/disable"
+              hx-target="#seerr-webhook"
+              hx-swap="outerHTML"
+              hx-confirm="Turn the webhook off? Requests filed in Seerr stop being logged and stop reaching your phone.">Turn off</button>
+    </div>
+  {% else %}
+    <p class="readonly-value unset">Off — nothing posted to {{ webhook_path }} is accepted.</p>
+    <p class="hint">
+      Requests filed in the app are logged and pushed to you already. This is
+      the other door: someone opening Seerr in a browser and requesting there.
+      Switching it on generates a secret to paste into Seerr's webhook
+      settings, and from then on those requests land in your activity log and
+      on your phone like any other.
+    </p>
+
+    <div class="row">
+      <button type="button"
+              hx-post="/admin/config/seerr-webhook"
+              hx-target="#seerr-webhook"
+              hx-swap="outerHTML">Set up the Seerr webhook</button>
+    </div>
+  {% endif %}
+</section>

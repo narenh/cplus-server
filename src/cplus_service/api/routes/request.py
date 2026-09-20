@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from ...auth.identity import authenticate_plex_token
 from ...bootstrap import REQUEST_ACTION_NAME, get_request_action
-from ...db.models import ActivityLog, EventType, Permission
+from ...db.models import ActivityLog, EventType, Permission, SeerrRequestNotice
 from ...notify.messages import MediaSummary, user_requested
 from ...seerr.client import SeerrAuthError, SeerrError
 from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
@@ -111,6 +111,14 @@ async def create_request(
                 success=False, message=exc.detail or str(exc)
             ).model_dump(),
         )
+
+    # Seerr notifies its webhook subscribers about this request too, including
+    # us — it has no idea the request it just accepted came through this
+    # service. Claiming it here is what stops ``POST /webhooks/seerr`` logging
+    # and pushing the same request a second time; see
+    # :class:`~cplus_service.db.models.SeerrRequestNotice`.
+    if result.id is not None:
+        db.add(SeerrRequestNotice(seerr_request_id=result.id))
 
     db.add(
         ActivityLog(

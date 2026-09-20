@@ -39,6 +39,15 @@
         {% if detail.get("kind") == "request" %}
           tmdb {{ detail.get("tmdb_id", "?") }} · {{ detail.get("type", "?") }}
           {% if detail.get("seasons") %}<span class="muted">seasons {{ detail.seasons|join(", ") }}</span>{% endif %}
+          {# Filed in Seerr's own UI rather than through an action here, via the
+             webhook. Worth saying on the row: it is the one kind of request
+             this service did not itself file, and the only one whose User
+             column can read "—" while still naming who asked — the payload
+             carries a username but no id to match a local row on. #}
+          {% if detail.get("source") == "seerr" %}
+            <span class="muted">· via Seerr{% if detail.get("unmatched_user") and detail.get("requested_by") %}
+              as {{ detail.requested_by }}{% endif %}</span>
+          {% endif %}
         {% elif (detail.get("kind") or "").startswith("request_") %}
           request {{ detail.get("seerr_request_id", "?") }}
         {% elif detail.get("kind") == "search" %}

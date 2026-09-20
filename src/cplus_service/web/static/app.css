@@ -333,6 +333,12 @@ form.card, .card form { max-width: 760px; }
 }
 .readonly-value.unset { font-family: inherit; color: var(--muted); font-style: italic; }
 
+/* Names a value the page shows but has no field for — the Seerr webhook's URL
+   and secret, which are copied out rather than typed in. Set like a <label>
+   because it does a label's job; not one, because there is no control under it
+   to label. */
+.field-label { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
+
 /* Sign-in ----------------------------------------------------------------- */
 
 /* The one page with no header and nothing to scan, so it gets centred as a

@@ -67,12 +67,12 @@
     <span id="save-result" class="inline-result"></span>
   </div>
 
-  {# Inside the form element, below its Save, but holding no field — this is
-     the one thing on the page that cannot be edited, and there is no endpoint
-     that could. It sits in the same card as Prowlarr and TMDB because it is
+  {# Inside the form element, below its Save, but holding no field of its own —
+     everything below the rule is either unchangeable or writes through on its
+     own button. It sits in the same card as Prowlarr and TMDB because Seerr is
      the third of the three services this install talks to, and a card of its
      own said it was a separate subject; below the Save button because that
-     button has nothing to do with it. The rule above it is what says so. #}
+     button has nothing to do with any of it. The rule is what says so. #}
   <hr class="card-divider">
   <section class="readonly-section">
     <h2>Seerr</h2>
@@ -91,6 +91,13 @@
       against the old instance.
     </p>
   </section>
+
+  {# The one part of the Seerr relationship this page *can* change: whether
+     Seerr is allowed to tell us about requests filed in its own UI. Kept next
+     to the host it concerns rather than on the Notifications tab, which hides
+     everything below its master switch — the webhook logs requests whether or
+     not you have push turned on, so its setup cannot live behind that. #}
+  {% include "partials/seerr_webhook.html" %}
 </form>
 {% endblock %}
 
