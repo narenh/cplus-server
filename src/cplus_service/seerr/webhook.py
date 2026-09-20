@@ -29,6 +29,16 @@ A variable Seerr does not recognise is left in the body verbatim, braces and
 all, so ``{{requestedBy_username}}`` is a value this has to reject rather than
 treat as somebody's name.
 
+Five fields are read, and the stock template carries all of them:
+``notification_type``, ``request_id``, ``requestedBy_username`` /
+``requestedBy_email``, ``subject``, and ``media.tmdbId`` / ``media.media_type``.
+Anything else in the body is ignored, so a template that has been customised
+for something else — an ntfy bridge, say — only has to *keep* these rather than
+give up what it already carries. Losing either of the first two is the one kind
+of omission that does not degrade gracefully, and the handler logs a warning
+naming it: without ``notification_type`` nothing is ever acted on, and without
+``request_id`` a request cannot be told apart from a redelivery of itself.
+
 **There is no user id in any of it.** Seerr's template vocabulary offers a
 username, an email and an avatar, and this service cannot ask Seerr who that is
 — it holds no Seerr credential of its own (see :mod:`cplus_service.api.routes.seerr`).

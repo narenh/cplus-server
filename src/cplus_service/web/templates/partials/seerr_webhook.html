@@ -18,6 +18,18 @@
       switch it on, and fill in these two fields. Leave the JSON payload as
       Seerr's default — it already carries everything this reads.
     </p>
+    {# Said here rather than only in the README, because the admin most likely
+       to have a customised payload is the one reading this page with Seerr
+       open in the next tab. Extra keys are ignored, so the ask is to keep
+       these, not to go back to the default. #}
+    <p class="hint">
+      If you have customised that payload for something else, it only needs to
+      keep <code>notification_type</code>, <code>request_id</code>,
+      <code>requestedBy_username</code>, <code>subject</code> and
+      <code>media_tmdbid</code>. Anything else in it is ignored. Without the
+      first two, deliveries are accepted and quietly do the wrong thing — the
+      server log says which is missing.
+    </p>
 
     <p class="field-label">Webhook URL</p>
     <p class="readonly-value">{{ webhook_url }}</p>

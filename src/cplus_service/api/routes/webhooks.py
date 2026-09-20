@@ -81,6 +81,19 @@ async def seerr_webhook(
     payload = await _body(request)
     event = parse_event(payload)
 
+    if not event.notification_type:
+        # The one payload mistake that silences the whole feature. With nothing
+        # to dispatch on, every delivery falls through as ignored and Seerr goes
+        # on reporting success — so an admin whose template lost this field sees
+        # a webhook that works perfectly and notifications that never arrive.
+        # Nothing else would ever say so; this line is the only breadcrumb.
+        logger.warning(
+            "a Seerr webhook arrived carrying no notification_type, so nothing"
+            " in it can be acted on. If you have customised Seerr's JSON"
+            " payload, it has to keep notification_type."
+        )
+        return {"handled": False, "reason": "no notification_type"}
+
     if event.is_test:
         # Seerr's own Test button. Reaching this line is the whole result: the
         # URL resolves, the secret matches, and the admin can stop guessing
@@ -89,6 +102,9 @@ async def seerr_webhook(
         return {"handled": False, "reason": "test"}
 
     if not event.is_request_filed:
+        # Debug rather than a warning: an admin is free to tick every type in
+        # Seerr, and the ones this does not act on are ignored by design.
+        logger.debug("ignoring a Seerr %s webhook", event.notification_type)
         return {"handled": False, "reason": "ignored", "event": event.notification_type}
 
     # Everything below this line writes, so the duplicate check comes first.
@@ -98,6 +114,17 @@ async def seerr_webhook(
         if await db.get(SeerrRequestNotice, event.request_id) is not None:
             return {"handled": False, "reason": "already known"}
         db.add(SeerrRequestNotice(seerr_request_id=event.request_id))
+    else:
+        # The other payload mistake worth saying out loud. Without an id there
+        # is nothing to claim the request by, so this one is announced on every
+        # delivery: the ``POST /request`` echo and each of Seerr's retries.
+        logger.warning(
+            "a Seerr %s webhook carried no request_id, so it cannot be told"
+            " apart from a redelivery and may be announced more than once. If"
+            " you have customised Seerr's JSON payload, it has to keep"
+            " request_id.",
+            event.notification_type,
+        )
 
     user = await _match_user(db, event)
     db.add(

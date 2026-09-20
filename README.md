@@ -1149,6 +1149,61 @@ not obvious:
 Anything missing reads as unknown rather than as an error. A notification that
 says slightly less beats a 400 that makes Seerr retry and then give up.
 
+### The payload it needs
+
+Seerr's stock template already carries everything, so the setup instructions say
+to leave it alone. If yours is already customised for something else — an ntfy
+bridge, a Discord relay, a shell script — you do not have to give that up.
+**Extra keys are ignored**, so it is enough to keep (or merge in) these five:
+
+```json
+{
+  "notification_type": "{{notification_type}}",
+  "subject": "{{subject}}",
+  "{{media}}": {
+    "media_type": "{{media_type}}",
+    "tmdbId": "{{media_tmdbid}}"
+  },
+  "{{request}}": {
+    "request_id": "{{request_id}}",
+    "requestedBy_username": "{{requestedBy_username}}",
+    "requestedBy_email": "{{requestedBy_email}}"
+  }
+}
+```
+
+`{{media}}` and `{{request}}` as *keys* are Seerr's own markers, not a typo:
+it rewrites them to `media` and `request` when the event has such an object, and
+drops the entry entirely when it does not — which is why a test notification has
+no `request` object at all rather than an empty one.
+
+A flattened payload works just as well, which is usually the easier thing to
+merge into a template built for something else:
+
+```json
+{
+  "notification_type": "{{notification_type}}",
+  "subject": "{{subject}}",
+  "media_type": "{{media_type}}",
+  "media_tmdbid": "{{media_tmdbid}}",
+  "request_id": "{{request_id}}",
+  "requestedBy_username": "{{requestedBy_username}}",
+  "requestedBy_email": "{{requestedBy_email}}"
+}
+```
+
+Dropping any of these degrades gracefully except the first two, and those two
+log a warning naming themselves, because neither failure is visible from
+anywhere else:
+
+| Missing | Effect |
+|---|---|
+| `notification_type` | **Nothing is ever handled.** Every delivery falls through as ignored while Seerr reports success. Logged as a warning |
+| `request_id` | **Dedup stops working**, so an in-app request is announced twice and every Seerr retry announces again. Logged as a warning |
+| `subject` | Title falls back to `TMDB 603`, then to `A new request` |
+| `requestedBy_username` / `_email` | Subtitle reads *Requested by a Seerr user*, and the requester cannot be matched to a local user |
+| `media_tmdbid` / `media_type` | The notification carries no ids for a client to deep-link on |
+
 ### Whose request it is
 
 **The payload carries no Seerr user id.** Seerr's template vocabulary offers a

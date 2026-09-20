@@ -160,23 +160,57 @@ def test_the_other_notification_types_are_not_requests(notification_type: str) -
     assert not event.is_test
 
 
-def test_a_flattened_payload_still_reads() -> None:
-    """An admin who edited the template out of its nested shape."""
-    event = parse_event(
-        {
-            "notification_type": "MEDIA_PENDING",
-            "subject": "The End of Oak Street (2026)",
-            "request_id": "99",
-            "requestedBy_username": "Robin Example",
-            "media_tmdbid": "603",
-            "media_type": "movie",
-        }
-    )
+#: The minimum payload the README tells an admin with a customised template to
+#: keep, substituted. Kept here so the documented template cannot quietly stop
+#: being a working one.
+DOCUMENTED_MINIMUM = {
+    "notification_type": "MEDIA_PENDING",
+    "subject": "The End of Oak Street (2026)",
+    "media": {"media_type": "movie", "tmdbId": "603"},
+    "request": {
+        "request_id": "99",
+        "requestedBy_username": "Robin Example",
+        "requestedBy_email": "robin@example.com",
+    },
+}
 
+#: The same five fields flattened, which the README offers as the easier thing
+#: to merge into a template built for something else.
+DOCUMENTED_FLAT = {
+    "notification_type": "MEDIA_PENDING",
+    "subject": "The End of Oak Street (2026)",
+    "media_type": "movie",
+    "media_tmdbid": "603",
+    "request_id": "99",
+    "requestedBy_username": "Robin Example",
+    "requestedBy_email": "robin@example.com",
+}
+
+
+@pytest.mark.parametrize(
+    "payload", [DOCUMENTED_MINIMUM, DOCUMENTED_FLAT], ids=["nested", "flat"]
+)
+def test_the_documented_minimum_payload_reads(payload: dict[str, Any]) -> None:
+    """Both shapes the README prints, read the same way."""
+    event = parse_event(payload)
+
+    assert event.is_request_filed
     assert event.request_id == 99
     assert event.tmdb_id == 603
     assert event.username == "Robin Example"
+    assert event.email == "robin@example.com"
     assert event.media_type == "movie"
+    assert event.subject == "The End of Oak Street (2026)"
+
+
+def test_keys_the_template_carries_for_something_else_are_ignored() -> None:
+    """An ntfy- or Discord-shaped template only has to *keep* what this reads."""
+    event = parse_event(
+        {**DOCUMENTED_MINIMUM, "topic": "media", "priority": 4, "tags": ["clapper"]}
+    )
+
+    assert event.is_request_filed
+    assert event.request_id == 99
 
 
 def test_an_unsubstituted_variable_is_not_a_username() -> None:
@@ -493,6 +527,84 @@ async def test_a_request_filed_through_the_app_is_not_announced_twice(
     assert len(relay.calls) == 1
     assert len(await request_rows(db)) == 1
     assert await db.get(SeerrRequestNotice, 99) is not None
+
+
+@respx.mock
+async def test_a_payload_with_no_notification_type_says_so_in_the_log(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one template mistake nothing else would reveal.
+
+    Every delivery falls through as ignored while Seerr reports success, so an
+    admin sees a working webhook and no notifications. This log line is the
+    only thing standing between that and an afternoon.
+    """
+    relay = mock_relay()
+    await an_admin_with_a_device(db, configured)
+    await webhook_enabled(db, configured)
+
+    with caplog.at_level("WARNING"):
+        response = await client.post(
+            WEBHOOK, headers=auth(), json=webhook_payload(notification_type="")
+        )
+
+    assert response.json() == {"handled": False, "reason": "no notification_type"}
+    assert not relay.called
+    assert await request_rows(db) == []
+    assert "notification_type" in caplog.text
+
+
+@respx.mock
+async def test_a_request_with_no_id_is_announced_but_warned_about(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Announced, because the admin still needs to know someone asked.
+
+    Warned about, because with no id to claim it by there is nothing to tell
+    this delivery apart from a redelivery of itself — so it is announced again
+    every time Seerr retries.
+    """
+    relay = mock_relay()
+    await an_admin_with_a_device(db, configured)
+    await webhook_enabled(db, configured)
+
+    with caplog.at_level("WARNING"):
+        first = await client.post(
+            WEBHOOK, headers=auth(), json=webhook_payload(request_id=None)
+        )
+        await client.post(WEBHOOK, headers=auth(), json=webhook_payload(request_id=None))
+
+    assert first.json() == {"handled": True}
+    assert "request_id" in caplog.text
+    # The duplicate this warns about, demonstrated rather than asserted about.
+    assert len(relay.calls) == 2
+    assert len(await request_rows(db)) == 2
+
+
+@respx.mock
+async def test_an_ignored_event_does_not_warn(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Ticking every type in Seerr is allowed, so it must not fill the log."""
+    await webhook_enabled(db, configured)
+
+    with caplog.at_level("WARNING"):
+        await client.post(
+            WEBHOOK,
+            headers=auth(),
+            json=webhook_payload(notification_type="MEDIA_AVAILABLE"),
+        )
+
+    assert caplog.text == ""
 
 
 @respx.mock
