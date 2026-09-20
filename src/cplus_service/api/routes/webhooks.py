@@ -68,6 +68,15 @@ async def seerr_webhook(
     config = await get_config(db)
     secret = (config.seerr_webhook_secret or "").strip()
     if not secret:
+        # Logged, not just answered. Seerr reports a failed delivery without
+        # saying what came back, so an admin looking at Seerr alone cannot tell
+        # this apart from a URL that never resolved — and those have opposite
+        # fixes. Every refusal below says so here for the same reason: a line
+        # in this log is the proof that the delivery arrived at all.
+        logger.warning(
+            "refused a Seerr webhook delivery: no secret is configured, so the"
+            " webhook is off. Generate one on the Configuration tab."
+        )
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "The Seerr webhook is switched off on this server. Generate a secret"
@@ -75,7 +84,14 @@ async def seerr_webhook(
         )
 
     if not _authorised(authorization, secret):
-        # Deliberately says nothing about which half was wrong.
+        logger.warning(
+            "refused a Seerr webhook delivery: the Authorization header %s."
+            " Copy the secret from the Configuration tab into Seerr's"
+            " Authorization Header field.",
+            "did not match the configured secret" if authorization else "was missing",
+        )
+        # The response itself deliberately says nothing about which half was
+        # wrong; the admin gets the detail from the line above instead.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Rejected")
 
     payload = await _body(request)
@@ -185,11 +201,20 @@ async def _body(request: Request) -> dict[str, Any]:
     try:
         payload = await request.json()
     except ValueError as exc:
+        logger.warning(
+            "refused a Seerr webhook delivery: the body was not valid JSON."
+            " Check Seerr's JSON payload template for a syntax error."
+        )
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "The webhook body was not valid JSON"
         ) from exc
 
     if not isinstance(payload, dict):
+        logger.warning(
+            "refused a Seerr webhook delivery: the body was %s rather than a"
+            " JSON object.",
+            type(payload).__name__,
+        )
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "The webhook body was not a JSON object"
         )

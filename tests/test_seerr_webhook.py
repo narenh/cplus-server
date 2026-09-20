@@ -251,13 +251,15 @@ def test_split_year(subject: str, expected: tuple[str, int | None]) -> None:
 
 
 async def test_the_endpoint_refuses_everyone_until_a_secret_is_generated(
-    client: httpx.AsyncClient, configured: Config
+    client: httpx.AsyncClient, configured: Config, caplog: pytest.LogCaptureFixture
 ) -> None:
     """No secret is not "open" — it is off."""
-    response = await client.post(WEBHOOK, headers=auth(), json=webhook_payload())
+    with caplog.at_level("WARNING"):
+        response = await client.post(WEBHOOK, headers=auth(), json=webhook_payload())
 
     assert response.status_code == 503
     assert "Configuration tab" in response.json()["detail"]
+    assert "no secret is configured" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -266,14 +268,26 @@ async def test_the_endpoint_refuses_everyone_until_a_secret_is_generated(
     ids=["missing", "wrong", "wrong-bearer"],
 )
 async def test_a_bad_secret_is_rejected(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config, headers: dict
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    headers: dict,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     await webhook_enabled(db, configured)
 
-    response = await client.post(WEBHOOK, headers=headers, json=webhook_payload())
+    with caplog.at_level("WARNING"):
+        response = await client.post(WEBHOOK, headers=headers, json=webhook_payload())
 
     assert response.status_code == 401
     assert await request_rows(db) == []
+
+    # The response says only "Rejected"; the reason belongs in the log, where
+    # the admin can see it and the caller cannot. Without it, a refused
+    # delivery and one that never arrived look identical from Seerr's side.
+    assert "refused a Seerr webhook delivery" in caplog.text
+    expected = "was missing" if not headers else "did not match"
+    assert expected in caplog.text
 
 
 async def test_a_bearer_prefixed_secret_is_accepted(
@@ -291,13 +305,18 @@ async def test_a_bearer_prefixed_secret_is_accepted(
 
 
 async def test_a_body_that_is_not_json_is_a_400(
-    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     await webhook_enabled(db, configured)
 
-    response = await client.post(WEBHOOK, headers=auth(), content=b"not json")
+    with caplog.at_level("WARNING"):
+        response = await client.post(WEBHOOK, headers=auth(), content=b"not json")
 
     assert response.status_code == 400
+    assert "not valid JSON" in caplog.text
 
 
 # --------------------------------------------------------------------------- #

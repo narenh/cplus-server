@@ -1118,6 +1118,36 @@ caller could present, so the endpoint refuses everyone. There is deliberately no
 unauthenticated mode — all the endpoint does is believe what it is told about
 who requested what.
 
+### When Seerr says "Webhook test notification failed to send"
+
+That message is Seerr's, and it covers every failure the same way — DNS,
+connection refused, TLS, and any non-2xx response alike. It does not say what
+came back, so start on this side instead: **every refusal is logged**, which
+makes the cplus log the one place that distinguishes "never arrived" from
+"arrived and was turned away".
+
+Nothing in the cplus log at all means the request never reached the process:
+
+| | |
+|---|---|
+| **Seerr cannot resolve the URL** | The address the Configuration tab prints is the one *you* reached the console on. A reverse proxy, a container network or a LAN address makes Seerr's view different — and a Seerr container often cannot resolve the public hostname back to itself (no hairpin NAT). Try the address Seerr can actually reach, which may be `http://cplus:8080/webhooks/seerr` on the shared Docker network |
+| **Something in front is refusing it** | Cloudflare Access, an auth proxy, or an IP allowlist ahead of the app rejects Seerr before it gets here. Seerr's own logs show the status |
+| **The URL redirects** | A trailing slash answers 307, which is fine. But an `http://` URL that a proxy 301s to `https://` can be retried as a GET, which this endpoint answers 405 to. Paste the final URL, scheme included |
+
+A line in the cplus log means it arrived, and names the reason:
+
+| Log line | Fix |
+|---|---|
+| `no secret is configured` | The webhook is off, or the running build predates it. Generate a secret on the Configuration tab |
+| `the Authorization header did not match` | Re-copy the secret. Rotating it on the Configuration tab does not update Seerr |
+| `the Authorization header was missing` | Seerr's **Authorization Header** field is empty, or a proxy stripped the header |
+| `the body was not valid JSON` | A syntax error in a customised JSON payload template |
+| `Seerr webhook test received` | **It worked.** Seerr reported a failure for some other reason — check that the agent is saved, not just filled in |
+
+A 404 rather than any of these means the running build predates the endpoint:
+the image has to be rebuilt and `alembic upgrade head` run, which
+`docker/entrypoint.sh` does on start.
+
 ### What it accepts
 
 `MEDIA_PENDING` and `MEDIA_AUTO_APPROVED` are acted on: both are somebody asking
