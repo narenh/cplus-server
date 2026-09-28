@@ -100,7 +100,7 @@ async def test_plex_server_is_null_when_no_server_is_connected(
     response = await client.get("/register", headers=plex_headers)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "plex_server": None}
+    assert response.json() == {"status": "ok", "plex_server": None, "audiobooks": False}
 
 
 @respx.mock
@@ -153,7 +153,7 @@ async def test_register_omits_defaults_when_first_run_is_absent(
     response = await client.get("/register", headers=plex_headers)
 
     assert response.status_code == 200
-    assert set(response.json()) == {"status", "plex_server"}
+    assert set(response.json()) == {"status", "plex_server", "audiobooks"}
 
 
 @respx.mock
@@ -167,7 +167,7 @@ async def test_register_omits_defaults_when_first_run_is_false(
     )
 
     assert response.status_code == 200
-    assert set(response.json()) == {"status", "plex_server"}
+    assert set(response.json()) == {"status", "plex_server", "audiobooks"}
 
 
 @respx.mock
@@ -183,7 +183,7 @@ async def test_register_bundles_defaults_when_first_run_is_true(
     assert response.headers["content-type"] == "application/json"
     body = response.json()
     assert body["status"] == "ok"
-    rest = {k: v for k, v in body.items() if k not in {"status", "plex_server"}}
+    rest = {k: v for k, v in body.items() if k not in {"status", "plex_server", "audiobooks"}}
     assert_well_formed_payload(rest)
     assert rest["default_libraries"] == [
         {

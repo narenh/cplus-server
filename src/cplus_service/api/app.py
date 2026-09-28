@@ -44,6 +44,7 @@ from ..settings import SEERR_URL_ENV, seerr_url
 from ..web import STATIC_DIR
 from .routes import (
     admin,
+    audiobooks,
     capabilities,
     grab,
     home,
@@ -184,6 +185,7 @@ def create_app(
     app.include_router(request.router)
     app.include_router(seerr.router)
     app.include_router(webhooks.router)
+    app.include_router(audiobooks.router)
     app.include_router(internal.router)
     app.include_router(admin.router)
 

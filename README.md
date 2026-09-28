@@ -172,7 +172,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 1017 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 1035 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -593,7 +593,11 @@ migration deletes, so nothing can prove what they were resolved against.
 | Endpoint | Auth | Notes |
 |---|---|---|
 | `GET /capabilities` | none | What this instance has switched on, before anyone signs in. Today just `{"notifications": bool}` |
-| `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server`; with `first_run=true`, bundles the Libraries seed and the caller's Home |
+| `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server` and `audiobooks` (whether there is a finished read-along book the caller can see); with `first_run=true`, bundles the Libraries seed and the caller's Home |
+| `GET /audiobooks` | cache + Plex | Finished read-along books in libraries the caller can see, with their progress. See [Read-along for clients](#read-along-for-clients) |
+| `GET /audiobooks/{ratingKey}` | cache + Plex | One book's index: files and their offsets, chapters, chunk time ranges, `version` |
+| `GET /audiobooks/{ratingKey}/chunks/{n}?v={version}` | cache + Plex | ~10 minutes of sentences. Immutable for its version; 409 once the book is re-aligned |
+| `GET`/`PUT /audiobooks/{ratingKey}/progress` | cache + Plex | Where the caller is in any audiobook they can see, aligned or not. Newest listen wins |
 | `GET /home` | cache | The caller's whole home screen, in CanopyPlus's own `HomeSettings` shape |
 | `PUT /home` | cache | One `HomeSettings` document. 200 if it won, 409 if it lost — the winner is the body either way |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
@@ -1417,6 +1421,72 @@ included) with the admin token added on this side. It is authorised by a random
 per-job key that exists only in that job's row and its `job.json`. It stops
 working when the job is no longer active, and a wrong key, a finished job and
 an unknown job all get the same 404.
+
+### Read-along for clients
+
+Only finished books are served, and only to someone who can see the book's
+library in Plex. The access check asks Plex as the caller: plex.tv turns the
+`X-Plex-Token` they sent into their own token for this install's server, and
+the server, asked with that, lists the libraries it shares with them. Both
+answers are cached per token for ten minutes, so a reading session costs one or
+two Plex calls, and a library shared or unshared is noticed within ten
+minutes. A book they cannot see is a 404, the same as one that does not exist.
+Label-based restrictions inside a shared library are not applied.
+
+Audio is never served here. The client plays the album's files straight from
+Plex, and every time below is on the book's **one continuous timeline** — all
+of its files, in listening order. `tracks[].offset` is where each file starts
+on it, measured from the decoded audio rather than from Plex's durations, which
+leave out encoder padding and drift across a many-file book. Position in the
+book is `offset + position in that file`.
+
+```jsonc
+// GET /audiobooks
+{"books": [{"rating_key": "501", "library_id": "7", "title": "The Hobbit",
+  "author": "J. R. R. Tolkien", "duration": 37500.0, "version": 12,
+  "aligned_at": "2026-09-28T23:17:51+00:00", "sentences": 6411,
+  "aligned_sentences": 6320, "progress": null}]}
+
+// GET /audiobooks/501
+{ ...the same fields...,
+  "tracks": [{"n": 0, "rating_key": "502", "part_id": "9001", "offset": 0.0, "duration": 37499.9}],
+  "chapters": [{"index": 3, "title": "An Unexpected Party", "start": 14.9, "end": 3361.1, "sentences": 574}],
+  "chunks": [{"n": 0, "start": 14.9, "end": 612.4, "first": 0, "last": 131}, ...],
+  "progress": {"position": 1234.5, "track_rating_key": "502", "track_offset": 1234.5,
+               "finished": false, "listened_at": "...", "device": "Living room"}}
+
+// GET /audiobooks/501/chunks/0?v=12   (gzip passed through when accepted)
+[{"i": 0, "sec": 3, "para": 0, "text": "In a hole in the ground there lived a hobbit.",
+  "start": 14.9, "end": 17.8, "flags": [], "wps": 3.4, "score": -0.21}, ...]
+```
+
+Without gzip in `Accept-Encoding` a chunk comes back as `{"sentences": [...]}`.
+
+**Sentences.** `start`/`end` are tight to the speech, so there are pauses
+between sentences: treat sentence *i* as current until *i+1* starts. They are
+`null` for text the narrator never reads (front matter, asides), flagged
+`unspoken`. `para` groups sentences into paragraphs and `sec` points at the
+epub's spine item, which is what `chapters[].index` refers to. Chapters come
+from the epub, never from the audio's own chapter markers.
+
+**Chunks.** About ten minutes of audio each, cut at paragraph breaks — or
+after 800 sentences, for a long stretch nobody reads. To seek, find the chunk
+whose range covers the time, fetch it, and prefetch the next. A chunk never
+changes for a given `version`, so it is sent `Cache-Control: immutable`. If the
+book is re-aligned, the old version answers **409**, and the client refetches
+the index.
+
+**Progress** is per user and book, stored whether or not the book is aligned
+(Plex's own progress for audiobooks is unreliable). `PUT` takes
+`{"position", "listened_at", "track_rating_key"?, "track_offset"?, "finished"?,
+"device"?}`. `listened_at` is when the listener was at that position, by the
+device's clock, and the newest listen wins. A write older than what is stored
+answers `{"applied": false, "progress": <what is stored>}`, so a device that
+was behind can jump to where the listener got to elsewhere. Last-to-arrive
+would instead let a device that reports on launch drag everyone back. A
+`listened_at` more than five minutes in the future is taken as now, so one
+device with a wrong clock cannot freeze everyone else's progress. Write every
+15–30 seconds while playing and on pause: tvOS can end an app without warning.
 
 ### Limits
 

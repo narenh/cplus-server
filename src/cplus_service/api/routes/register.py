@@ -33,6 +33,13 @@ actually signed in to before binding: same identifier, same library ids, and
 ``default_libraries`` means what it says. ``null`` is a real answer — an admin
 who has not yet connected this instance to Plex — and says only "this cannot
 be verified", not "this is the wrong server".
+
+**``audiobooks``** is ``true`` when at least one finished read-along book is in
+a library this user can see — the client's cue to show its Audiobooks tab.
+Checking costs one or two Plex calls (cached for ten minutes), made only when
+this install has any finished book at all. If Plex can't be asked, it answers
+``true`` whenever any book is finished; ``GET /audiobooks`` still only lists
+what the user can see, so the worst case is an empty tab.
 """
 
 from __future__ import annotations
@@ -42,12 +49,15 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import Response
+from sqlalchemy import select
 
+from ...audiobooks.access import AccessUnknown
 from ...auth.identity import authenticate_plex_token
-from ...db.models import Config
+from ...db.models import AudiobookAlignment, Config
 from ...db.session import get_config
 from ...seerr.client import SeerrAuthError, SeerrError
-from ..deps import DbDep, PlexTokenDep, SeerrDep
+from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
+from .audiobooks import visible_books
 from .defaults import defaults_payload
 
 logger = logging.getLogger(__name__)
@@ -73,9 +83,19 @@ def plex_server_identity(config: Config) -> dict[str, str] | None:
     }
 
 
+async def _any_audiobooks(db: DbDep, config: Config) -> bool:
+    found = await db.execute(
+        select(AudiobookAlignment.id)
+        .where(AudiobookAlignment.plex_server_id == (config.plex_server_client_identifier or ""))
+        .limit(1)
+    )
+    return found.first() is not None
+
+
 @router.get("/register")
 async def register(
     db: DbDep,
+    state: StateDep,
     seerr: SeerrDep,
     plex_token: PlexTokenDep,
     first_run: bool | None = Query(default=None),
@@ -105,9 +125,15 @@ async def register(
         ) from exc
 
     config = await get_config(db)
+    try:
+        audiobooks = bool(await visible_books(db, state, config, plex_token))
+    except AccessUnknown as exc:
+        logger.warning("couldn't check audiobook access for register: %s", exc)
+        audiobooks = await _any_audiobooks(db, config)
     body: dict[str, object] = {
         "status": "ok",
         "plex_server": plex_server_identity(config),
+        "audiobooks": audiobooks,
     }
     if first_run is True:
         body.update(await defaults_payload(db, user.id))

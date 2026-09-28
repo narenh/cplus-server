@@ -41,7 +41,9 @@ def upgrade() -> None:
     sa.Column('job_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('plex_server_id', 'rating_key')
+    sa.UniqueConstraint('plex_server_id', 'rating_key'),
+    # ``id`` is the alignment's version; AUTOINCREMENT so one is never reused.
+    sqlite_autoincrement=True,
     )
     with op.batch_alter_table('audiobook_alignments', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_audiobook_alignments_library_id'), ['library_id'], unique=False)

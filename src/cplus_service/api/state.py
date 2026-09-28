@@ -12,6 +12,8 @@ from datetime import datetime
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from ..audiobooks.access import PlexAccess
+
 
 @dataclass
 class PendingPlexLogin:
@@ -62,3 +64,7 @@ class AppState:
     without bound. Entries older than
     :data:`~cplus_service.api.routes.admin.login.PENDING_LOGIN_TTL` are swept
     on the next sign-in attempt; see that module."""
+
+    plex_access: PlexAccess = field(default_factory=PlexAccess)
+    """Which libraries each Plex user may see, asked of Plex as them and cached
+    briefly. See :mod:`cplus_service.audiobooks.access`."""

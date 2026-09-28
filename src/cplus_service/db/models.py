@@ -732,7 +732,14 @@ class AudiobookAlignment(Base):
     """
 
     __tablename__ = "audiobook_alignments"
-    __table_args__ = (UniqueConstraint("plex_server_id", "rating_key"),)
+    # AUTOINCREMENT because ``id`` doubles as the alignment's version, which
+    # clients cache chunks under forever: plain SQLite rowids reuse the highest
+    # id once its row is deleted, so a re-aligned book could come back under its
+    # old version and be served stale chunks from a client's cache.
+    __table_args__ = (
+        UniqueConstraint("plex_server_id", "rating_key"),
+        {"sqlite_autoincrement": True},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     plex_server_id: Mapped[str] = mapped_column(String(64))
@@ -782,3 +789,33 @@ class AudiobookChunk(Base):
     data: Mapped[bytes] = mapped_column(LargeBinary)
 
     alignment: Mapped[AudiobookAlignment] = relationship(back_populates="chunks")
+
+
+class AudiobookProgress(Base):
+    """Where one user is in one audiobook — kept here because Plex's own is unreliable.
+
+    One row per user and book, whether or not the book has been aligned.
+    ``position`` is seconds on the book's one continuous timeline (all of its
+    files, in order); ``track_rating_key``/``track_offset`` say the same thing
+    in the terms a player uses, and survive the book being re-aligned.
+
+    Several Apple TVs can play the same book, so a write carries ``listened_at``
+    — when the listener was at that position, by the device's clock — and the
+    newest listen wins. Last-to-arrive would let a device that reports on launch
+    drag everyone back to wherever it was last week.
+    """
+
+    __tablename__ = "audiobook_progress"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    plex_server_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    rating_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    position: Mapped[float] = mapped_column(Float)
+    track_rating_key: Mapped[str | None] = mapped_column(String(32))
+    track_offset: Mapped[float | None] = mapped_column(Float)
+    finished: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    listened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    device: Mapped[str | None] = mapped_column(String(128))
