@@ -1,0 +1,93 @@
+{# One book's read-along cell: rendered in the list, and returned alone by every
+   write to it and every poll of it.
+
+   A cell with a job in flight re-requests itself — every 2 s while verifying,
+   every 10 s while processing — and a cell with nothing in flight carries no
+   trigger at all, so a page of finished books makes no requests. #}
+{% set base = "/admin/audiobooks/books/" ~ book.rating_key %}
+{% macro upload(label, style="secondary") %}
+  {% if book.can_align %}
+    <form class="upload-form" hx-post="{{ base }}/align" hx-encoding="multipart/form-data"
+          hx-trigger="change" hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML">
+      <label class="button {{ style }} file-button">
+        {{ label }}
+        <input type="file" name="epub" accept=".epub,application/epub+zip">
+      </label>
+      <span class="uploading muted">Uploading…</span>
+    </form>
+  {% endif %}
+{% endmacro %}
+{% macro cancel() %}
+  <button type="button" class="link" hx-post="{{ base }}/cancel"
+          hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+          hx-confirm="Stop aligning this book?">Cancel</button>
+{% endmacro %}
+<div class="book-status" id="book-{{ book.rating_key }}"
+  {% if book.polling %}hx-get="{{ base }}/status" hx-trigger="{{ book.polling }}" hx-swap="outerHTML"{% endif %}>
+
+{% if book.kind == "verifying" %}
+  {% set pct = book.job.progress or 0 %}
+  <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
+  <div class="status-line">
+    <span>Verifying…</span>
+    <span class="muted">{{ book.job.stage or "" }}</span>
+    {{ cancel() }}
+  </div>
+
+{% elif book.kind == "queued" %}
+  <div class="bar"><span style="width: 0%"></span></div>
+  <div class="status-line">
+    <span>Processing…</span>
+    <span class="muted">
+      {% if book.position and book.position > 1 %}{{ book.position|ordinal }} in line{% else %}starting{% endif %}
+    </span>
+    {{ cancel() }}
+  </div>
+  {% if book.job.message %}<p class="hint warn">{{ book.job.message }}</p>{% endif %}
+
+{% elif book.kind == "running" %}
+  {% set pct = book.job.progress or 0 %}
+  <div class="bar"><span style="width: {{ pct|round(1) }}%"></span></div>
+  <div class="status-line">
+    <span>Processing… {{ pct|round|int }}%</span>
+    <span class="muted">
+      {{ book.job.stage or "" }}{% if book.job.eta_seconds is not none %} · {{ book.job.eta_seconds|eta }} left{% endif %}
+    </span>
+    {{ cancel() }}
+  </div>
+  {% if book.stalled_minutes %}
+    <p class="hint err">No word from the aligner for {{ book.stalled_minutes }} minutes. If it doesn't pick back up, check the <code>cplus-aligner</code> container.</p>
+  {% endif %}
+  {% if book.job.message %}<p class="hint warn">{{ book.job.message }}</p>{% endif %}
+
+{% elif book.kind == "ready" %}
+  {% set stats = book.alignment.stats or {} %}
+  <div class="status-line">
+    <span class="ok">✓ Ready</span>
+    {% if stats.get("sentences") %}
+      <span class="muted">{{ "{:,}".format(stats.get("aligned", 0)) }} of {{ "{:,}".format(stats.get("sentences")) }} sentences</span>
+    {% endif %}
+  </div>
+  {% if book.stale %}
+    <p class="hint warn">The audio in Plex has changed since this was aligned, so the timings may be off. Upload the epub again to re-align.</p>
+  {% endif %}
+  {% if book.message %}<p class="hint err">The replacement didn't go through: {{ book.message }}</p>{% endif %}
+  <div class="row-controls">
+    {{ upload("Replace epub…") }}
+    <button type="button" class="link danger" hx-post="{{ base }}/delete"
+            hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+            hx-confirm="Delete this book's alignment? Read-along stops working for it in the app.">Delete</button>
+  </div>
+
+{% elif book.kind in ("failed", "rejected") %}
+  <p class="hint err">{{ book.message or "That didn't work." }}</p>
+  {{ upload("Try another epub…") }}
+
+{% else %}
+  {% if book.can_align %}
+    {{ upload("Align…") }}
+  {% else %}
+    <span class="muted">—</span>
+  {% endif %}
+{% endif %}
+</div>

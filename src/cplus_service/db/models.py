@@ -21,9 +21,13 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -649,3 +653,132 @@ class ActivityLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+
+class AudiobookJobStatus(StrEnum):
+    """Where one alignment job is. See :mod:`cplus_service.audiobooks`."""
+
+    VERIFYING = "verifying"
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    @property
+    def active(self) -> bool:
+        return self in (self.VERIFYING, self.QUEUED, self.RUNNING)
+
+
+class AudiobookJob(Base):
+    """One epub upload for one book, from verification to a finished alignment.
+
+    The work itself happens in the aligner sidecar; this row is cplus-service's
+    record of it, kept current from the files the sidecar writes (see
+    :mod:`cplus_service.audiobooks.monitor`). Rows are kept after they finish so
+    the tab can say what happened; the uploaded epub is not — it is deleted with
+    the job's working directory once the job ends.
+
+    ``secret`` authorises the sidecar's audio requests for this job and nothing
+    else; it stops working the moment the job is no longer active.
+    """
+
+    __tablename__ = "audiobook_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plex_server_id: Mapped[str] = mapped_column(String(64))
+    rating_key: Mapped[str] = mapped_column(String(32), index=True)
+    library_id: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(512))
+    author: Mapped[str | None] = mapped_column(String(512))
+    status: Mapped[AudiobookJobStatus] = mapped_column(String(16), index=True)
+    #: What the sidecar says it is doing ("Listening to the audio"), and how far.
+    stage: Mapped[str | None] = mapped_column(String(128))
+    progress: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    eta_seconds: Mapped[int | None] = mapped_column(Integer)
+    #: The verification verdict, a warning worth keeping, or why it failed.
+    message: Mapped[str | None] = mapped_column(Text)
+    secret: Mapped[str] = mapped_column(String(64))
+    #: The album's files at upload time, in listening order — what the sidecar
+    #: is sent and what the finished alignment's track offsets refer to.
+    tracks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    epub_title: Mapped[str | None] = mapped_column(String(512))
+    epub_author: Mapped[str | None] = mapped_column(String(512))
+    epub_words: Mapped[int | None] = mapped_column(Integer)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the sidecar last reported on this job; a running job that stops
+    #: reporting is shown as stalled rather than as frozen at its last percent.
+    heard_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def is_active(self) -> bool:
+        # The column is a plain string, so a loaded row holds ``str``, not the enum.
+        return AudiobookJobStatus(self.status).active
+
+
+class AudiobookAlignment(Base):
+    """A finished alignment: one book's sentences, timed against its audio.
+
+    Keyed by the Plex server and the album's ratingKey — ratingKeys are only
+    unique within one server, and an install can be repointed at another.
+    ``fingerprint`` identifies the files it was built from, so the tab can tell
+    when the audio has since been replaced and the timings no longer apply.
+
+    The sentences themselves live in :class:`AudiobookChunk`, a few minutes of
+    audio each, so a client can start reading without fetching the whole book.
+    """
+
+    __tablename__ = "audiobook_alignments"
+    __table_args__ = (UniqueConstraint("plex_server_id", "rating_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plex_server_id: Mapped[str] = mapped_column(String(64))
+    rating_key: Mapped[str] = mapped_column(String(32), index=True)
+    library_id: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(512))
+    author: Mapped[str | None] = mapped_column(String(512))
+    duration: Mapped[float] = mapped_column(Float)
+    #: ``[{n, rating_key, part_id, offset, duration}]``: where each file starts
+    #: on the book's one continuous timeline, which every time here is on.
+    tracks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    #: Chapters as the epub has them: ``[{index, title, start, end, sentences}]``.
+    sections: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    epub_title: Mapped[str | None] = mapped_column(String(512))
+    epub_author: Mapped[str | None] = mapped_column(String(512))
+    job_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    chunks: Mapped[list[AudiobookChunk]] = relationship(
+        back_populates="alignment",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AudiobookChunk.n",
+    )
+
+
+class AudiobookChunk(Base):
+    """A run of consecutive sentences, about ten minutes of audio, stored gzipped.
+
+    Cut at paragraph boundaries. ``start``/``end`` span the timed sentences in it
+    and are ``None`` only for a chunk the narrator skipped entirely (front
+    matter, an appendix).
+    """
+
+    __tablename__ = "audiobook_chunks"
+
+    alignment_id: Mapped[int] = mapped_column(
+        ForeignKey("audiobook_alignments.id", ondelete="CASCADE"), primary_key=True
+    )
+    n: Mapped[int] = mapped_column(Integer, primary_key=True)
+    start: Mapped[float | None] = mapped_column(Float)
+    end: Mapped[float | None] = mapped_column(Float)
+    first_sentence: Mapped[int] = mapped_column(Integer)
+    last_sentence: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+
+    alignment: Mapped[AudiobookAlignment] = relationship(back_populates="chunks")

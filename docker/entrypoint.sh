@@ -3,6 +3,13 @@
 # what makes an image upgrade a no-op for the operator: pull, restart, done.
 set -eu
 
+# The same image runs the audiobook aligner sidecar (`command: ["aligner"]` in
+# docker-compose.yml). It never touches the database, so no migrations.
+if [ "${1:-}" = "aligner" ]; then
+    echo "cplus-aligner: working in ${CPLUS_ALIGN_DIR:-<unset>}"
+    exec python -m cplus_align
+fi
+
 echo "cplus-service: applying migrations to ${CPLUS_DB_PATH}"
 alembic upgrade head
 

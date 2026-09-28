@@ -433,3 +433,162 @@ class PlexServerClient:
                 continue
             collections.append(PlexCollection(id=str(rating_key), title=str(title)))
         return collections
+
+    # ------------------------------------------------------------------ #
+    # Audiobooks: albums in a music library, and the files behind them
+    # ------------------------------------------------------------------ #
+
+    async def _get_json(
+        self, path: str, *, params: dict[str, str] | None = None, token: str | None = None
+    ) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        headers = {"Accept": "application/json", "X-Plex-Token": token or self.token}
+        try:
+            response = await self.client.get(
+                url, headers=headers, params=params, timeout=self._timeout
+            )
+        except httpx.HTTPError as exc:
+            raise PlexServerError(f"GET {url} failed: {exc}") from exc
+        if response.status_code >= 400:
+            raise PlexServerError(
+                f"Plex server returned {response.status_code}",
+                status_code=response.status_code,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PlexServerError("Plex server returned a non-JSON body") from exc
+        container = payload.get("MediaContainer", {}) if isinstance(payload, dict) else {}
+        return container if isinstance(container, dict) else {}
+
+    async def list_albums(
+        self, library_id: str, *, start: int = 0, size: int = 50, query: str | None = None
+    ) -> tuple[list[PlexAlbum], int]:
+        """One page of a music library's albums, by title -> ``(albums, total)``.
+
+        In a Plex music library an audiobook is an album (type 9) — its author
+        is usually the album artist — and its files are the album's tracks.
+        """
+        params = {
+            "type": "9",
+            "sort": "titleSort",
+            "X-Plex-Container-Start": str(start),
+            "X-Plex-Container-Size": str(size),
+        }
+        if query:
+            params["title"] = query
+        container = await self._get_json(f"/library/sections/{library_id}/all", params=params)
+        albums = [
+            album
+            for raw in container.get("Metadata", []) or []
+            if isinstance(raw, dict) and (album := PlexAlbum.from_plex(raw, library_id))
+        ]
+        total = int(container.get("totalSize") or container.get("size") or len(albums))
+        return albums, total
+
+    async def album(self, rating_key: str, *, token: str | None = None) -> PlexAlbum | None:
+        """One album by ratingKey, or ``None`` when it is not an album on this server.
+
+        ``token`` asks as someone other than the admin — a user's own server
+        token answers 401/404 for anything they cannot see, which is exactly
+        the library-access question.
+        """
+        try:
+            container = await self._get_json(f"/library/metadata/{rating_key}", token=token)
+        except PlexServerError as exc:
+            if exc.status_code in (401, 403, 404):
+                return None
+            raise
+        for raw in container.get("Metadata", []) or []:
+            if isinstance(raw, dict) and raw.get("type") == "album":
+                return PlexAlbum.from_plex(raw, str(raw.get("librarySectionID") or ""))
+        return None
+
+    async def album_parts(self, rating_key: str) -> list[PlexAudioPart]:
+        """Every file of an album, in listening order (disc, then track number)."""
+        container = await self._get_json(f"/library/metadata/{rating_key}/children")
+        tracks = [t for t in container.get("Metadata", []) or [] if isinstance(t, dict)]
+        ordered = sorted(
+            enumerate(tracks),
+            key=lambda item: (
+                int(item[1].get("parentIndex") or 1),
+                int(item[1].get("index") or 0),
+                item[0],
+            ),
+        )
+        parts: list[PlexAudioPart] = []
+        for _, track in ordered:
+            track_seconds = (track.get("duration") or 0) / 1000
+            for media in track.get("Media", []) or []:
+                media_parts = [p for p in media.get("Part", []) or [] if isinstance(p, dict)]
+                for part in media_parts:
+                    if not part.get("key") or not part.get("id"):
+                        continue
+                    seconds = (part.get("duration") or 0) / 1000 or (
+                        track_seconds / len(media_parts)
+                    )
+                    parts.append(
+                        PlexAudioPart(
+                            track_rating_key=str(track.get("ratingKey") or ""),
+                            track_title=str(track.get("title") or ""),
+                            part_id=str(part["id"]),
+                            key=str(part["key"]),
+                            size=int(part["size"]) if part.get("size") else None,
+                            duration=float(seconds),
+                            container=str(part.get("container") or media.get("container") or ""),
+                        )
+                    )
+                break  # the first Media is the one Plex plays; the rest are alternates
+        return parts
+
+    def open_stream(
+        self, path: str, *, headers: dict[str, str] | None = None
+    ) -> httpx.Request:
+        """A request for raw bytes from the server (a file part, an image), not yet sent."""
+        return self.client.build_request(
+            "GET",
+            f"{self.base_url}{path}",
+            headers={**(headers or {}), "X-Plex-Token": self.token},
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
+
+
+@dataclass(frozen=True)
+class PlexAlbum:
+    """An album in a music library — what the Audiobooks tab lists as one book."""
+
+    rating_key: str
+    title: str
+    author: str | None
+    library_id: str
+    thumb: str | None
+    year: int | None
+    tracks: int | None
+
+    @classmethod
+    def from_plex(cls, raw: dict[str, Any], library_id: str) -> PlexAlbum | None:
+        rating_key, title = raw.get("ratingKey"), raw.get("title")
+        if not rating_key or not title:
+            return None
+        return cls(
+            rating_key=str(rating_key),
+            title=str(title),
+            author=str(raw["parentTitle"]) if raw.get("parentTitle") else None,
+            library_id=str(raw.get("librarySectionID") or library_id),
+            thumb=str(raw["thumb"]) if raw.get("thumb") else None,
+            year=int(raw["year"]) if raw.get("year") else None,
+            tracks=int(raw["leafCount"]) if raw.get("leafCount") else None,
+        )
+
+
+@dataclass(frozen=True)
+class PlexAudioPart:
+    """One audio file behind an album, as Plex serves it at ``key``."""
+
+    track_rating_key: str
+    track_title: str
+    part_id: str
+    key: str
+    size: int | None
+    duration: float
+    container: str

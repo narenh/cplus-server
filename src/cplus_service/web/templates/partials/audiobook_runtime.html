@@ -1,0 +1,102 @@
+{# The aligner card at the top of the Audiobooks tab.
+
+   Off by default, and the only way on is a button that says what it costs,
+   because enabling downloads ~1.5 GB and a book in progress holds ~2 GB of
+   memory. While an install or removal runs, the card re-requests itself every
+   two seconds, and when that finishes the page reloads so every book's cell
+   picks up whether it can be aligned now. #}
+{% set busy = runtime.status in ("installing", "removing") %}
+<section class="card" id="aligner-runtime"
+  {% if busy %}hx-get="/admin/audiobooks/runtime?was={{ runtime.status }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2>Read-along</h2>
+
+  {% if runtime.status == "unconfigured" %}
+    <p class="hint">
+      Read-along isn't set up on this deployment. It needs the
+      <code>cplus-aligner</code> service from <code>docker-compose.yml</code>,
+      sharing the <code>cplus-align</code> volume with this one, and
+      <code>CPLUS_ALIGN_DIR</code> set on both.
+    </p>
+
+  {% elif runtime.status == "offline" %}
+    <p class="hint err">
+      The <code>cplus-aligner</code> service isn't running — it hasn't checked in
+      for over a minute. Nothing can be aligned until it is back; finished books
+      keep working in the app.
+    </p>
+
+  {% elif runtime.status in ("absent", "failed") %}
+    <p class="hint">
+      Aligns an epub you upload to a book's audio, sentence by sentence, so
+      Canopy+ can show the text as it's read. Books are aligned one at a time in
+      the background; a 20-hour book takes a few hours.
+    </p>
+    <p class="hint warn">
+      Turning this on downloads <strong>{{ runtime.download_bytes|bytes }}</strong> once —
+      the alignment model and what runs it — into the aligner's volume. While a
+      book is being aligned the aligner uses about <strong>2.1 GB of memory</strong>
+      and the CPUs you've given it; between books it uses almost nothing.
+    </p>
+    <p class="hint">
+      The model and the alignment code are licensed
+      <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>:
+      non-commercial use only.
+    </p>
+    {% if runtime.status == "failed" and runtime.error %}
+      <p class="hint err">The last attempt failed: {{ runtime.error }}</p>
+    {% endif %}
+    <div class="row">
+      <button type="button"
+              hx-post="/admin/audiobooks/runtime/enable"
+              hx-target="#aligner-runtime" hx-swap="outerHTML">
+        {{ "Try again" if runtime.status == "failed" else "Turn on read-along" }}
+      </button>
+    </div>
+
+  {% elif runtime.status == "installing" %}
+    {% set pct = runtime.percent %}
+    <div class="bar {{ 'indeterminate' if pct is none or (runtime.progress or {}).get('stage') != 'download' }}">
+      <span {% if pct is not none %}style="width: {{ pct|round(1) }}%"{% endif %}></span>
+    </div>
+    <p class="status-line">
+      {% set p = runtime.progress or {} %}
+      {% if p.get("stage") == "download" and p.get("total") %}
+        Downloading {{ p.get("done")|bytes }} of {{ p.get("total")|bytes }}…
+      {% else %}
+        {{ p.get("label") or "Starting" }}…
+      {% endif %}
+    </p>
+
+  {% elif runtime.status == "removing" %}
+    <div class="bar indeterminate"><span></span></div>
+    <p class="status-line">Removing the runtime…</p>
+
+  {% elif runtime.status == "outdated" %}
+    <p class="hint warn">
+      This version of cplus-server needs an updated aligner runtime
+      ({{ runtime.download_bytes|bytes }} to download). Books already aligned keep
+      working; nothing new is aligned until it's updated.
+    </p>
+    <div class="row">
+      <button type="button"
+              hx-post="/admin/audiobooks/runtime/enable"
+              hx-target="#aligner-runtime" hx-swap="outerHTML">Update</button>
+    </div>
+
+  {% elif runtime.status == "ready" %}
+    <p class="hint">
+      <span class="ok">On.</span>
+      {% if runtime.engine_running %}Aligning now.{% else %}Idle.{% endif %}
+      The runtime takes {{ runtime.disk_bytes|bytes }} of disk.
+      Upload a DRM-free epub for a book below to align it.
+    </p>
+    <div class="row">
+      <button type="button" class="secondary danger"
+              hx-post="/admin/audiobooks/runtime/disable"
+              hx-target="#aligner-runtime" hx-swap="outerHTML"
+              hx-confirm="Turn read-along off? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.">
+        Turn off and remove the download
+      </button>
+    </div>
+  {% endif %}
+</section>

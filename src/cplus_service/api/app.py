@@ -8,6 +8,8 @@ Nothing per-request owns them.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -19,6 +21,9 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from cplus_align.protocol import AlignPaths, align_dir
+
+from ..audiobooks import monitor as aligner_monitor
 from ..auth.identity import sync_seerr_instance
 from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import (
@@ -42,6 +47,7 @@ from .routes import (
     capabilities,
     grab,
     home,
+    internal,
     manager,
     push_devices,
     register,
@@ -138,9 +144,19 @@ def create_app(
                 SEERR_URL_ENV,
             )
 
+        # Follows the aligner sidecar's job files, when this deployment has one.
+        monitor: asyncio.Task[None] | None = None
+        root = align_dir()
+        if root is not None:
+            monitor = asyncio.create_task(aligner_monitor.run(sessionmaker, AlignPaths(root)))
+
         try:
             yield
         finally:
+            if monitor is not None:
+                monitor.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await monitor
             await http.aclose()
             await seerr_http.aclose()
             await relay_http.aclose()
@@ -168,6 +184,7 @@ def create_app(
     app.include_router(request.router)
     app.include_router(seerr.router)
     app.include_router(webhooks.router)
+    app.include_router(internal.router)
     app.include_router(admin.router)
 
     app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")

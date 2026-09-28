@@ -103,6 +103,8 @@ Only the handful that must exist before the UI does:
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
+| `CPLUS_ALIGN_DIR` | *(set to `/align` in `docker-compose.yml`)* | The volume shared with the `cplus-aligner` sidecar, on both services. Unset, the Audiobooks tab says read-along isn't set up. See [Audiobook read-along](#audiobook-read-along) |
+| `CPLUS_INTERNAL_URL` | `http://cplus-service:8080` | How the aligner sidecar reaches this service for audio. The default is the compose service name; change it only if you rename the service |
 
 Every default above is baked into the image itself (the Dockerfile's own `ENV`),
 not restated in `docker-compose.yml`, which sets only `CPLUS_SEERR_URL` and the
@@ -170,7 +172,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 871 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 1017 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -214,14 +216,25 @@ src/cplus_service/
                         request, seerr, webhooks
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, login (Plex PIN flow)
-  plex/client.py        plex.tv PIN flow — webui sign-in only
+  plex/client.py        plex.tv PIN flow, and the admin's own server (libraries,
+                        collections, audiobook albums and their files)
+  audiobooks/           read-along, cplus side: runtime state, jobs, the monitor
+                        that follows the sidecar, storing finished alignments
   web/                  Jinja2 templates + vendored HTMX, Open Props and CSS
   db/models.py          SQLAlchemy 2.0 schema
   home.py               the Home document: whose it is, its wire shape, its stamp
   bootstrap.py          seeds the built-in Request action and the "All" profile
+src/cplus_align/        the aligner sidecar (python -m cplus_align)
+  protocol.py           the shared directory both containers talk through
+  epub.py               reading and checking epubs (stdlib; cplus uses it too)
+  supervisor.py         heartbeat, install/uninstall, runs the engine
+  install.py            downloads the pinned runtime into the volume
+  runtime_lock.json     every wheel and model file, by URL, SHA-256 and size
+  pipeline/             the engine: numpy/torch, only on the downloaded runtime
 migrations/             Alembic
 docker/entrypoint.sh    migrate, then serve
 scripts/demo.py         offline + live REPL-style driver
+scripts/lock_aligner_runtime.py  regenerates the aligner's runtime lock
 tests/                  unit + ASGI end-to-end tests
 ```
 
@@ -459,6 +472,9 @@ stage 2; they exist now so the migration history has one starting point.
 | `activity_log` | user, `event_type` (`search`\|`grab`\|`request`\|`admin`), `detail` JSON, `created_at` |
 | `seerr_request_notices` | Seerr request ids this service has already logged and pushed about, written by `POST /request` and by the webhook. One integer each; it is what stops an in-app request being announced twice |
 | `plex_token_sessions` | SHA-256 token fingerprint → user; what tvOS auth reads |
+| `audiobook_jobs` | one epub upload for one album: status, progress, ETA, the verdict or error, the album's files at upload time, and the per-job key the sidecar fetches audio with. Kept after they finish; the epub is not |
+| `audiobook_alignments` | a finished alignment, unique per Plex server + album ratingKey: track offsets, chapters, stats, and a fingerprint of the files it was made from |
+| `audiobook_chunks` | the sentences, gzipped JSON, about ten minutes of audio per chunk, cut at paragraph breaks |
 | `admin_sessions` | opaque browser session tokens for the web UI |
 
 Three pragmas are set per connection. `foreign_keys=ON` because SQLite defaults
@@ -715,6 +731,9 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/users/{id}/home`, `POST .../shelves`, `.../carousel`, `.../top-shelf` (and their move/remove/reorder/enabled variants) | One user's own Home — same Carousel/Top Shelf/Shelves editor as the Libraries & Home tab, but scoped to a single user's own copy rather than the install-wide default |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+| `GET /admin/audiobooks`, `/runtime`, `POST .../runtime/enable`, `.../runtime/disable` | The Audiobooks tab and its read-along card |
+| `POST /admin/audiobooks/books/{ratingKey}/align`, `/cancel`, `/delete`, `GET .../status` | One book: upload an epub, cancel, forget the alignment, poll |
+| `GET /admin/audiobooks/cover/{ratingKey}` | Cover art, fetched with the admin token so the page never holds it |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
@@ -1283,6 +1302,128 @@ rather than the Notifications one: that page hides everything below its master
 switch, and this works whether or not that switch is on.
 
 ---
+
+## Audiobook read-along
+
+The **Audiobooks** tab aligns an epub to an audiobook in Plex, sentence by
+sentence, so Canopy+ can show the text as it is read. An admin picks the music
+library their audiobooks live in (in Plex an audiobook is an album in a music
+library — author as artist, the files as tracks), uploads a DRM-free English
+epub for a book, and a few hours later the book has a check mark.
+
+### Turning it on
+
+It is **off by default** and costs nothing until it is on. The
+`cplus-aligner` service in `docker-compose.yml` is the same image in another
+role; until an admin presses *Turn on read-along* it is one idle Python process.
+Turning it on downloads **~1.5 GB once** — PyTorch (CPU build), the other
+Python packages, and the alignment model — into the `cplus-align` volume, where
+it takes ~2.5 GB. Nothing heavy is in the image, so installs that never use
+this never download it, and image builds stay fast. *Turn off* deletes the
+download; books already aligned keep working.
+
+Every file is pinned by URL and SHA-256 in `src/cplus_align/runtime_lock.json`
+and installed with no package index at all. A download interrupted by a
+restart resumes from where it stopped. When a new image changes the lock, the
+tab shows *Update* with the size of what changed; nothing new is aligned until
+it is applied. Regenerate the lock with `scripts/lock_aligner_runtime.py`.
+
+The model (`MahmoudAshraf/mms-300m-1130-forced-aligner`) and the aligner's
+Viterbi code (`ctc-forced-aligner`, built into the image from a pinned GitHub
+commit — the PyPI package of that name is an unrelated project) are
+**CC BY-NC 4.0: non-commercial use only.** The tab says so next to the button.
+
+### What it needs
+
+Measured on a 2.1 GHz Xeon, 15-second windows:
+
+| CPUs | Compute per second of audio | A 20-hour book |
+|---|---|---|
+| 2 | 0.28 s | ~5.6 h |
+| 3 | 0.19–0.21 s | ~4 h |
+| 4 | 0.15 s | ~3 h |
+
+Memory while a book is being aligned is ~2.1 GB: 0.8 GB of working memory plus
+the 1.3 GB model, which is read from disk and counts as reclaimable page
+cache. Between books the engine exits and gives all of it back. The compose
+file caps the sidecar at `cpus: 3` and `mem_limit: 2560m`, and the engine runs
+at low CPU priority, so Plex and anything else on the host win the CPU when they
+want it. On a host with 4 GB shared with other services, a book in progress
+leaves little headroom; 6 GB or more is comfortable.
+
+Disk: the runtime's 2.5 GB, plus, while a book is in progress, its audio,
+the decoded 16 kHz PCM (~115 MB per hour of audio) and the model's output
+(~22 MB per hour). A job checks free space before it starts and all of it is
+deleted when the job ends.
+
+These are this machine's numbers, not a promise: the first book on a new host
+is the real benchmark, and every ETA after it uses that host's own measured
+speed (`runtime/calibration.json`).
+
+### What happens to an upload
+
+1. **Instant checks, before anything is queued.** Not an epub, DRM-protected
+   (a content file listed as encrypted, or Adobe/Apple DRM files present — font
+   obfuscation is not DRM and passes), not English, or almost no text: refused
+   on the spot.
+2. **Verifying (about a minute).** Eight 20-second samples from 10% to 90% of
+   the audio are read from Plex by seeking — a few MB, not the whole book — run
+   through the model and checked for 12-letter sequences that occur exactly
+   once in the epub. Matching narration scores 15–135 per sample; another book
+   scores 0–4. Fewer than a quarter of the samples matching fails the upload
+   with that count; fewer than 60% passes with a warning (abridged, different
+   edition). Verification never waits behind a book already in progress: the
+   running job serves it between batches, on the model it already has loaded.
+3. **Processing.** Download the audio (through cplus-service, see below),
+   decode every file in listening order into one timeline, run the model over
+   all of it, anchor the text to the audio, and force-align ~75-second
+   segments between anchors. Stretches the narrator never reads (front matter,
+   licence pages, an aside) are left unaligned rather than squeezed in.
+4. **Stored.** The result is split into ~10-minute chunks and written to
+   SQLite; the uploaded epub and every working file are deleted.
+
+The progress bar is sized before the job starts from the book's duration and
+this host's measured speed per stage, and switches to the live rate as each
+stage runs. It never moves backwards, and a job resumed after a restart picks up
+at the percent it had reached.
+
+### Restarts and failures
+
+The model's output goes to disk window by window, and that file is the
+checkpoint: a redeploy six hours into a long book resumes at the next window.
+If the engine is killed while working on a book (the memory limit is the
+usual reason), it is restarted and the book retried. After the third time the
+book is failed with an explanation instead of looping. A running job that stops
+reporting shows *No word from the aligner for N minutes* rather than a bar
+frozen at its last value.
+
+**Replace** keeps the current alignment live until the new one finishes; a
+replacement that fails leaves the old one in place and says why. When the
+album's files in Plex change after it was aligned (a different recording, a
+re-rip), the tab marks the book out of date. That is detected by comparing the
+files' part ids and sizes with the ones it was aligned from.
+
+### How the two containers talk
+
+Through the `cplus-align` volume only (`cplus_align/protocol.py`): cplus-service
+writes a job directory, the sidecar writes status, verdict and result files
+next to it, atomically, and each side reads the other's tolerantly. There is no
+API between them and no shared database. The sidecar never sees the SQLite
+file, the Prowlarr key or any Plex token.
+
+It reaches back for exactly one thing, audio, at
+`GET /internal/aligner/jobs/{id}/tracks/{n}`, which relays Plex (Range requests
+included) with the admin token added on this side. It is authorised by a random
+per-job key that exists only in that job's row and its `job.json`. It stops
+working when the job is no longer active, and a wrong key, a finished job and
+an unknown job all get the same 404.
+
+### Limits
+
+English only. The model's alphabet is a–z and the apostrophe, and text is
+folded to it. DRM-free epubs only. The first words of a book can be missed when
+they sit inside a stretch that is dropped as unspoken, most often a title read
+before the text starts.
 
 ## Admin web UI
 

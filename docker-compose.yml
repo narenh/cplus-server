@@ -27,6 +27,11 @@ services:
       # Changing it signs out every device and browser on the next start.
       CPLUS_SEERR_URL: ${CPLUS_SEERR_URL:?set CPLUS_SEERR_URL to your Seerr base URL}
 
+      # Where this service and the cplus-aligner sidecar below exchange
+      # audiobook jobs. Remove it (and the sidecar) and the Audiobooks tab
+      # says read-along isn't set up.
+      CPLUS_ALIGN_DIR: /align
+
       # Everything else this needs before the web UI exists (listen port and
       # address, the SQLite path, log level, timezone) is baked into the image
       # itself — see the Dockerfile's own `ENV` — rather than repeated here.
@@ -52,6 +57,7 @@ services:
       # real volume — a bind to an ephemeral path means every redeploy silently
       # resets the service to first-run.
       - cplus-data:/data
+      - cplus-align:/align
 
     healthcheck:
       test: ["CMD", "python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ['CPLUS_PORT']+'/health', timeout=4)"]
@@ -60,5 +66,38 @@ services:
       retries: 3
       start_period: 15s
 
+  # Audiobook read-along: aligns an uploaded epub to a book's audio. The same
+  # image in another role. Idle and tiny until an admin turns read-along on in
+  # the Audiobooks tab, which downloads ~1.5 GB (the model and the runtime that
+  # runs it) into the cplus-align volume once.
+  #
+  # It never sees the database or any Plex token: it gets jobs and audio from
+  # cplus-service through the shared volume and an internal route.
+  cplus-aligner:
+    build: .
+    command: ["aligner"]
+    restart: unless-stopped
+    environment:
+      CPLUS_ALIGN_DIR: /align
+    volumes:
+      - cplus-align:/align
+    # What a book in progress may use; between books it uses almost nothing.
+    # Measured: ~2.1 GB while aligning (0.8 GB working memory plus 1.3 GB of
+    # model weights read from disk). CPU sets the speed — at 3 CPUs a 20-hour
+    # book takes about 4 hours — and the aligner also runs at low priority, so
+    # anything else on the host wins when it needs the CPU.
+    cpus: 3
+    mem_limit: 2560m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,time; sys.exit(time.time()-json.load(open('/align/runtime/heartbeat.json'))['t']>60)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 volumes:
   cplus-data:
+  # The aligner's runtime and model (~2.3 GB once read-along is on) and
+  # in-progress jobs. Nothing here needs backing up: it can all be
+  # re-downloaded, and finished alignments live in cplus-data.
+  cplus-align:

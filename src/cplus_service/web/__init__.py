@@ -50,6 +50,39 @@ def format_when(value: Any) -> Markup:
     return Markup(f'<time datetime="{iso}" class="local-time">{escape(fallback)}</time>')
 
 
+def format_bytes(value: Any) -> str:
+    """Bytes as MB or GB, whichever reads naturally: ``282 MB``, ``1.5 GB``."""
+    if not isinstance(value, int | float) or value <= 0:
+        return "—"
+    if value >= 1e9:
+        return f"{value / 1e9:.1f} GB"
+    return f"{max(value / 1e6, 1):.0f} MB"
+
+
+def format_eta(value: Any) -> str:
+    """Seconds left, rounded the way the estimate deserves: ``about 3 h 10 min``.
+
+    A multi-hour estimate on a shared machine is good to a few minutes at best,
+    so it is never shown to the minute beyond the first hour.
+    """
+    if not isinstance(value, int | float) or value < 0:
+        return ""
+    minutes = value / 60
+    if minutes < 1:
+        return "under a minute"
+    if minutes < 60:
+        return f"about {round(minutes)} min"
+    hours, rest = divmod(round(minutes / 10) * 10, 60)
+    return f"about {hours} h {rest} min" if rest else f"about {hours} h"
+
+
+def ordinal(value: Any) -> str:
+    if not isinstance(value, int):
+        return str(value)
+    suffix = "th" if 10 <= value % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    return f"{value}{suffix}"
+
+
 @cache
 def static_url(name: str) -> str:
     """``/static/<name>`` with a content hash on the end.
@@ -81,6 +114,9 @@ def static_url(name: str) -> str:
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["size"] = format_size
 templates.env.filters["when"] = format_when
+templates.env.filters["bytes"] = format_bytes
+templates.env.filters["eta"] = format_eta
+templates.env.filters["ordinal"] = ordinal
 templates.env.globals["static_url"] = static_url
 
 __all__ = [

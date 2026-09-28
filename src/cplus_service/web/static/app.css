@@ -1000,3 +1000,47 @@ table.preview .dropped-by { color: var(--err); }
 @media (prefers-reduced-motion: reduce) {
   .error-toast { transition: none; transform: translateX(-50%); }
 }
+
+/* Audiobooks -------------------------------------------------------------- */
+
+.books th.cover, .books td.cover { width: 56px; padding-right: 0; }
+.books td.cover img {
+  display: block; width: 48px; height: 48px; object-fit: cover;
+  border-radius: 6px; background: var(--line-soft);
+}
+.books td.readalong { width: 46%; min-width: 280px; }
+.book-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.book-status .hint { margin: 4px 0; }
+.status-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
+.pager { justify-content: center; }
+
+/* A progress bar that only ever means one thing: how far along this job is.
+   The indeterminate form is for the moments with nothing to measure yet (the
+   upload has landed but the aligner hasn't picked it up). */
+.bar {
+  height: 6px; border-radius: var(--radius-pill); background: var(--line-soft);
+  overflow: hidden; margin: 6px 0; max-width: 420px;
+}
+.bar > span {
+  display: block; height: 100%; background: var(--accent);
+  transition: width .6s ease;
+}
+.bar.indeterminate > span { width: 30%; animation: bar-slide 1.3s ease-in-out infinite; }
+@keyframes bar-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar > span { transition: none; }
+  .bar.indeterminate > span { animation: none; width: 100%; opacity: .35; }
+}
+
+/* A file picker that looks like the other buttons; picking a file submits it. */
+.file-button { position: relative; overflow: hidden; }
+.file-button input[type="file"] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0;
+}
+.upload-form { display: inline-flex; align-items: center; gap: 8px; }
+.upload-form .uploading { display: none; }
+.upload-form.htmx-request .uploading { display: inline; }
+.upload-form.htmx-request .file-button { display: none; }

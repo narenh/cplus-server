@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% include "partials/audiobook_runtime.html" %}
+
+<section class="card">
+  <h2>Books</h2>
+  <p class="hint">
+    In Plex, an audiobook is an album in a music library. Pick the library your
+    audiobooks are in; each book aligned here appears in Canopy+ with its text.
+  </p>
+
+  {% if plex_error %}
+    <p class="hint err">{{ plex_error }}</p>
+  {% elif not libraries %}
+    <p class="empty">This Plex server has no music libraries, which is where Plex keeps audiobooks.</p>
+  {% else %}
+    <form method="get" action="/admin/audiobooks" class="filter">
+      <select name="library" aria-label="Library" onchange="this.form.submit()">
+        {% for section in libraries %}
+          <option value="{{ section.id }}" {% if library and section.id == library.id %}selected{% endif %}>{{ section.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="search" name="q" value="{{ q }}" placeholder="Search titles" aria-label="Search titles">
+      <button type="submit" class="secondary">Search</button>
+    </form>
+
+    {% if not books %}
+      <p class="empty">{% if q %}No books match “{{ q }}”.{% else %}This library has no albums.{% endif %}</p>
+    {% else %}
+      <div class="table-scroll">
+        <table class="books">
+          <thead>
+            <tr><th class="cover"></th><th>Book</th><th>Read-along</th></tr>
+          </thead>
+          <tbody>
+            {% for album, book in books %}
+              <tr>
+                <td class="cover">
+                  {% if album.thumb %}
+                    <img src="/admin/audiobooks/cover/{{ album.rating_key }}?thumb={{ album.thumb|urlencode }}"
+                         alt="" width="48" height="48" loading="lazy">
+                  {% endif %}
+                </td>
+                <td class="book">
+                  <strong>{{ album.title }}</strong>
+                  <div class="book-sub">
+                    {{ album.author or "" }}{% if album.year %}{% if album.author %} · {% endif %}{{ album.year }}{% endif %}{% if album.tracks and album.tracks > 1 %} · {{ album.tracks }} files{% endif %}
+                  </div>
+                </td>
+                <td class="readalong">{% include "partials/audiobook_status.html" %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% set pages = ((total + page_size - 1) // page_size) %}
+      {% if pages > 1 %}
+        <div class="row pager">
+          {% set params = "library=" ~ (library.id|urlencode) ~ ("&q=" ~ (q|urlencode) if q else "") %}
+          {% if page > 0 %}<a class="button secondary" href="/admin/audiobooks?{{ params }}&page={{ page - 1 }}">← Previous</a>{% endif %}
+          <span class="muted">Page {{ page + 1 }} of {{ pages }}</span>
+          {% if page + 1 < pages %}<a class="button secondary" href="/admin/audiobooks?{{ params }}&page={{ page + 1 }}">Next →</a>{% endif %}
+        </div>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+</section>
+
+{% endblock %}

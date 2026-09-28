@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from . import (
     actions,
     activity,
+    audiobooks,
     config,
     libraries,
     login,
@@ -33,5 +34,6 @@ router.include_router(user_home.router)
 router.include_router(activity.router)
 router.include_router(notifications.router)
 router.include_router(libraries.router)
+router.include_router(audiobooks.router)
 
 __all__ = ["router"]
