@@ -23,6 +23,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -829,3 +830,41 @@ class AudiobookProgress(Base):
     #: Playback rate the listener chose for this book; rides on the newest
     #: listen like everything else here. ``None`` until a client sends one.
     speed: Mapped[float | None] = mapped_column(Float)
+
+
+class AudiobookBookmark(Base):
+    """A place one listener marked in one audiobook.
+
+    Keyed by an id the client makes, so a write it retries after losing the
+    answer lands on the same row instead of adding a second bookmark. Scoped
+    like :class:`AudiobookProgress`: per user, per Plex Home profile.
+
+    A delete leaves a tombstone (``deleted_at``) rather than removing the row.
+    Another device may still have the add queued from before it saw the delete;
+    without the tombstone that late write would bring the bookmark back.
+    """
+
+    __tablename__ = "audiobook_bookmarks"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    profile: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="")
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plex_server_id: Mapped[str] = mapped_column(String(64))
+    rating_key: Mapped[str] = mapped_column(String(32))
+    position: Mapped[float] = mapped_column(Float)
+    track_rating_key: Mapped[str | None] = mapped_column(String(32))
+    track_offset: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "ix_audiobook_bookmarks_book",
+            "user_id",
+            "profile",
+            "plex_server_id",
+            "rating_key",
+        ),
+    )

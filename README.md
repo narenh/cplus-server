@@ -598,6 +598,7 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /audiobooks/{ratingKey}` | cache + Plex | One book's index: files and their offsets, chapters, chunk time ranges, `version` |
 | `GET /audiobooks/{ratingKey}/chunks/{n}?v={version}` | cache + Plex | ~10 minutes of sentences. Immutable for its version; 409 once the book is re-aligned |
 | `GET`/`PUT /audiobooks/{ratingKey}/progress` | cache + Plex | Where the caller is in any audiobook they can see, aligned or not. Newest listen wins |
+| `GET /audiobooks/{ratingKey}/bookmarks`, `PUT`/`DELETE …/bookmarks/{id}` | cache + Plex | Places the caller marked in a book. The client makes each id (a UUID), so a retried add is harmless |
 | `GET /home` | cache | The caller's whole home screen, in CanopyPlus's own `HomeSettings` shape |
 | `PUT /home` | cache | One `HomeSettings` document. 200 if it won, 409 if it lost — the winner is the body either way |
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
@@ -1523,9 +1524,17 @@ would instead let a device that reports on launch drag everyone back. A
 device with a wrong clock cannot freeze everyone else's progress. Write every
 15–30 seconds while playing and on pause: tvOS can end an app without warning.
 
+**Bookmarks** are per user and book too, and also returned in the index.
+`PUT …/bookmarks/{uuid}` takes `{"position", "created_at", "track_rating_key"?,
+"track_offset"?}`; the client picks the uuid, so resending an add whose answer
+was lost is harmless. `DELETE` leaves a tombstone: a `PUT` to a deleted id
+answers `{"deleted": true, "bookmark": null}` instead of bringing it back, which
+stops a device that queued the add before it saw the delete from undoing it.
+An id already used for another book is a **409**.
+
 **Profiles.** `X-Plex-Token` is the account's, shared by every Plex Home
 profile, so a client sends `X-Canopy-Profile: <home user uuid>` to keep each
-profile's progress apart. Leave it out for the account owner. It isn't
+profile's progress and bookmarks apart. Leave it out for the account owner. It isn't
 verified: whoever holds the token can switch to any of the account's profiles
 in Plex anyway.
 

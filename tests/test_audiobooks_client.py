@@ -398,3 +398,65 @@ async def test_each_home_profile_keeps_its_own_progress(
     assert theirs["progress"]["position"] == 60
     listed = (await client.get("/audiobooks", headers=kid)).json()["books"][0]
     assert listed["progress"]["position"] == 60
+
+
+# --------------------------------------------------------------------------- #
+# Bookmarks
+# --------------------------------------------------------------------------- #
+
+MARK = "3f1c2a9e-8b7d-4e6f-9a0b-1c2d3e4f5a6b"
+
+
+async def mark(client, headers, *, position: float, id: str = MARK, key: str = "501"):
+    return await client.put(
+        f"/audiobooks/{key}/bookmarks/{id}",
+        headers=headers,
+        json={"position": position, "created_at": _at(0), "track_rating_key": "502"},
+    )
+
+
+async def test_a_bookmark_is_stored_and_a_retry_does_not_double_it(
+    client, db, connected, listener, plex, plex_headers
+) -> None:
+    await aligned(db)
+    first = await mark(client, plex_headers, position=90)
+    assert first.json()["deleted"] is False
+    await mark(client, plex_headers, position=90)
+    listed = (await client.get("/audiobooks/501/bookmarks", headers=plex_headers)).json()
+    assert [b["id"] for b in listed["bookmarks"]] == [MARK]
+    index = (await client.get("/audiobooks/501", headers=plex_headers)).json()
+    assert index["bookmarks"][0]["position"] == 90
+
+
+async def test_a_deleted_bookmark_is_not_brought_back_by_a_late_add(
+    client, db, connected, listener, plex, plex_headers
+) -> None:
+    await aligned(db)
+    await mark(client, plex_headers, position=90)
+    gone = await client.delete(f"/audiobooks/501/bookmarks/{MARK}", headers=plex_headers)
+    assert gone.status_code == 204
+    late = await mark(client, plex_headers, position=90)
+    assert late.json() == {"deleted": True, "bookmark": None}
+    listed = (await client.get("/audiobooks/501/bookmarks", headers=plex_headers)).json()
+    assert listed["bookmarks"] == []
+
+
+async def test_bookmarks_are_per_profile_and_per_book(
+    client, db, connected, listener, plex, plex_headers
+) -> None:
+    await aligned(db)
+    await aligned(db, rating_key="601", title="Another")
+    await mark(client, plex_headers, position=90)
+    kid = {**plex_headers, "X-Canopy-Profile": "kid-uuid"}
+    theirs = (await client.get("/audiobooks/501/bookmarks", headers=kid)).json()
+    assert theirs["bookmarks"] == []
+    reused = await mark(client, plex_headers, position=5, key="601")
+    assert reused.status_code == 409
+
+
+async def test_a_bookmark_id_must_be_a_uuid(
+    client, db, connected, listener, plex, plex_headers
+) -> None:
+    await aligned(db)
+    response = await mark(client, plex_headers, position=1, id="not-a-uuid")
+    assert response.status_code == 422

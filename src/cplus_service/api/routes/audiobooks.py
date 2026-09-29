@@ -22,7 +22,12 @@ of its files starts on it.
   book, aligned or not. Newest listen wins; see
   :class:`~cplus_service.db.models.AudiobookProgress`.
 
-Progress is kept per Plex Home profile, named by ``X-Canopy-Profile`` (absent
+* ``GET /audiobooks/{ratingKey}/bookmarks``, ``PUT``/``DELETE
+  /audiobooks/{ratingKey}/bookmarks/{id}`` — places this user marked in the
+  book. The client makes each id, so a retried add is harmless; see
+  :class:`~cplus_service.db.models.AudiobookBookmark`.
+
+Progress and bookmarks are kept per Plex Home profile, named by ``X-Canopy-Profile`` (absent
 for the account owner); see :func:`~cplus_service.api.deps.get_profile`.
 """
 
@@ -31,6 +36,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import Response
@@ -40,7 +46,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...audiobooks.access import AccessUnknown
 from ...audiobooks.ingest import decode_chunk
-from ...db.models import AudiobookAlignment, AudiobookChunk, AudiobookProgress, Config, User
+from ...db.models import (
+    AudiobookAlignment,
+    AudiobookBookmark,
+    AudiobookChunk,
+    AudiobookProgress,
+    Config,
+    User,
+)
 from ...db.session import get_config
 from ..deps import CachedUserDep, DbDep, PlexTokenDep, ProfileDep, StateDep
 from ..state import AppState
@@ -193,6 +206,7 @@ async def book_index(
         .order_by(AudiobookChunk.n)
     )
     progress = await _progress_rows(db, user, profile, alignment.plex_server_id, [rating_key])
+    bookmarks = await _bookmark_rows(db, user, profile, alignment.plex_server_id, rating_key)
     return {
         **_book_json(alignment),
         "tracks": alignment.tracks,
@@ -202,6 +216,7 @@ async def book_index(
             for n, start, end, first, last in chunks.all()
         ],
         "progress": _progress_json(progress.get(rating_key)),
+        "bookmarks": [_bookmark_json(b) for b in bookmarks],
     }
 
 
@@ -349,3 +364,126 @@ async def put_progress(
     row.updated_at = now
     await db.flush()
     return {"applied": True, "progress": _progress_json(row)}
+
+
+# --------------------------------------------------------------------------- #
+# Bookmarks
+# --------------------------------------------------------------------------- #
+
+
+class BookmarkIn(BaseModel):
+    """A place in the book, and when the listener marked it."""
+
+    position: float = Field(ge=0, description="Seconds from the start of the book, all files")
+    created_at: datetime = Field(description="When the listener made the bookmark")
+    track_rating_key: str | None = Field(default=None, max_length=32)
+    track_offset: float | None = Field(default=None, ge=0)
+
+
+def _bookmark_json(row: AudiobookBookmark) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "position": row.position,
+        "track_rating_key": row.track_rating_key,
+        "track_offset": row.track_offset,
+        "created_at": _aware(row.created_at).isoformat(),
+    }
+
+
+async def _bookmark_rows(
+    db: AsyncSession, user: User, profile: str, server_id: str, rating_key: str
+) -> list[AudiobookBookmark]:
+    """The live bookmarks in one book, in book order. Tombstones stay server-side."""
+    rows = await db.execute(
+        select(AudiobookBookmark)
+        .where(
+            AudiobookBookmark.user_id == user.id,
+            AudiobookBookmark.profile == profile,
+            AudiobookBookmark.plex_server_id == server_id,
+            AudiobookBookmark.rating_key == rating_key,
+            AudiobookBookmark.deleted_at.is_(None),
+        )
+        .order_by(AudiobookBookmark.position)
+    )
+    return list(rows.scalars())
+
+
+async def _bookmark(
+    db: AsyncSession, user: User, profile: str, server_id: str, rating_key: str, bookmark_id: UUID
+) -> AudiobookBookmark | None:
+    row = await db.get(AudiobookBookmark, (user.id, profile, str(bookmark_id)))
+    # An id this user already used for another book is not this book's.
+    if row is not None and (row.plex_server_id, row.rating_key) != (server_id, rating_key):
+        raise HTTPException(status.HTTP_409_CONFLICT, "That bookmark id belongs to another book")
+    return row
+
+
+@router.get("/{rating_key}/bookmarks")
+async def list_bookmarks(
+    rating_key: str,
+    db: DbDep,
+    state: StateDep,
+    user: CachedUserDep,
+    plex_token: PlexTokenDep,
+    profile: ProfileDep,
+) -> dict[str, Any]:
+    config = await get_config(db)
+    server_id = await _check_album(db, state, config, plex_token, rating_key)
+    rows = await _bookmark_rows(db, user, profile, server_id, rating_key)
+    return {"bookmarks": [_bookmark_json(row) for row in rows]}
+
+
+@router.put("/{rating_key}/bookmarks/{bookmark_id}")
+async def put_bookmark(
+    rating_key: str,
+    bookmark_id: UUID,
+    body: BookmarkIn,
+    db: DbDep,
+    state: StateDep,
+    user: CachedUserDep,
+    plex_token: PlexTokenDep,
+    profile: ProfileDep,
+) -> dict[str, Any]:
+    """Add a bookmark, or move one. A deleted bookmark stays deleted.
+
+    ``deleted`` in the answer says the id was already deleted elsewhere, so
+    the client should drop it rather than keep retrying.
+    """
+    config = await get_config(db)
+    server_id = await _check_album(db, state, config, plex_token, rating_key)
+    row = await _bookmark(db, user, profile, server_id, rating_key, bookmark_id)
+    if row is not None and row.deleted_at is not None:
+        return {"deleted": True, "bookmark": None}
+    if row is None:
+        row = AudiobookBookmark(
+            user_id=user.id,
+            profile=profile,
+            id=str(bookmark_id),
+            plex_server_id=server_id,
+            rating_key=rating_key,
+        )
+        db.add(row)
+    row.position = body.position
+    row.track_rating_key = body.track_rating_key
+    row.track_offset = body.track_offset
+    row.created_at = _aware(body.created_at)
+    await db.flush()
+    return {"deleted": False, "bookmark": _bookmark_json(row)}
+
+
+@router.delete("/{rating_key}/bookmarks/{bookmark_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bookmark(
+    rating_key: str,
+    bookmark_id: UUID,
+    db: DbDep,
+    state: StateDep,
+    user: CachedUserDep,
+    plex_token: PlexTokenDep,
+    profile: ProfileDep,
+) -> None:
+    """Delete a bookmark. Deleting one this server never heard of is not an error."""
+    config = await get_config(db)
+    server_id = await _check_album(db, state, config, plex_token, rating_key)
+    row = await _bookmark(db, user, profile, server_id, rating_key, bookmark_id)
+    if row is not None and row.deleted_at is None:
+        row.deleted_at = datetime.now(UTC)
