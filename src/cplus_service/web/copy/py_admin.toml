@@ -136,7 +136,7 @@ text = '''You can use {{ placeholders }}, which the app fills in from the releas
 
 # Audiobooks tab: uploading an epub / importing an alignment, shown above the book's row.
 [audiobook_read_along_off]
-text = '''Read-along isn't enabled, so nothing can be aligned yet.'''
+text = '''Canopy+ Audiobooks isn't turned on, so nothing can be aligned yet.'''
 
 [audiobook_already_aligning_epub]
 text = '''This book is already being aligned. Cancel that first.'''

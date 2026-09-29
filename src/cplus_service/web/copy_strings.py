@@ -1,9 +1,9 @@
 """The admin UI's prose, kept in ``web/copy/*.toml`` so it can be edited without touching templates.
 
 One file per page (``config.toml``, ``actions.toml``…). A string's key is
-``<file stem>.<table path>``, e.g. ``[prowlarr_key]`` / ``hint = '''…'''`` in
-``config.toml`` is ``config.prowlarr_key.hint``. Templates pull it in with
-``{{ t('config.prowlarr_key.hint') }}``.
+``<file stem>.<table path>``, e.g. ``[preferred_indexer]`` / ``hint = '''…'''`` in
+``config.toml`` is ``config.preferred_indexer.hint``. Templates pull it in with
+``{{ t('config.preferred_indexer.hint') }}``.
 
 Each string is itself a tiny Jinja template rendered with the calling
 template's variables, and its output is trusted HTML. So ``<code>``, ``{{ var }}``

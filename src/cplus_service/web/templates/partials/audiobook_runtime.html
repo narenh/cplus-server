@@ -4,60 +4,89 @@
    because enabling downloads ~1.5 GB and a book in progress holds ~2 GB of
    memory. While an install or removal runs, the card re-requests itself every
    two seconds, and when that finishes the page reloads so every book's cell
-   picks up whether it can be aligned now. #}
+   picks up whether it can be aligned now. The polling card is marked
+   ``polling`` so each refresh swaps in without the just-saved tint. #}
 {% set busy = runtime.status in ("installing", "removing") %}
-<section class="card" id="aligner-runtime"
+<section class="card{{ ' polling' if busy }}" id="aligner-runtime"
   {% if busy %}hx-get="/admin/audiobooks/runtime?was={{ runtime.status }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
-  <h2>Read-along</h2>
+  <h2>Canopy+ Audiobooks</h2>
 
   {% if runtime.status == "unconfigured" %}
     <p class="hint">
-      {{ t('partials_audiobook_runtime.unconfigured.hint') }}
+      Canopy+ Audiobooks isn't set up on this deployment. It needs the
+      <code>cplus-aligner</code> service from <code>docker-compose.yml</code>,
+      sharing the <code>cplus-align</code> volume with this one, and
+      <code>CPLUS_ALIGN_DIR</code> set on both.
     </p>
 
   {% elif runtime.status == "offline" %}
     <p class="hint err">
-      {{ t('partials_audiobook_runtime.offline.hint') }}
+      The <code>cplus-aligner</code> service isn't running — it hasn't checked in
+      for over a minute. Nothing can be aligned until it is back; finished books
+      keep working in the app.
     </p>
 
   {% elif runtime.status in ("absent", "failed") %}
     <p class="hint">
-      {{ t('partials_audiobook_runtime.off_intro.hint') }}
+      Canopy+ can play audiobooks on your TV synchronized with the book text.
+      Upload DRM-free epub books to align them with your audiobooks. Alignment
+      happens locally using
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">ctc-forced-aligner</a>
+      and requires {{ runtime.min_free }} of server storage for the
+      model and intermediate files.
     </p>
     <p class="hint warn">
-      {{ t('partials_audiobook_runtime.off_cost.warning') }}
+      Turning this on downloads <strong>{{ runtime.download_bytes|bytes }}</strong> once —
+      the alignment model and what runs it — into the aligner's volume. While a
+      book is being aligned the aligner uses about <strong>2.1 GB of memory</strong>
+      and the CPUs you've given it; between books it uses almost nothing.
     </p>
     <p class="hint">
-      {{ t('partials_audiobook_runtime.off_license.hint') }}
+      The model and the alignment code are licensed
+      <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>:
+      non-commercial use only.
     </p>
     {% if runtime.status == "failed" and runtime.error %}
-      <p class="hint err">{{ t('partials_audiobook_runtime.install_failed.hint') }}</p>
+      <p class="hint err">The last attempt failed: {{ runtime.error }}</p>
+    {% endif %}
+    {% if not runtime.enough_space %}
+      <p class="hint err">
+        Canopy+ Audiobooks requires {{ runtime.min_free }} of disk space
+        ({{ runtime.free_bytes|bytes }} available).
+      </p>
     {% endif %}
     <div class="row">
       <button type="button"
               hx-post="/admin/audiobooks/runtime/enable"
-              hx-target="#aligner-runtime" hx-swap="outerHTML">
-        {{ t('partials_audiobook_runtime.retry_button.label') if runtime.status == "failed" else t('partials_audiobook_runtime.enable_button.label') }}
+              hx-target="#aligner-runtime" hx-swap="outerHTML"
+              {% if not runtime.enough_space %}disabled{% endif %}>
+        Enable
       </button>
     </div>
 
   {% elif runtime.status == "installing" %}
     {% set pct = runtime.percent %}
     <div class="bar {{ 'indeterminate' if pct is none or (runtime.progress or {}).get('stage') != 'download' }}">
-      <span {% if pct is not none %}style="width: {{ pct|round(1) }}%"{% endif %}></span>
+      <span id="aligner-runtime-bar" {% if pct is not none %}style="width: {{ pct|round(1) }}%"{% endif %}></span>
     </div>
     <p class="status-line">
       {% set p = runtime.progress or {} %}
-      {{ t('partials_audiobook_runtime.installing.status', p=p) }}
+      {% if p.get("stage") == "download" and p.get("total") %}
+        Downloading {{ p.get("done")|bytes }} of {{ p.get("total")|bytes }}…
+      {% else %}
+        {{ p.get("label") or "Starting" }}…
+      {% endif %}
     </p>
 
   {% elif runtime.status == "removing" %}
     <div class="bar indeterminate"><span></span></div>
-    <p class="status-line">{{ t('partials_audiobook_runtime.removing.status') }}</p>
+    <p class="status-line">Removing the runtime…</p>
 
   {% elif runtime.status == "outdated" %}
     <p class="hint warn">
-      {{ t('partials_audiobook_runtime.outdated.warning') }}
+      This version of cplus-server needs an updated aligner runtime
+      ({{ runtime.download_bytes|bytes }} to download). Books already aligned keep
+      working; nothing new is aligned until it's updated.
     </p>
     <div class="row">
       <button type="button"
@@ -67,14 +96,19 @@
 
   {% elif runtime.status == "ready" %}
     <p class="hint">
-      {{ t('partials_audiobook_runtime.ready.hint') }}
+      Canopy+ can play audiobooks on your TV synchronized with the book text.
+      Upload DRM-free epub books to align them with your audiobooks. Alignment
+      happens locally using
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">ctc-forced-aligner</a>
+      and requires {{ runtime.min_free }} of server storage for the
+      model and intermediate files.
     </p>
     <div class="row">
       <button type="button" class="secondary danger"
               hx-post="/admin/audiobooks/runtime/disable"
               hx-target="#aligner-runtime" hx-swap="outerHTML"
-              hx-confirm="{{ t('partials_audiobook_runtime.disable_confirm.message') }}">
-        {{ t('partials_audiobook_runtime.disable_button.label') }}
+              hx-confirm="Turn off Canopy+ Audiobooks? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.">
+        Disable
       </button>
     </div>
   {% endif %}

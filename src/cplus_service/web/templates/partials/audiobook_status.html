@@ -1,16 +1,23 @@
-{# One book's read-along cell: rendered in the list, and returned alone by every
+{# One book's audiobook cell: rendered in the list, and returned alone by every
    write to it and every poll of it.
 
    A cell with a job in flight re-requests itself — every 2 s while verifying,
    every 10 s while processing — and a cell with nothing in flight carries no
-   trigger at all, so a page of finished books makes no requests.
+   trigger at all, so a page of finished books makes no requests. A polling
+   cell is marked ``polling`` so each refresh swaps in without the just-saved
+   tint, and its bar's fill keeps one id so htmx slides it to the new width
+   rather than redrawing it.
 
-   The "⋯" menu holds what is used rarely: uploading a finished alignment made
-   elsewhere. It is left out while a job is in flight — the cell re-renders on
-   every poll, which would snap an open menu shut — and an upload then would
-   be overwritten by the job anyway. Its panel opens inside the cell rather
-   than floating over the table: the table scrolls sideways on a narrow screen,
-   and that clips anything positioned outside it. #}
+   The "⋯" menu holds what is used rarely: replacing a finished book's epub,
+   uploading an alignment made elsewhere, downloading this one, and deleting
+   it. It is
+   left out while a job is in flight — the cell re-renders on every poll, which
+   would snap an open menu shut — and an upload then would be overwritten by
+   the job anyway. It is a popover, so it sits in the top layer rather than
+   being clipped by the sideways-scrolling table; static/popover-menus.js
+   places it under its button, and asks the data-confirm question before a
+   file picker opens. Its uploads show "Uploading…" in the cell itself, since
+   the menu closes once a file is picked. #}
 {% set base = "/admin/audiobooks/books/" ~ book.rating_key %}
 {% macro upload(label, style="secondary") %}
   {% if book.can_align %}
@@ -27,9 +34,9 @@
 {% macro cancel() %}
   <button type="button" class="link" hx-post="{{ base }}/cancel"
           hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
-          hx-confirm="{{ t('partials_audiobook_status.cancel.confirm') }}">Cancel</button>
+          hx-confirm="Stop aligning this book?">Cancel</button>
 {% endmacro %}
-<div class="book-status" id="book-{{ book.rating_key }}"
+<div class="book-status{{ ' polling' if book.polling }}" id="book-{{ book.rating_key }}"
   {% if book.polling %}hx-get="{{ base }}/status" hx-trigger="{{ book.polling }}" hx-swap="outerHTML"{% endif %}>
 
 {% if book.notice %}<p class="hint err">{{ book.notice }}</p>{% endif %}
@@ -37,19 +44,18 @@
 
 {% if book.kind == "verifying" %}
   {% set pct = book.job.progress or 0 %}
-  <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
+  <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span id="bar-{{ book.rating_key }}" {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
   <div class="status-line">
     <span>Verifying…</span>
-    <span class="muted">{{ book.job.stage or "" }}</span>
     {{ cancel() }}
   </div>
 
 {% elif book.kind == "queued" %}
-  <div class="bar"><span style="width: 0%"></span></div>
+  <div class="bar"><span id="bar-{{ book.rating_key }}" style="width: 0%"></span></div>
   <div class="status-line">
-    <span>{{ t('partials_audiobook_status.queued.label') }}</span>
+    <span>Processing…</span>
     <span class="muted">
-      {{ t('partials_audiobook_status.queued_position.text', book=book) }}
+      {% if book.position and book.position > 1 %}{{ book.position|ordinal }} in line{% else %}starting{% endif %}
     </span>
     {{ cancel() }}
   </div>
@@ -57,65 +63,82 @@
 
 {% elif book.kind == "running" %}
   {% set pct = book.job.progress or 0 %}
-  <div class="bar"><span style="width: {{ pct|round(1) }}%"></span></div>
+  <div class="bar"><span id="bar-{{ book.rating_key }}" style="width: {{ pct|round(1) }}%"></span></div>
   <div class="status-line">
     <span>Processing… {{ pct|round|int }}%</span>
     <span class="muted">
-      {{ book.job.stage or "" }}{% if book.job.eta_seconds is not none %} · {{ book.job.eta_seconds|eta }} left{% endif %}
+      {% if book.speed %}Speed: {{ "%.1f"|format(book.speed) }}x{% endif %}{% if book.speed and book.job.eta_seconds is not none %} · {% endif %}{% if book.job.eta_seconds is not none %}{{ book.job.eta_seconds|eta }} left{% endif %}
     </span>
     {{ cancel() }}
   </div>
   {% if book.stalled_minutes %}
-    <p class="hint err">{{ t('partials_audiobook_status.stalled.hint', book=book) }}</p>
+    <p class="hint err">No word from the aligner for {{ book.stalled_minutes }} minutes. If it doesn't pick back up, check the <code>cplus-aligner</code> container.</p>
   {% endif %}
   {% if book.job.message %}<p class="hint warn">{{ book.job.message }}</p>{% endif %}
 
 {% elif book.kind == "ready" %}
   {% set stats = book.alignment.stats or {} %}
   <div class="status-line">
-    <span class="ok">✓ Ready</span>
-    {% if stats.get("sentences") %}
-      <span class="muted">{{ "{:,}".format(stats.get("aligned", 0)) }} of {{ "{:,}".format(stats.get("sentences")) }} sentences</span>
+    {# How much of the epub was found in the audio. Under 80% is worth a look;
+       under 50% is almost always the wrong edition or recording. Rounded down,
+       so a book never shows a figure on the other side of its colour's line. #}
+    {% set matched = (100 * stats.get("aligned", 0) / stats.get("sentences"))|round(0, "floor")|int if stats.get("sentences") else none %}
+    {% if matched is none or matched >= 80 %}
+      <span class="ok">✓ Ready</span>
+    {% elif matched >= 50 %}
+      <span class="warn">Partial Match {{ matched }}%</span>
+    {% else %}
+      <span class="err">Incorrect Match {{ matched }}%</span>
     {% endif %}
   </div>
   {% if book.stale %}
-    <p class="hint warn">{{ t('partials_audiobook_status.stale.hint') }}</p>
+    <p class="hint warn">The audio in Plex has changed since this was aligned, so the timings may be off. Upload the epub again to re-align.</p>
   {% endif %}
-  {% if book.message %}<p class="hint err">{{ t('partials_audiobook_status.replace_failed.hint', book=book) }}</p>{% endif %}
-  <div class="row-controls">
-    {{ upload(t('partials_audiobook_status.replace_button.label')) }}
-    <button type="button" class="link danger" hx-post="{{ base }}/delete"
-            hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
-            hx-confirm="{{ t('partials_audiobook_status.delete.confirm') }}">Delete</button>
-  </div>
+  {% if book.message %}<p class="hint err">The replacement didn't go through: {{ book.message }}</p>{% endif %}
 
 {% elif book.kind == "failed" %}
-  <p class="hint err">{{ book.message or t('partials_audiobook_status.failed.fallback') }}</p>
-  {{ upload(t('partials_audiobook_status.failed_button.label')) }}
+  <p class="hint err">{{ book.message or "That didn't work." }}</p>
+  {{ upload("Try another epub…") }}
 
 {% else %}
   {% if book.can_align %}
-    {{ upload(t('partials_audiobook_status.align_button.label')) }}
+    {{ upload("Upload epub") }}
   {% else %}
     <span class="muted">—</span>
   {% endif %}
 {% endif %}
 {% if not book.polling %}
-  <details class="book-menu">
-    <summary aria-label="More for this book" title="More">⋯</summary>
-    <div class="book-menu-items">
-      <form class="upload-form" hx-post="{{ base }}/import" hx-encoding="multipart/form-data"
-            hx-trigger="change" hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML">
-        <label class="button secondary file-button">
-          {{ t('partials_audiobook_status.import_button.label') }}
-          <input type="file" name="alignment" accept=".json,application/json">
+  {% set menu_id = "book-menu-" ~ book.rating_key %}
+  <button type="button" class="book-menu-button" popovertarget="{{ menu_id }}"
+          aria-label="More for this book" title="More">⋯</button>
+  <div class="popover-menu" id="{{ menu_id }}" popover>
+    {% if book.kind == "ready" and book.can_align %}
+      <form hx-post="{{ base }}/align" hx-encoding="multipart/form-data" hx-trigger="change"
+            hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+            hx-indicator="#book-{{ book.rating_key }}">
+        <label class="menu-item file-button">
+          Replace epub
+          <input type="file" name="epub" accept=".epub,application/epub+zip"
+                 data-confirm="Replacing this epub will require re-aligning the entire audiobook and could take several hours. Are you sure you want to proceed?">
         </label>
-        <span class="uploading muted">Uploading…</span>
       </form>
-      <p class="hint">
-        {{ t('partials_audiobook_status.import_hint.hint') }}
-      </p>
-    </div>
-  </details>
+    {% endif %}
+    <form hx-post="{{ base }}/import" hx-encoding="multipart/form-data" hx-trigger="change"
+          hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+          hx-indicator="#book-{{ book.rating_key }}">
+      <label class="menu-item file-button"
+             title="A finished alignment made elsewhere (bookalign.py's output) from this book's audio. Nothing needs to run.">
+        Upload alignment JSON
+        <input type="file" name="alignment" accept=".json,application/json">
+      </label>
+    </form>
+    {% if book.kind == "ready" %}
+      <a class="menu-item" href="{{ base }}/alignment.json" download>Download alignment JSON</a>
+      <button type="button" class="menu-item danger" hx-post="{{ base }}/delete"
+              hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+              hx-confirm="Delete this book's alignment? Its text stops showing in Canopy+.">Delete</button>
+    {% endif %}
+  </div>
+  <span class="uploading muted">Uploading…</span>
 {% endif %}
 </div>

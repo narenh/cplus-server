@@ -121,7 +121,7 @@ async def test_the_tab_says_read_along_is_not_set_up_without_an_aligner(
     response = await client.get("/admin/audiobooks")
     assert response.status_code == 200
     assert "isn't set up on this deployment" in response.text
-    assert "Align…" not in response.text
+    assert "Upload epub" not in response.text
 
 
 async def test_the_tab_lists_only_music_libraries_and_their_albums(
@@ -142,11 +142,44 @@ async def test_enabling_is_offered_with_its_download_size_and_licence(
     sidecar_up(paths, status="absent")
     await signed_in(client, db)
     response = await client.get("/admin/audiobooks")
-    assert "Turn on read-along" in response.text
+    after = response.text.split('hx-post="/admin/audiobooks/runtime/enable"')[1]
+    assert after.split(">", 1)[1].split("</button>")[0].strip() == "Enable"
     assert "GB</strong> once" in response.text
     assert "CC BY-NC 4.0" in response.text
     # Nothing can be aligned until it's on.
-    assert "Align…" not in response.text
+    assert "Upload epub" not in response.text
+
+
+def low_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
+    from collections import namedtuple
+
+    from cplus_service.audiobooks import runtime
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(runtime.shutil, "disk_usage", lambda _path: usage(free, 0, free))
+
+
+async def test_enabling_is_disabled_without_10_gb_free(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    connected: Config,
+    plex,
+    paths: AlignPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sidecar_up(paths, status="absent")
+    low_disk(monkeypatch, 4_200_000_000)
+    await signed_in(client, db)
+    response = await client.get("/admin/audiobooks")
+    assert "Canopy+ Audiobooks requires 10GB of disk space (4.2 GB available)" in " ".join(
+        response.text.split()
+    )
+    assert "disabled>" in " ".join(response.text.split())
+
+    refused = await client.post("/admin/audiobooks/runtime/enable")
+    assert refused.status_code == 409
+    assert "4.2 GB available" in refused.text
+    assert not paths.request_file.exists()
 
 
 async def test_enabling_asks_the_sidecar_to_install(
@@ -270,7 +303,7 @@ async def test_uploading_is_refused_while_read_along_is_off(
     sidecar_up(paths, status="absent")
     await signed_in(client, db)
     response = await upload(client, make_epub())
-    assert "enabled, so nothing can be aligned" in response.text
+    assert "turned on, so nothing can be aligned" in response.text
     assert await jobs(db) == []
 
 
@@ -293,7 +326,7 @@ async def test_cancelling_marks_the_job_and_tells_the_sidecar(
     await upload(client, make_epub())
     response = await client.post(f"/admin/audiobooks/books/{ALBUM_KEY}/cancel")
     assert response.status_code == 200
-    assert "Align…" in response.text
+    assert "Upload epub" in response.text
     [job] = await jobs(db)
     assert job.status == AudiobookJobStatus.CANCELLED
     assert (paths.job(job.id) / "cancel").exists()
@@ -327,7 +360,7 @@ async def test_verification_progress_reaches_the_cell(
     await _sync(app, paths)
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
     assert "Verifying…" in response.text
-    assert "Reading audio samples" in response.text
+    assert "Reading audio samples" not in response.text  # the stage isn't worth showing
     assert "width: 40.0%" in response.text
 
 
@@ -366,7 +399,9 @@ async def test_a_passed_verification_queues_then_runs_with_progress_and_eta(
     await _sync(app, paths)
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
     assert "Processing… 43%" in response.text
-    assert "about 3 h 20 min left" in response.text
+    # 10 h 25 min of audio over (a moment so far + 3 h 20 min left).
+    assert "Speed: 3.1x · about 3 h 20 min left" in response.text
+    assert "Listening to the audio" not in response.text
     assert 'hx-trigger="every 10s"' in response.text
 
 
@@ -407,7 +442,7 @@ async def test_a_result_is_stored_in_chunks_and_the_job_directory_removed(
     assert sentences[1]["start"] is None and sentences[1]["flags"] == ["unspoken"]
 
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
-    assert "✓ Ready" in response.text and "5 of 6 sentences" in response.text
+    assert "✓ Ready" in response.text and "%" not in response.text.split("✓ Ready")[1][:80]
 
     # The epub and everything else in the job's directory go once it is quiet.
     monkeypatch.setattr(monitor, "SWEEP_QUIET_SECONDS", 0)
@@ -469,7 +504,7 @@ async def test_deleting_an_alignment_removes_its_chunks(
     write_result(paths.job(job.id))
     await _sync(app, paths)
     response = await client.post(f"/admin/audiobooks/books/{ALBUM_KEY}/delete")
-    assert "Align…" in response.text
+    assert "Upload epub" in response.text
     db.expire_all()
     assert (await db.execute(select(AudiobookAlignment))).first() is None
     assert (await db.execute(select(AudiobookChunk))).first() is None
@@ -611,7 +646,7 @@ async def test_a_bookalign_json_is_imported_without_the_aligner_at_all(
     await signed_in(client, db)
     response = await import_json(client, bookalign_output())
     assert response.status_code == 200
-    assert "✓ Ready" in response.text and "5 of 6 sentences" in response.text
+    assert "✓ Ready" in response.text and "%" not in response.text.split("✓ Ready")[1][:80]
 
     db.expire_all()
     alignment = (await db.execute(select(AudiobookAlignment))).scalar_one()
@@ -638,6 +673,59 @@ async def test_an_import_replaces_the_existing_alignment_under_a_new_version(
     second = (await db.execute(select(AudiobookAlignment))).scalar_one()
     assert second.id != first
     assert second.stats["sentences"] == 8
+
+
+async def test_a_downloaded_alignment_uploads_back_unchanged(client, db, connected, plex) -> None:
+    await signed_in(client, db)
+    await import_json(client, bookalign_output())
+    download = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/alignment.json")
+    assert download.status_code == 200
+    assert 'filename="The Hobbit.alignment.json"' in download.headers["content-disposition"]
+    exported = download.json()
+    assert exported["version"] == 1 and len(exported["sentences"]) == 6
+    assert exported["audio"]["tracks"] == [{"n": 0, "offset": 0.0, "duration": 37500.0}]
+
+    db.expire_all()
+
+    async def snapshot() -> tuple:
+        row = (await db.execute(select(AudiobookAlignment))).scalar_one()
+        chunks = [c.data for c in (await db.execute(select(AudiobookChunk))).scalars()]
+        return row.id, (row.tracks, row.sections, row.stats, chunks)
+
+    before_id, before = await snapshot()
+    await import_json(client, download.content)
+    db.expire_all()
+    after_id, after = await snapshot()
+    assert after_id != before_id  # a new version...
+    assert after == before  # ...of the same alignment
+
+
+async def test_downloading_needs_an_alignment(client, db, connected, plex) -> None:
+    await signed_in(client, db)
+    response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/alignment.json")
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("aligned", "shown"),
+    [
+        (6, '<span class="ok">✓ Ready</span>'),
+        (5, '<span class="ok">✓ Ready</span>'),  # 83%
+        (4, '<span class="warn">Partial Match 66%</span>'),  # 66.7%, rounded down
+        (3, '<span class="warn">Partial Match 50%</span>'),
+        (2, '<span class="err">Incorrect Match 33%</span>'),
+    ],
+)
+async def test_a_finished_book_says_how_well_it_matched(
+    client, db, connected, plex, aligned: int, shown: str
+) -> None:
+    await signed_in(client, db)
+    payload = json.loads(bookalign_output())
+    for sentence in payload["sentences"][aligned:]:
+        sentence["start"] = sentence["end"] = None
+    payload["stats"].update(sentences=6, aligned=aligned)
+    response = await import_json(client, json.dumps(payload).encode())
+    assert shown in response.text
 
 
 async def test_an_alignment_of_different_audio_is_refused(client, db, connected, plex) -> None:
@@ -728,9 +816,22 @@ async def test_the_menu_is_offered_except_while_a_job_is_in_flight(
     sidecar_up(paths)
     await signed_in(client, db)
     page = await client.get("/admin/audiobooks")
-    assert 'class="book-menu"' in page.text and "Upload alignment JSON…" in page.text
+    assert 'class="popover-menu"' in page.text and "Upload alignment JSON" in page.text
+    assert "Replace epub" not in page.text and "Delete" not in page.text  # nothing to replace
     verifying = await upload(client, make_epub())
-    assert "book-menu" not in verifying.text
+    assert "popover-menu" not in verifying.text
+
+
+async def test_a_finished_books_menu_offers_replace_upload_and_delete(
+    client, db, connected, plex, paths: AlignPaths
+) -> None:
+    sidecar_up(paths)
+    await signed_in(client, db)
+    ready = await import_json(client, bookalign_output())
+    menu = ready.text[ready.text.index('class="popover-menu"') :]
+    order = ["Replace epub", "Upload alignment JSON", "Download alignment JSON", "Delete"]
+    assert [menu.index(item) for item in order] == sorted(menu.index(item) for item in order)
+    assert "re-aligning the entire audiobook" in menu
 
 
 async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
@@ -739,8 +840,15 @@ async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
     sidecar_up(paths)
     await signed_in(client, db)
     await import_json(client, bookalign_output())
+    db.expire_all()
+    before = (await db.execute(select(AudiobookAlignment))).scalar_one()
     refused_json = await import_json(client, b"{not json")
     assert "not JSON" in refused_json.text and "✓ Ready" in refused_json.text
+    wrong_book = await import_json(client, bookalign_output(duration=3346.0))
+    assert "Plex has 10 h 25 min" in wrong_book.text and "✓ Ready" in wrong_book.text
+    db.expire_all()
+    after = (await db.execute(select(AudiobookAlignment))).scalar_one()
+    assert (after.id, after.stats) == (before.id, before.stats)
     refused_epub = await upload(client, make_epub(language="fr"))
     assert "Only English" in refused_epub.text and "✓ Ready" in refused_epub.text
     assert "Try another epub" not in refused_epub.text

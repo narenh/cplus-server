@@ -91,7 +91,7 @@ text = '''Notifications are switched off for this instance. Watch GET /capabilit
 text = '''Couldn't check your access with Plex: {{ error }}'''
 
 [no_read_along]
-text = '''No read-along for this book'''
+text = '''This book isn't aligned'''
 
 [book_realigned]
 text = '''This book was re-aligned; fetch its index again.'''

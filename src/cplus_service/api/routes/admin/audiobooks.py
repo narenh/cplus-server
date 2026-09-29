@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
+import re
 import secrets
+import urllib.parse
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -37,6 +40,7 @@ from ....audiobooks.ingest import (
     MAX_IMPORT_BYTES,
     InvalidResult,
     build_alignment,
+    export_result,
     import_tracks,
     parse_result,
     replace_alignment,
@@ -54,6 +58,7 @@ from ....audiobooks.jobs import (
 )
 from ....db.models import (
     AudiobookAlignment,
+    AudiobookChunk,
     AudiobookJob,
     AudiobookJobStatus,
     Config,
@@ -61,7 +66,7 @@ from ....db.models import (
 )
 from ....db.session import get_config
 from ....plex.client import PlexAlbum, PlexServerClient, PlexServerError
-from ....web import templates
+from ....web import format_bytes, templates
 from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from ...state import AppState
@@ -105,6 +110,9 @@ class BookState:
     position: int | None = None
     stale: bool = False
     stalled_minutes: int | None = None
+    #: Hours of audio per hour of work, over the whole job as now estimated:
+    #: the book's length over time so far plus time left.
+    speed: float | None = None
     can_align: bool = False
 
     @property
@@ -115,6 +123,15 @@ class BookState:
         if self.kind in ("queued", "running"):
             return "every 10s"
         return None
+
+
+def _speed(job: AudiobookJob) -> float | None:
+    if job.started_at is None or job.eta_seconds is None:
+        return None
+    started = job.started_at if job.started_at.tzinfo else job.started_at.replace(tzinfo=UTC)
+    total = (datetime.now(UTC) - started).total_seconds() + job.eta_seconds
+    audio = sum(float(t.get("duration") or 0) for t in job.tracks or [])
+    return audio / total if total > 0 and audio > 0 else None
 
 
 async def _book_state(
@@ -150,6 +167,8 @@ async def _book_state(
             silent = (datetime.now(UTC) - heard).total_seconds()
             if silent > STATUS_STALE:
                 state.stalled_minutes = int(silent // 60)
+        if job.status == AudiobookJobStatus.RUNNING:
+            state.speed = _speed(job)
         return state
     if alignment is not None:
         state.kind = "ready"
@@ -309,6 +328,12 @@ async def enable_runtime(request: Request, admin: AdminPageDep) -> Response:
         raise HTTPException(status.HTTP_409_CONFLICT, "The aligner service isn't running.")
     if runtime.status in ("installing", "removing"):
         return _runtime_card(request)
+    if not runtime.installed and not runtime.enough_space:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Canopy+ Audiobooks requires {runtime.min_free} of disk space "
+            f"({format_bytes(runtime.free_bytes)} available).",
+        )
     aligner.request(paths, "install")
     return _runtime_card(request)
 
@@ -415,6 +440,32 @@ async def align_book(
         "audiobook %s (%s): queued job %s for verification", album.title, rating_key, job.id
     )
     return await _cell(request, db, rating_key)
+
+
+@router.get("/books/{rating_key}/alignment.json")
+async def export_alignment(db: DbDep, admin: AdminPageDep, rating_key: str) -> Response:
+    """The book's alignment as a file *Upload alignment JSON* takes back."""
+    config = await get_config(db)
+    server_id = config.plex_server_client_identifier or ""
+    alignment = (await alignments_for(db, server_id, [rating_key])).get(rating_key)
+    if alignment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This book isn't aligned")
+    rows = await db.execute(
+        select(AudiobookChunk.data)
+        .where(AudiobookChunk.alignment_id == alignment.id)
+        .order_by(AudiobookChunk.n)
+    )
+    result = await asyncio.to_thread(export_result, alignment, list(rows.scalars()))
+    body = json.dumps(result, ensure_ascii=False, indent=1).encode("utf-8")
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", alignment.title).strip() or "audiobook"
+    ascii_name = name.encode("ascii", "ignore").decode() or "audiobook"
+    disposition = (
+        f'attachment; filename="{ascii_name}.alignment.json"; '
+        f"filename*=UTF-8''{urllib.parse.quote(name + '.alignment.json')}"
+    )
+    return Response(
+        body, media_type="application/json", headers={"Content-Disposition": disposition}
+    )
 
 
 @router.post("/books/{rating_key}/import", response_class=HTMLResponse)
