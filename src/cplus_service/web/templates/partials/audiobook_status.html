@@ -8,12 +8,15 @@
    tint, and its bar's fill keeps one id so htmx slides it to the new width
    rather than redrawing it.
 
-   The "⋯" menu holds what is used rarely: replacing or deleting a finished
-   book's alignment, and uploading one made elsewhere. It is left out while a job is in flight — the cell re-renders on
-   every poll, which would snap an open menu shut — and an upload then would
-   be overwritten by the job anyway. Its panel opens inside the cell rather
-   than floating over the table: the table scrolls sideways on a narrow screen,
-   and that clips anything positioned outside it. #}
+   The "⋯" menu holds what is used rarely: replacing a finished book's epub,
+   uploading an alignment made elsewhere, and deleting the alignment. It is
+   left out while a job is in flight — the cell re-renders on every poll, which
+   would snap an open menu shut — and an upload then would be overwritten by
+   the job anyway. It is a popover, so it sits in the top layer rather than
+   being clipped by the sideways-scrolling table; static/popover-menus.js
+   places it under its button, and asks the data-confirm question before a
+   file picker opens. Its uploads show "Uploading…" in the cell itself, since
+   the menu closes once a file is picked. #}
 {% set base = "/admin/audiobooks/books/" ~ book.rating_key %}
 {% macro upload(label, style="secondary") %}
   {% if book.can_align %}
@@ -43,7 +46,6 @@
   <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span id="bar-{{ book.rating_key }}" {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
   <div class="status-line">
     <span>Verifying…</span>
-    <span class="muted">{{ book.job.stage or "" }}</span>
     {{ cancel() }}
   </div>
 
@@ -64,7 +66,7 @@
   <div class="status-line">
     <span>Processing… {{ pct|round|int }}%</span>
     <span class="muted">
-      {{ book.job.stage or "" }}{% if book.job.eta_seconds is not none %} · {{ book.job.eta_seconds|eta }} left{% endif %}
+      {% if book.speed %}Speed: {{ "%.1f"|format(book.speed) }}x{% endif %}{% if book.speed and book.job.eta_seconds is not none %} · {% endif %}{% if book.job.eta_seconds is not none %}{{ book.job.eta_seconds|eta }} left{% endif %}
     </span>
     {{ cancel() }}
   </div>
@@ -98,30 +100,36 @@
   {% endif %}
 {% endif %}
 {% if not book.polling %}
-  <details class="book-menu">
-    <summary aria-label="More for this book" title="More">⋯</summary>
-    <div class="book-menu-items">
-      {% if book.kind == "ready" %}
-        <div class="book-menu-actions">
-          {{ upload("Replace epub…") }}
-          <button type="button" class="secondary danger" hx-post="{{ base }}/delete"
-                  hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
-                  hx-confirm="Delete this book's alignment? Its text stops showing in Canopy+.">Delete</button>
-        </div>
-      {% endif %}
-      <form class="upload-form" hx-post="{{ base }}/import" hx-encoding="multipart/form-data"
-            hx-trigger="change" hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML">
-        <label class="button secondary file-button">
-          Upload alignment JSON…
-          <input type="file" name="alignment" accept=".json,application/json">
+  {% set menu_id = "book-menu-" ~ book.rating_key %}
+  <button type="button" class="book-menu-button" popovertarget="{{ menu_id }}"
+          aria-label="More for this book" title="More">⋯</button>
+  <div class="popover-menu" id="{{ menu_id }}" popover>
+    {% if book.kind == "ready" and book.can_align %}
+      <form hx-post="{{ base }}/align" hx-encoding="multipart/form-data" hx-trigger="change"
+            hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+            hx-indicator="#book-{{ book.rating_key }}">
+        <label class="menu-item file-button">
+          Replace epub
+          <input type="file" name="epub" accept=".epub,application/epub+zip"
+                 data-confirm="Replacing this epub will require re-aligning the entire audiobook and could take several hours. Are you sure you want to proceed?">
         </label>
-        <span class="uploading muted">Uploading…</span>
       </form>
-      <p class="hint">
-        A finished alignment made elsewhere (<code>bookalign.py</code>'s output) from this
-        book's audio. It replaces any alignment the book has; nothing needs to run.
-      </p>
-    </div>
-  </details>
+    {% endif %}
+    <form hx-post="{{ base }}/import" hx-encoding="multipart/form-data" hx-trigger="change"
+          hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+          hx-indicator="#book-{{ book.rating_key }}">
+      <label class="menu-item file-button"
+             title="A finished alignment made elsewhere (bookalign.py's output) from this book's audio. Nothing needs to run.">
+        Upload alignment JSON
+        <input type="file" name="alignment" accept=".json,application/json">
+      </label>
+    </form>
+    {% if book.kind == "ready" %}
+      <button type="button" class="menu-item danger" hx-post="{{ base }}/delete"
+              hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
+              hx-confirm="Delete this book's alignment? Its text stops showing in Canopy+.">Delete</button>
+    {% endif %}
+  </div>
+  <span class="uploading muted">Uploading…</span>
 {% endif %}
 </div>

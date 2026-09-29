@@ -359,7 +359,7 @@ async def test_verification_progress_reaches_the_cell(
     await _sync(app, paths)
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
     assert "Verifying…" in response.text
-    assert "Reading audio samples" in response.text
+    assert "Reading audio samples" not in response.text  # the stage isn't worth showing
     assert "width: 40.0%" in response.text
 
 
@@ -398,7 +398,9 @@ async def test_a_passed_verification_queues_then_runs_with_progress_and_eta(
     await _sync(app, paths)
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
     assert "Processing… 43%" in response.text
-    assert "about 3 h 20 min left" in response.text
+    # 10 h 25 min of audio over (a moment so far + 3 h 20 min left).
+    assert "Speed: 3.1x · about 3 h 20 min left" in response.text
+    assert "Listening to the audio" not in response.text
     assert 'hx-trigger="every 10s"' in response.text
 
 
@@ -760,9 +762,21 @@ async def test_the_menu_is_offered_except_while_a_job_is_in_flight(
     sidecar_up(paths)
     await signed_in(client, db)
     page = await client.get("/admin/audiobooks")
-    assert 'class="book-menu"' in page.text and "Upload alignment JSON…" in page.text
+    assert 'class="popover-menu"' in page.text and "Upload alignment JSON" in page.text
+    assert "Replace epub" not in page.text and "Delete" not in page.text  # nothing to replace
     verifying = await upload(client, make_epub())
-    assert "book-menu" not in verifying.text
+    assert "popover-menu" not in verifying.text
+
+
+async def test_a_finished_books_menu_offers_replace_upload_and_delete(
+    client, db, connected, plex, paths: AlignPaths
+) -> None:
+    sidecar_up(paths)
+    await signed_in(client, db)
+    ready = await import_json(client, bookalign_output())
+    menu = ready.text[ready.text.index('class="popover-menu"') :]
+    assert menu.index("Replace epub") < menu.index("Upload alignment JSON") < menu.index("Delete")
+    assert "re-aligning the entire audiobook" in menu
 
 
 async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
@@ -771,8 +785,15 @@ async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
     sidecar_up(paths)
     await signed_in(client, db)
     await import_json(client, bookalign_output())
+    db.expire_all()
+    before = (await db.execute(select(AudiobookAlignment))).scalar_one()
     refused_json = await import_json(client, b"{not json")
     assert "not JSON" in refused_json.text and "✓ Ready" in refused_json.text
+    wrong_book = await import_json(client, bookalign_output(duration=3346.0))
+    assert "Plex has 10 h 25 min" in wrong_book.text and "✓ Ready" in wrong_book.text
+    db.expire_all()
+    after = (await db.execute(select(AudiobookAlignment))).scalar_one()
+    assert (after.id, after.stats) == (before.id, before.stats)
     refused_epub = await upload(client, make_epub(language="fr"))
     assert "Only English" in refused_epub.text and "✓ Ready" in refused_epub.text
     assert "Try another epub" not in refused_epub.text

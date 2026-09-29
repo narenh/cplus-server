@@ -104,6 +104,9 @@ class BookState:
     position: int | None = None
     stale: bool = False
     stalled_minutes: int | None = None
+    #: Hours of audio per hour of work, over the whole job as now estimated:
+    #: the book's length over time so far plus time left.
+    speed: float | None = None
     can_align: bool = False
 
     @property
@@ -114,6 +117,15 @@ class BookState:
         if self.kind in ("queued", "running"):
             return "every 10s"
         return None
+
+
+def _speed(job: AudiobookJob) -> float | None:
+    if job.started_at is None or job.eta_seconds is None:
+        return None
+    started = job.started_at if job.started_at.tzinfo else job.started_at.replace(tzinfo=UTC)
+    total = (datetime.now(UTC) - started).total_seconds() + job.eta_seconds
+    audio = sum(float(t.get("duration") or 0) for t in job.tracks or [])
+    return audio / total if total > 0 and audio > 0 else None
 
 
 async def _book_state(
@@ -149,6 +161,8 @@ async def _book_state(
             silent = (datetime.now(UTC) - heard).total_seconds()
             if silent > STATUS_STALE:
                 state.stalled_minutes = int(silent // 60)
+        if job.status == AudiobookJobStatus.RUNNING:
+            state.speed = _speed(job)
         return state
     if alignment is not None:
         state.kind = "ready"

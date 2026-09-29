@@ -17,6 +17,7 @@
      viewer's own timezone — see format_when() in cplus_service/web/__init__.py. #}
   <script src="{{ static_url('local-time.js') }}" defer></script>
   <script src="{{ static_url('topbar-menus.js') }}" defer></script>
+  <script src="{{ static_url('popover-menus.js') }}" defer></script>
   {# Every write in this UI lands in place, and htmx never swaps a 4xx body —
      so without this, a save the server refused would look like nothing
      happened. See static/htmx-errors.js. #}

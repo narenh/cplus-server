@@ -1016,30 +1016,44 @@ table.preview .dropped-by { color: var(--err); }
 .book-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .book-status .hint { margin: 4px 0; }
 
-/* The per-book "⋯" menu. The button sits in the cell's top-right corner; the
-   panel opens in the cell's own flow, under whatever the cell shows, because a
-   floating popover would be clipped by .table-scroll. */
+/* The per-book "⋯" button, in the cell's top-right corner, and the menu it
+   opens. The menu is a popover — top layer, so .table-scroll can't clip it —
+   placed under the button by static/popover-menus.js. */
 .book-status { position: relative; padding-right: 34px; min-height: 28px; }
-.book-menu > summary {
+.book-menu-button {
   position: absolute; top: 0; right: 0;
-  list-style: none; cursor: pointer; user-select: none;
-  width: 28px; height: 28px; border-radius: var(--radius-control);
+  width: 28px; height: 28px; min-height: 0; padding: 0; border: none;
+  border-radius: var(--radius-control);
   display: flex; align-items: center; justify-content: center;
-  color: var(--muted); font-size: 18px; line-height: 1;
+  background: none; color: var(--muted); font-size: 18px; line-height: 1;
 }
-.book-menu > summary::-webkit-details-marker { display: none; }
-.book-menu > summary:hover, .book-menu[open] > summary { color: var(--ink); background: var(--bg); }
-.book-menu-items {
-  margin: 8px 0 4px; padding: 10px 12px;
-  background: var(--panel-raised); border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+.book-menu-button:hover:not(:disabled), .book-menu-button:has(+ :popover-open) {
+  color: var(--ink); background: var(--bg); filter: none;
 }
-.book-menu-items .hint { margin: 8px 0 0; }
-.book-menu-actions {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line-soft);
+.popover-menu {
+  position: fixed; inset: auto; margin: 0;
+  min-width: 200px; padding: 6px;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius-panel);
+  box-shadow: var(--lift-2);
 }
-.book-menu-actions form { display: inline-flex; }
+.popover-menu form { display: block; margin: 0; }
+/* Overrides the global button look: a menu row, not a control. */
+.menu-item {
+  display: flex; justify-content: flex-start; width: 100%;
+  min-height: 0; padding: 6px 10px; border: none; font-weight: 400;
+  border-radius: var(--radius-control); background: none;
+  color: var(--ink); font: inherit; font-size: 14px; text-align: left;
+  white-space: nowrap; cursor: pointer;
+}
+.menu-item:hover:not(:disabled), .menu-item:focus-within, .menu-item:focus-visible {
+  background: var(--bg); filter: none;
+}
+.menu-item:active:not(:disabled) { transform: none; }
+.menu-item.danger { color: var(--err); }
+/* An upload started from the menu: the menu has closed, so the cell says it. */
+.book-status > .uploading { display: none; }
+.book-status.htmx-request > .uploading { display: inline; }
 .status-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
 .pager { justify-content: center; }
 
