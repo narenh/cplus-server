@@ -34,6 +34,14 @@ CHUNK_MAX_SENTENCES = 800
 #: small, and they are what an admin-facing quality view would read.
 SENTENCE_FIELDS = ("i", "sec", "para", "text", "start", "end", "flags", "wps", "score")
 
+#: What each chapter keeps for clients. ``title`` is the ready-to-show string; ``part``
+#: ("Book Two"), ``number`` and ``name`` (the title without its "Chapter 6:") let a client
+#: group and number chapters its own way. Only the fields the aligner wrote are kept, so an
+#: older alignment reads exactly as it always did.
+SECTION_FIELDS = (
+    "index", "title", "start", "end", "sentences", "label", "number", "part", "name",
+)  # fmt: skip
+
 
 class InvalidResult(ValueError):
     pass
@@ -206,10 +214,7 @@ def build_alignment(job: AudiobookJob, result: dict[str, Any]) -> AudiobookAlign
                 "duration": measured.get("duration", track.get("duration")),
             }
         )
-    sections = [
-        {k: s.get(k) for k in ("index", "title", "start", "end", "sentences")}
-        for s in result.get("sections") or []
-    ]
+    sections = [{k: s[k] for k in SECTION_FIELDS if k in s} for s in result.get("sections") or []]
     book = result.get("book") or {}
     alignment = AudiobookAlignment(
         plex_server_id=job.plex_server_id,

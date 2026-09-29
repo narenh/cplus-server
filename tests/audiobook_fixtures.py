@@ -40,6 +40,85 @@ CONTENT_ENCRYPTION = """<?xml version="1.0"?>
 </encryption>"""
 
 
+def make_toc_epub(
+    docs: dict[str, str],
+    toc: list[tuple[str, str, int]] | None,
+    *,
+    nav: bool = False,
+) -> bytes:
+    """An epub of several documents (``href -> body html``) with a table of contents.
+
+    ``toc`` is ``(title, href or href#id, depth)`` in reading order, depth 0 or 1 (1 nests
+    under the last depth-0 entry). ``nav`` writes an EPUB3 navigation document instead of an
+    EPUB2 NCX; ``toc=None`` writes neither.
+    """
+
+    items = "".join(
+        f'<item id="d{n}" href="{href}" media-type="application/xhtml+xml"/>'
+        for n, href in enumerate(docs)
+    )
+    spine = "".join(f'<itemref idref="d{n}"/>' for n in range(len(docs)))
+    spine_attr = ""
+    files: dict[str, str] = {}
+    if toc is not None and nav:
+        # Nesting in a nav document puts the child list inside the parent's <li>.
+        listing = ""
+        for n, (title, href, depth) in enumerate(toc):
+            nxt = toc[n + 1][2] if n + 1 < len(toc) else 0
+            listing += f'<li><a href="{href}">{title}</a>'
+            listing += "<ol>" if nxt > depth else "</li>" + ("</ol></li>" if nxt < depth else "")
+        items += (
+            '<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>'
+        )
+        files["OEBPS/nav.xhtml"] = (
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:epub="http://www.idpf.org/2007/ops"><body>'
+            f'<nav epub:type="toc"><ol>{listing}</ol></nav></body></html>'
+        )
+    elif toc is not None:
+        points = ""
+        for n, (title, href, depth) in enumerate(toc):
+            nxt = toc[n + 1][2] if n + 1 < len(toc) else 0
+            points += (
+                f'<navPoint id="p{n}"><navLabel><text>{title}</text></navLabel>'
+                f'<content src="{href}"/>'
+            )
+            points += "" if nxt > depth else "</navPoint>" + ("</navPoint>" if nxt < depth else "")
+        items += '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+        spine_attr = ' toc="ncx"'
+        files["OEBPS/toc.ncx"] = (
+            '<?xml version="1.0"?>'
+            '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">'
+            f"<navMap>{points}</navMap></ncx>"
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0"?><container version="1.0" '
+            'xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>'
+            '<rootfile full-path="OEBPS/content.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>',
+        )
+        archive.writestr(
+            "OEBPS/content.opf",
+            '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title>'
+            f"</metadata><manifest>{items}</manifest><spine{spine_attr}>{spine}</spine></package>",
+        )
+        for href, body in docs.items():
+            archive.writestr(
+                f"OEBPS/{href}",
+                '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">'
+                f"<head><title>x</title></head><body>{body}</body></html>",
+            )
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buf.getvalue()
+
+
 def make_epub(
     *,
     paragraphs: int = 30,

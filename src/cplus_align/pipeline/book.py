@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..epub import WORD_SPLIT, EpubBook
+from .chapters import TocPoint, resolve_toc
 
 #: Seed length in letters, shared by anchoring and verification.
 K = 12
@@ -54,7 +55,10 @@ def split_sentences(punkt: Any, text: str) -> list[str]:
 @dataclass
 class Book:
     title: str | None
-    sections: list[dict[str, Any]]
+    #: The table of contents in reading order (see :mod:`.chapters`).
+    toc: list[TocPoint]
+    #: Each sentence: its text, its ``doc``/``blk`` (spine document and block it came
+    #: from), its ``para`` number and its word range ``w0:w1``.
     sents: list[dict[str, Any]]
     words: list[str]
     wlen: np.ndarray
@@ -67,14 +71,9 @@ def build_book(epub: EpubBook) -> Book:
     punkt = _punkt()
     sents: list[dict[str, Any]] = []
     words: list[str] = []
-    sections: list[dict[str, Any]] = []
     para = 0
-    for si, doc in enumerate(epub.docs):
-        sec: dict[str, Any] = {"index": si, "href": doc.href, "title": None}
-        sections.append(sec)
-        for tag, text in doc.blocks:
-            if sec["title"] is None and tag in ("h1", "h2", "h3"):
-                sec["title"] = text
+    for di, doc in enumerate(epub.docs):
+        for bi, (_tag, text) in enumerate(doc.blocks):
             for sentence in split_sentences(punkt, text):
                 toks = [t for t in WORD_SPLIT.split(sentence) if t]
                 if not toks:
@@ -82,7 +81,14 @@ def build_book(epub: EpubBook) -> Book:
                 w0 = len(words)
                 words.extend(norm_word(t) for t in toks)
                 sents.append(
-                    {"sec": si, "para": para, "text": sentence, "w0": w0, "w1": len(words)}
+                    {
+                        "doc": di,
+                        "blk": bi,
+                        "para": para,
+                        "text": sentence,
+                        "w0": w0,
+                        "w1": len(words),
+                    }
                 )
             para += 1
     wlen = np.array([len(w) for w in words], dtype=np.int64)
@@ -90,7 +96,7 @@ def build_book(epub: EpubBook) -> Book:
     owner = np.repeat(np.arange(len(words)), wlen)
     return Book(
         title=epub.title,
-        sections=sections,
+        toc=resolve_toc(epub),
         sents=sents,
         words=words,
         wlen=wlen,

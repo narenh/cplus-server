@@ -1466,13 +1466,15 @@ book is `offset + position in that file`.
 // GET /audiobooks/501
 { ...the same fields...,
   "tracks": [{"n": 0, "rating_key": "502", "part_id": "9001", "offset": 0.0, "duration": 37499.9}],
-  "chapters": [{"index": 3, "title": "An Unexpected Party", "start": 14.9, "end": 3361.1, "sentences": 574}],
+  "chapters": [{"index": 0, "title": "Chapter 1: An Unexpected Party", "start": 0.0, "end": 3361.7,
+                "sentences": 646, "label": "Chapter 1", "number": 1, "part": null,
+                "name": "An Unexpected Party"}, ...],
   "chunks": [{"n": 0, "start": 14.9, "end": 612.4, "first": 0, "last": 131}, ...],
   "progress": {"position": 1234.5, "track_rating_key": "502", "track_offset": 1234.5,
                "finished": false, "listened_at": "...", "device": "Living room"}}
 
 // GET /audiobooks/501/chunks/0?v=12   (gzip passed through when accepted)
-[{"i": 0, "sec": 3, "para": 0, "text": "In a hole in the ground there lived a hobbit.",
+[{"i": 0, "sec": 0, "para": 0, "text": "In a hole in the ground there lived a hobbit.",
   "start": 14.9, "end": 17.8, "flags": [], "wps": 3.4, "score": -0.21}, ...]
 ```
 
@@ -1481,9 +1483,25 @@ Without gzip in `Accept-Encoding` a chunk comes back as `{"sentences": [...]}`.
 **Sentences.** `start`/`end` are tight to the speech, so there are pauses
 between sentences: treat sentence *i* as current until *i+1* starts. They are
 `null` for text the narrator never reads (front matter, asides), flagged
-`unspoken`. `para` groups sentences into paragraphs and `sec` points at the
-epub's spine item, which is what `chapters[].index` refers to. Chapters come
-from the epub, never from the audio's own chapter markers.
+`unspoken`. `para` groups sentences into paragraphs and `sec` is the index of
+the sentence's chapter, which is `chapters[].index`.
+
+**Chapters** are a ready-made list for a chapter switcher: contiguous over the
+whole book (the first starts at 0, the last ends at the book's duration, and
+every sentence belongs to exactly one). `title` is what to show — cleaned and
+title-cased from the epub's table of contents, numbered where the book numbers
+its chapters, and prefixed with the part when numbering restarts ("Chapter 6:
+Out of the Frying-Pan into the Fire"; "Book Two · Chapter 1: Many Meetings";
+"Prologue"). `sentences` counts the chapter's sentences. `part` ("Book Two"),
+`number` and `name` (the title without its "Chapter 6:") are there for a client
+that wants to group and number chapters its own way. A table of contents
+entry with almost no spoken audio — a title page, a "Book One" divider, the
+copyright page — is not a chapter of its own: it joins the chapter after it, or
+the one before it at the end of the book, so the opening and closing credits
+belong to the first and last chapters. A book with no usable table of contents
+takes its chapters from the headings that open each file, and one with neither
+comes back as a single chapter. Chapters come from the epub, never from the
+audio's own chapter markers.
 
 **Chunks.** About ten minutes of audio each, cut at paragraph breaks — or
 after 800 sentences, for a long stretch nobody reads. To seek, find the chunk

@@ -14,7 +14,8 @@ no reliance on the audio's own chapter markers:
    chain of them — anchors between audio time and book position.
 3. Between anchors, run CTC forced alignment on ~75 s segments. Stretches where
    the book has far more text than the audio has time for are marked unspoken.
-4. Group word times into sentences.
+4. Group word times into sentences, and sentences into chapters: the epub's table
+   of contents gives the titles, the alignment the times (see :mod:`.chapters`).
 
 The ctc-forced-aligner code and the model are CC-BY-NC 4.0 (non-commercial).
 """

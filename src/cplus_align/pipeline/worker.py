@@ -45,6 +45,7 @@ from .align import align_segments, assemble
 from .anchors import NoSharedText, find_chain, greedy_decode, make_runs, plan_segments, seed_hits
 from .audio import SR, decode, download
 from .book import build_book, unique_seeds
+from .chapters import apply_sections, derive_chapters
 from .emissions import CONTEXT, WINDOW, Model, compute_emissions, cpu_threads
 from .verify import Track, verify
 
@@ -386,11 +387,16 @@ class Engine:
         # ---- assemble
         tracker.start("save")
         sents = assemble(book, times)
-        for sec in book.sections:
-            timed = [s for s in sents if s["sec"] == sec["index"] and s["start"] is not None]
-            sec["start"] = min((s["start"] for s in timed), default=None)
-            sec["end"] = max((s["end"] for s in timed), default=None)
-            sec["sentences"] = sum(1 for s in sents if s["sec"] == sec["index"])
+        sections = apply_sections(
+            sents,
+            derive_chapters(
+                book.toc,
+                [(s["doc"], s["blk"]) for s in book.sents],
+                sents,
+                total_seconds,
+                epub.title,
+            ),
+        )
         aligned = sum(s["start"] is not None for s in sents)
 
         offsets, acc = [], 0
@@ -418,7 +424,7 @@ class Engine:
             "version": 1,
             "book": {"title": epub.title, "authors": epub.authors},
             "audio": {"duration": round(total_seconds, 2), "tracks": track_meta},
-            "sections": book.sections,
+            "sections": sections,
             "sentences": sents,
             "extra_audio": [[round(a, 1), round(b, 1)] for a, b in extra],
             "stats": {

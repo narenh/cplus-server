@@ -127,7 +127,6 @@ def assemble(book: Book, times: WordTimes) -> list[dict[str, Any]]:
         spoken_words = int((wlen[s["w0"] : s["w1"]] > 0).sum())
         rec: dict[str, Any] = {
             "i": i,
-            "sec": s["sec"],
             "para": s["para"],
             "text": s["text"],
             "start": None,

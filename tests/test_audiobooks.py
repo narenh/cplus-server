@@ -25,7 +25,7 @@ from cplus_align.protocol import (
     write_json,
 )
 from cplus_service.audiobooks import monitor
-from cplus_service.audiobooks.ingest import chunk_sentences, decode_chunk
+from cplus_service.audiobooks.ingest import build_alignment, chunk_sentences, decode_chunk
 from cplus_service.db.models import (
     AudiobookAlignment,
     AudiobookChunk,
@@ -744,3 +744,30 @@ async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
     refused_epub = await upload(client, make_epub(language="fr"))
     assert "Only English" in refused_epub.text and "✓ Ready" in refused_epub.text
     assert "Try another epub" not in refused_epub.text
+
+
+def test_chapter_details_the_aligner_writes_reach_clients() -> None:
+    from types import SimpleNamespace
+
+    TITLE = "Book One \u00b7 Chapter 1: Roast Mutton"
+    result = result_payload()
+    result["sections"] = [
+        {
+            "index": 0, "title": TITLE, "start": 0.0, "end": 30.0, "sentences": 3,
+            "range": [0, 3], "label": "Chapter 1", "number": 1, "part": "Book One",
+            "name": "Roast Mutton",
+        },
+        {"index": 1, "title": "Two", "start": 30.0, "end": 54.0, "sentences": 3},
+    ]  # fmt: skip
+    track = {"n": 0, "rating_key": "502", "part_id": "9001", "size": 1, "duration": 37499.9}
+    job = SimpleNamespace(
+        plex_server_id=SERVER_ID, rating_key=ALBUM_KEY, library_id="7", title="T", author="A",
+        tracks=[track], id=1, epub_title=None, epub_author=None,
+    )  # fmt: skip
+    first, second = build_alignment(job, result).sections  # type: ignore[arg-type]
+    assert first == {
+        "index": 0, "title": TITLE, "start": 0.0, "end": 30.0, "sentences": 3,
+        "label": "Chapter 1", "number": 1, "part": "Book One", "name": "Roast Mutton",
+    }  # fmt: skip
+    # An alignment without the extra fields (an older one) is stored exactly as before.
+    assert second == {"index": 1, "title": "Two", "start": 30.0, "end": 54.0, "sentences": 3}

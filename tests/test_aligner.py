@@ -13,12 +13,21 @@ import json
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from cplus_align import install
-from cplus_align.epub import inspect_epub, is_english, read_epub
+from cplus_align.epub import EpubBook, EpubDoc, TocEntry, inspect_epub, is_english, read_epub
+from cplus_align.pipeline.chapters import (
+    TocPoint,
+    apply_sections,
+    derive_chapters,
+    resolve_toc,
+    roman_or_int,
+    smart_title,
+)
 from cplus_align.pipeline.progress import JobProgress, predicted_seconds, record_calibration
 from cplus_align.protocol import (
     AlignPaths,
@@ -30,7 +39,7 @@ from cplus_align.protocol import (
 )
 from cplus_align.supervisor import MAX_CRASHES, Supervisor
 
-from .audiobook_fixtures import CONTENT_ENCRYPTION, FONT_OBFUSCATION, make_epub
+from .audiobook_fixtures import CONTENT_ENCRYPTION, FONT_OBFUSCATION, make_epub, make_toc_epub
 
 # --------------------------------------------------------------------------- #
 # Epubs
@@ -358,3 +367,229 @@ def test_samples_spread_across_a_many_file_book() -> None:
 def test_calibration_file_is_json(tmp_path: Path) -> None:
     write_json(tmp_path / "c.json", {"a": 1})
     assert json.loads((tmp_path / "c.json").read_text()) == {"a": 1}
+
+
+# --------------------------------------------------------------------------- #
+# Chapters
+# --------------------------------------------------------------------------- #
+
+_PARAGRAPH = "<p>One two three four five six seven eight nine ten.</p>"
+
+
+def _book_epub(*, nav: bool = False) -> bytes:
+    """A Fellowship-shaped book: a part divider over two chapters, then a second part."""
+    return make_toc_epub(
+        {
+            "title.xhtml": _PARAGRAPH,
+            "part1.xhtml": "<h1>BOOK ONE</h1>",
+            "ch1.xhtml": _PARAGRAPH * 3,
+            "ch2.xhtml": '<p id="top">Opening.</p>'
+            + _PARAGRAPH
+            + '<h2 id="mid">Middle</h2>'
+            + _PARAGRAPH,
+        },
+        [
+            ("TITLE PAGE", "title.xhtml", 0),
+            ("BOOK ONE", "part1.xhtml", 0),
+            ("CHAPTER 1: A LONG-EXPECTED PARTY", "ch1.xhtml", 1),
+            ("CHAPTER 2: THE SHADOW OF THE PAST", "ch2.xhtml", 1),
+            ("A LATER SECTION", "ch2.xhtml#mid", 0),
+        ],
+        nav=nav,
+    )
+
+
+@pytest.mark.parametrize("nav", [False, True], ids=["epub2-ncx", "epub3-nav"])
+def test_the_table_of_contents_is_read_from_ncx_or_nav(nav: bool) -> None:
+    book = read_epub(io.BytesIO(_book_epub(nav=nav)))
+    assert [(e.title, e.path, e.fragment, e.parent) for e in book.toc] == [
+        ("TITLE PAGE", "OEBPS/title.xhtml", None, None),
+        ("BOOK ONE", "OEBPS/part1.xhtml", None, None),
+        ("CHAPTER 1: A LONG-EXPECTED PARTY", "OEBPS/ch1.xhtml", None, "BOOK ONE"),
+        ("CHAPTER 2: THE SHADOW OF THE PAST", "OEBPS/ch2.xhtml", None, "BOOK ONE"),
+        ("A LATER SECTION", "OEBPS/ch2.xhtml", "mid", None),
+    ]
+    # An id records the block it opens in, so an entry can point into the middle of a file.
+    ch2 = book.docs[3]
+    assert ch2.path == "OEBPS/ch2.xhtml"
+    assert ch2.anchors == {"top": 0, "mid": 2}
+
+
+def test_an_epub_without_a_table_of_contents_reads_as_empty_not_broken() -> None:
+    book = read_epub(io.BytesIO(make_toc_epub({"a.xhtml": _PARAGRAPH}, None)))
+    assert book.toc == [] and len(book.docs) == 1
+
+
+def test_a_corrupt_table_of_contents_is_ignored() -> None:
+    raw = make_toc_epub({"a.xhtml": _PARAGRAPH}, [("One", "a.xhtml", 0)])
+    src, dst = zipfile.ZipFile(io.BytesIO(raw)), io.BytesIO()
+    with zipfile.ZipFile(dst, "w") as out:
+        for item in src.infolist():
+            out.writestr(
+                item.filename, "<navMap><oops" if item.filename.endswith(".ncx") else src.read(item)
+            )
+    book = read_epub(io.BytesIO(dst.getvalue()))
+    assert book.toc == [] and len(book.docs) == 1
+
+
+def test_entries_land_on_their_anchors_and_duplicates_collapse() -> None:
+    docs = [
+        EpubDoc("a", [("p", "x")] * 3, path="a.xhtml", anchors={"here": 2}),
+        EpubDoc("b", [("h1", "Chapter I"), ("h1", "THE TITLE"), ("p", "y")], path="b.xhtml"),
+    ]
+    entries = [
+        TocEntry("Deep", "a.xhtml", "here"),
+        TocEntry("Whole", "a.xhtml", None),
+        TocEntry("Also whole", "a.xhtml", None),  # same place as "Whole"
+        TocEntry("Missing file", "gone.xhtml", None),
+        TocEntry("Bad anchor", "b.xhtml", "nope"),
+    ]
+    points = resolve_toc(EpubBook("T", [], None, docs, toc=entries))
+    assert [(p.title, p.doc, p.blk) for p in points] == [
+        ("Whole", 0, 0),
+        ("Deep", 0, 2),
+        ("Bad anchor", 1, 0),
+    ]
+
+
+def test_without_a_table_of_contents_chapters_come_from_opening_headings() -> None:
+    docs = [
+        EpubDoc("a", [("p", "just text")], path="a.xhtml"),
+        EpubDoc("b", [("h1", "Chapter II"), ("h1", "ROAST MUTTON"), ("p", "text")], path="b.xhtml"),
+    ]
+    points = resolve_toc(EpubBook("T", [], None, docs))
+    assert [(p.title, p.doc) for p in points] == [("Chapter II: ROAST MUTTON", 1)]
+
+
+@pytest.mark.parametrize(
+    ("raw", "clean"),
+    [
+        ("A LONG-EXPECTED PARTY", "A Long-Expected Party"),
+        ("FOG ON THE BARROW-DOWNS", "Fog on the Barrow-Downs"),
+        ("THE BRIDGE OF KHAZAD-D\u00dbM", "The Bridge of Khazad-D\u00fbm"),
+        ("AUTHOR\u2019S NOTE", "Author\u2019s Note"),
+        ("NOTE ON THE 50TH ANNIVERSARY EDITION", "Note on the 50th Anniversary Edition"),
+        ("The Old Forest", "The Old Forest"),  # already mixed case: left alone
+        ("  spaced   out ", "spaced out"),
+        ("1234", "1234"),
+    ],
+)
+def test_all_caps_headings_become_title_case(raw: str, clean: str) -> None:
+    assert smart_title(raw) == clean
+
+
+def test_roman_numerals_and_digits_read_as_numbers() -> None:
+    assert [roman_or_int(t) for t in ("I", "IV", "ix", "XIX", "XLII", "12")] == [
+        1,
+        4,
+        9,
+        19,
+        42,
+        12,
+    ]
+
+
+def _timed_book(
+    spec: list[tuple[int, int, float]],
+) -> tuple[list[tuple[int, int]], list[dict], float]:
+    """``(document, sentences, seconds each)`` -> where each sentence came from, and its timing."""
+    where, sentences, t = [], [], 0.0
+    for doc, count, seconds in spec:
+        for _ in range(count):
+            where.append((doc, 0))
+            sentences.append({"start": round(t, 2), "end": round(t + seconds, 2)})
+            t += seconds + 1
+    return where, sentences, t + 2
+
+
+def _fellowship_toc() -> list[TocPoint]:
+    return [
+        TocPoint("TITLE PAGE", 0, 0, None),
+        TocPoint("PROLOGUE", 1, 0, None),
+        TocPoint("BOOK ONE", 2, 0, None),
+        TocPoint("CHAPTER 1: A LONG-EXPECTED PARTY", 3, 0, "BOOK ONE"),
+        TocPoint("CHAPTER II: THE SHADOW OF THE PAST", 4, 0, "BOOK ONE"),
+        TocPoint("BOOK TWO", 5, 0, None),
+        TocPoint("CHAPTER 1: MANY MEETINGS", 6, 0, "BOOK TWO"),
+        TocPoint("COPYRIGHT", 7, 0, None),
+    ]
+
+
+def test_chapters_come_out_titled_numbered_grouped_and_contiguous() -> None:
+    where, sentences, duration = _timed_book(
+        [(0, 2, 3.0), (1, 30, 5.0), (2, 1, 2.0), (3, 30, 5.0), (4, 30, 5.0), (5, 1, 2.0),
+         (6, 30, 5.0), (7, 3, 10.0)]
+    )  # fmt: skip
+    chapters = derive_chapters(_fellowship_toc(), where, sentences, duration, "The Fellowship")
+
+    assert [c["display"] for c in chapters] == [
+        "Prologue",
+        "Book One \u00b7 Chapter 1: A Long-Expected Party",
+        "Book One \u00b7 Chapter 2: The Shadow of the Past",
+        "Book Two \u00b7 Chapter 1: Many Meetings",
+    ]
+    assert [c["part"] for c in chapters] == [None, "Book One", "Book One", "Book Two"]
+    assert [c["number"] for c in chapters] == [None, 1, 2, 1]
+    assert [c["title"] for c in chapters] == [
+        "Prologue", "A Long-Expected Party", "The Shadow of the Past", "Many Meetings",
+    ]  # fmt: skip
+
+    # The title page belongs to the first chapter, "Book One"/"Book Two" to the chapter they
+    # introduce, and the copyright to the last: nothing is left over.
+    assert [c["sentences"] for c in chapters] == [[0, 32], [32, 63], [63, 93], [93, 127]]
+    # Contiguous over the audio and over the sentences, from the very start to the very end.
+    assert chapters[0]["start"] == 0.0 and chapters[-1]["end"] == round(duration, 2)
+    assert all(a["end"] == b["start"] for a, b in zip(chapters, chapters[1:], strict=False))
+    assert all(
+        a["sentences"][1] == b["sentences"][0] for a, b in zip(chapters, chapters[1:], strict=False)
+    )
+    # A chapter starts where its first sentence is spoken, "Book One" included.
+    assert chapters[1]["start"] == sentences[32]["start"]
+
+
+def test_sections_are_what_the_service_stores_and_serves() -> None:
+    where, sentences, duration = _timed_book(
+        [(1, 30, 5.0), (3, 30, 5.0), (4, 30, 5.0), (6, 30, 5.0)]
+    )
+    toc = _fellowship_toc()
+    chapters = derive_chapters(toc, where, sentences, duration)
+    sections = apply_sections(sentences, chapters)
+
+    assert [s["index"] for s in sections] == [0, 1, 2, 3]
+    assert [s["title"] for s in sections][1] == "Book One \u00b7 Chapter 1: A Long-Expected Party"
+    assert sum(s["sentences"] for s in sections) == len(sentences)
+    assert [s["sec"] for s in sentences] == [
+        n for n, s in enumerate(sections) for _ in range(s["sentences"])
+    ]
+
+    # ... and the service accepts exactly this document.
+    from cplus_service.audiobooks.ingest import parse_result
+
+    body = [{"i": i, "para": i, "text": f"s{i}", "flags": [], **s} for i, s in enumerate(sentences)]
+    result = {
+        "version": 1,
+        "audio": {"duration": duration},
+        "sections": sections,
+        "sentences": body,
+    }
+    assert parse_result(json.dumps(result).encode())["sections"] == sections
+
+
+def test_entries_with_almost_no_speech_are_not_chapters() -> None:
+    # Only the title page and copyright have audio, and not much: one chapter, named for the book.
+    where, sentences, duration = _timed_book([(0, 2, 3.0), (7, 3, 10.0)])
+    [only] = derive_chapters(_fellowship_toc(), where, sentences, duration, "The Fellowship")
+    assert only["title"] == only["display"] == "The Fellowship"
+    assert (only["start"], only["end"], only["sentences"]) == (0.0, round(duration, 2), [0, 5])
+
+
+def test_a_chapter_the_narrator_skipped_disappears_instead_of_leaving_a_hole() -> None:
+    where, sentences, duration = _timed_book([(3, 30, 5.0), (4, 30, 5.0), (6, 30, 5.0)])
+    for i in range(30, 60):  # chapter 2 is unspoken
+        sentences[i].update(start=None, end=None)
+    chapters = derive_chapters(_fellowship_toc(), where, sentences, duration)
+    assert [c["title"] for c in chapters] == ["A Long-Expected Party", "Many Meetings"]
+    # Like any entry with no speech, the skipped chapter's text joins the chapter after it.
+    assert [c["sentences"] for c in chapters] == [[0, 30], [30, 90]]
+    assert chapters[1]["start"] == sentences[60]["start"]  # where the next chapter is spoken
+    assert chapters[0]["end"] == chapters[1]["start"] and chapters[1]["end"] == round(duration, 2)

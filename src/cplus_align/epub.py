@@ -78,6 +78,8 @@ class _Blocks(HTMLParser):
         self.buf: list[str] = []
         self.skip = 0
         self.cur = ""
+        #: element id -> index of the block it opens in (where a TOC entry can point)
+        self.ids: dict[str, int] = {}
 
     def _flush(self) -> None:
         text = " ".join("".join(self.buf).split())
@@ -93,6 +95,10 @@ class _Blocks(HTMLParser):
         elif tag in BLOCK:
             self._flush()
             self.cur = tag
+        if tag not in SKIP:
+            for name, value in attrs:
+                if name == "id" and value:
+                    self.ids.setdefault(value, len(self.blocks))
 
     def handle_endtag(self, tag: str) -> None:
         if tag in SKIP:
@@ -116,6 +122,21 @@ class EpubDoc:
 
     href: str
     blocks: list[tuple[str, str]]
+    #: The document's path inside the archive, and where each ``id`` in it falls
+    #: (as an index into ``blocks``): what a table-of-contents entry points at.
+    path: str = ""
+    anchors: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class TocEntry:
+    """One line of the epub's table of contents, resolved to a file and maybe an anchor in it."""
+
+    title: str
+    path: str
+    fragment: str | None
+    #: The title of the entry this one is nested under, if any ("Book One" over its chapters).
+    parent: str | None = None
 
 
 @dataclass
@@ -125,6 +146,7 @@ class EpubBook:
     language: str | None
     docs: list[EpubDoc]
     drm: bool = False
+    toc: list[TocEntry] = field(default_factory=list)
 
     @property
     def words(self) -> int:
@@ -197,6 +219,97 @@ def _has_drm(archive: zipfile.ZipFile) -> bool:
     return False
 
 
+#: More entries than this is not a table of contents; it is a crafted archive.
+MAX_TOC_ENTRIES = 5000
+
+
+def _target(base: str, href: str) -> tuple[str, str | None]:
+    """An href from the package or nav document -> (archive path, fragment)."""
+    path, _, fragment = href.partition("#")
+    return posixpath.normpath(posixpath.join(base, unquote(path))), unquote(fragment) or None
+
+
+def _toc_ncx(archive: zipfile.ZipFile, path: str) -> list[TocEntry]:
+    """An EPUB2 ``toc.ncx``: nested ``navPoint`` elements."""
+    root = ET.fromstring(_read(archive, path))
+    base = posixpath.dirname(path)
+    out: list[TocEntry] = []
+
+    def walk(node: ET.Element, parent: str | None) -> None:
+        for point in node:
+            if _local(point) != "navPoint":
+                continue
+            label = " ".join(
+                next((t.text or "" for t in point.iter() if _local(t) == "text"), "").split()
+            )
+            src = next((c.get("src") for c in point if _local(c) == "content"), None)
+            if src and label and len(out) < MAX_TOC_ENTRIES:
+                out.append(TocEntry(label, *_target(base, src), parent))
+            walk(point, label or parent)
+
+    for nav_map in (e for e in root.iter() if _local(e) == "navMap"):
+        walk(nav_map, None)
+    return out
+
+
+def _toc_nav(archive: zipfile.ZipFile, path: str) -> list[TocEntry]:
+    """An EPUB3 navigation document: the ``<nav epub:type="toc">`` list."""
+    root = ET.fromstring(_read(archive, path))
+    base = posixpath.dirname(path)
+    out: list[TocEntry] = []
+    navs = [n for n in root.iter() if _local(n) == "nav"]
+    nav = next(
+        (n for n in navs if any(k.endswith("type") and "toc" in v for k, v in n.attrib.items())),
+        navs[0] if navs else None,
+    )
+
+    def walk(ol: ET.Element, parent: str | None) -> None:
+        for item in ol:
+            if _local(item) != "li":
+                continue
+            link = next((c for c in item if _local(c) in ("a", "span")), None)
+            label = " ".join("".join(link.itertext()).split()) if link is not None else ""
+            href = link.get("href") if link is not None and _local(link) == "a" else None
+            if href and label and len(out) < MAX_TOC_ENTRIES:
+                out.append(TocEntry(label, *_target(base, href), parent))
+            sub = next((c for c in item if _local(c) == "ol"), None)
+            if sub is not None:
+                walk(sub, label or parent)
+
+    if nav is not None:
+        for ol in (c for c in nav if _local(c) == "ol"):
+            walk(ol, None)
+    return out
+
+
+def _read_toc(
+    archive: zipfile.ZipFile, opf: ET.Element, items: dict[str | None, ET.Element], base: str
+) -> list[TocEntry]:
+    """The table of contents: the EPUB3 nav document if there is one, else the NCX.
+
+    Never raises. A missing or broken table of contents only means the book gets its
+    chapters from the headings that open each file instead.
+    """
+    nav = next((e for e in items.values() if "nav" in (e.get("properties") or "").split()), None)
+    ncx_id = next((e.get("toc") for e in opf.iter() if _local(e) == "spine" and e.get("toc")), None)
+    ncx = items.get(ncx_id)
+    if ncx is None:
+        ncx = next(
+            (e for e in items.values() if e.get("media-type") == "application/x-dtbncx+xml"), None
+        )
+    for item, reader in ((nav, _toc_nav), (ncx, _toc_ncx)):
+        href = item.get("href") if item is not None else None
+        if not href:
+            continue
+        try:
+            entries = reader(archive, posixpath.normpath(posixpath.join(base, unquote(href))))
+        except (KeyError, ET.ParseError, EpubError):
+            continue
+        if entries:
+            return entries
+    return []
+
+
 def read_epub(source: str | Path | IO[bytes]) -> EpubBook:
     """Parse an epub into its spine's text blocks. Raises :class:`EpubError`."""
     try:
@@ -216,7 +329,8 @@ def read_epub(source: str | Path | IO[bytes]) -> EpubBook:
 
         drm = _has_drm(archive)
         base = posixpath.dirname(opf_path)
-        manifest = {e.get("id"): e.get("href") for e in opf.iter() if _local(e) == "item"}
+        items = {e.get("id"): e for e in opf.iter() if _local(e) == "item"}
+        manifest = {item_id: e.get("href") for item_id, e in items.items()}
         title = next((e.text.strip() for e in opf.iter() if _local(e) == "title" and e.text), None)
         authors = [
             e.text.strip()
@@ -240,9 +354,10 @@ def read_epub(source: str | Path | IO[bytes]) -> EpubBook:
             parser = _Blocks()
             parser.feed(_decode(raw))
             parser.close()
-            docs.append(EpubDoc(href=href, blocks=parser.blocks))
+            docs.append(EpubDoc(href=href, blocks=parser.blocks, path=full, anchors=parser.ids))
+        toc = _read_toc(archive, opf, items, base)
 
-    return EpubBook(title=title, authors=authors, language=language, docs=docs, drm=drm)
+    return EpubBook(title=title, authors=authors, language=language, docs=docs, drm=drm, toc=toc)
 
 
 #: Below this many words there is nothing worth aligning — or the text is
