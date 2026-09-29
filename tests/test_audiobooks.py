@@ -142,11 +142,43 @@ async def test_enabling_is_offered_with_its_download_size_and_licence(
     sidecar_up(paths, status="absent")
     await signed_in(client, db)
     response = await client.get("/admin/audiobooks")
-    assert "Turn on read-along" in response.text
+    assert "Turn on Canopy+ Audiobooks" in response.text
     assert "GB</strong> once" in response.text
     assert "CC BY-NC 4.0" in response.text
     # Nothing can be aligned until it's on.
     assert "Align…" not in response.text
+
+
+def low_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
+    from collections import namedtuple
+
+    from cplus_service.audiobooks import runtime
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(runtime.shutil, "disk_usage", lambda _path: usage(free, 0, free))
+
+
+async def test_enabling_is_disabled_without_10_gb_free(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    connected: Config,
+    plex,
+    paths: AlignPaths,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sidecar_up(paths, status="absent")
+    low_disk(monkeypatch, 4_200_000_000)
+    await signed_in(client, db)
+    response = await client.get("/admin/audiobooks")
+    assert "Canopy+ Audiobooks requires 10.0 GB of disk space (4.2 GB available)" in " ".join(
+        response.text.split()
+    )
+    assert "disabled>" in " ".join(response.text.split())
+
+    refused = await client.post("/admin/audiobooks/runtime/enable")
+    assert refused.status_code == 409
+    assert "4.2 GB available" in refused.text
+    assert not paths.request_file.exists()
 
 
 async def test_enabling_asks_the_sidecar_to_install(
@@ -270,7 +302,7 @@ async def test_uploading_is_refused_while_read_along_is_off(
     sidecar_up(paths, status="absent")
     await signed_in(client, db)
     response = await upload(client, make_epub())
-    assert "enabled, so nothing can be aligned" in response.text
+    assert "turned on, so nothing can be aligned" in response.text
     assert await jobs(db) == []
 
 

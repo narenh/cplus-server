@@ -61,7 +61,7 @@ from ....db.models import (
 )
 from ....db.session import get_config
 from ....plex.client import PlexAlbum, PlexServerClient, PlexServerError
-from ....web import templates
+from ....web import format_bytes, templates
 from ...deps import DbDep, StateDep
 from ...state import AppState
 from .deps import AdminPageDep
@@ -310,6 +310,12 @@ async def enable_runtime(request: Request, admin: AdminPageDep) -> Response:
         raise HTTPException(status.HTTP_409_CONFLICT, "The aligner service isn't running.")
     if runtime.status in ("installing", "removing"):
         return _runtime_card(request)
+    if not runtime.installed and not runtime.enough_space:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Canopy+ Audiobooks requires {format_bytes(runtime.min_free_bytes)} of disk space "
+            f"({format_bytes(runtime.free_bytes)} available).",
+        )
     aligner.request(paths, "install")
     return _runtime_card(request)
 
@@ -380,7 +386,7 @@ async def align_book(
     paths = aligner.paths()
     runtime = aligner.read_runtime(paths)
     if paths is None or not runtime.ready:
-        return await reject("Read-along isn't enabled, so nothing can be aligned yet.")
+        return await reject("Canopy+ Audiobooks isn't turned on, so nothing can be aligned yet.")
     plex = _plex(config, state)
     server_id = config.plex_server_client_identifier
     if plex is None or not server_id:

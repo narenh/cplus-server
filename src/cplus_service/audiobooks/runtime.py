@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,11 @@ from cplus_align.protocol import (
     read_json,
     write_json,
 )
+
+# Free space the aligner's volume must have before the runtime is installed:
+# the download (~1.5 GB, ~2.3 GB unpacked) plus a book's working files, which
+# hold its whole decoded audio while it is aligned.
+MIN_FREE_BYTES = 10 * 10**9
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,7 @@ class RuntimeView:
     disk_bytes: int | None = None
     engine_running: bool = False
     installed: bool = False
+    free_bytes: int | None = None
 
     @property
     def ready(self) -> bool:
@@ -51,6 +58,15 @@ class RuntimeView:
         if not total or done is None:
             return None
         return max(0.0, min(100.0, 100.0 * done / total))
+
+    @property
+    def min_free_bytes(self) -> int:
+        return MIN_FREE_BYTES
+
+    @property
+    def enough_space(self) -> bool:
+        """Whether there is room to install. Unknown free space doesn't block it."""
+        return self.free_bytes is None or self.free_bytes >= MIN_FREE_BYTES
 
 
 def paths() -> AlignPaths | None:
@@ -81,6 +97,11 @@ def read_runtime(root: AlignPaths | None = None) -> RuntimeView:
     if not fresh(heartbeat, HEARTBEAT_STALE):
         status = "offline"
 
+    try:
+        free = shutil.disk_usage(target.root).free
+    except OSError:
+        free = None
+
     return RuntimeView(
         status=status,
         error=state.get("error"),
@@ -89,6 +110,7 @@ def read_runtime(root: AlignPaths | None = None) -> RuntimeView:
         disk_bytes=state.get("disk"),
         engine_running=bool(heartbeat and heartbeat.get("engine") == "running"),
         installed=installed,
+        free_bytes=free,
     )
 
 

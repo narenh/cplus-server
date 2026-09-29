@@ -4,15 +4,16 @@
    because enabling downloads ~1.5 GB and a book in progress holds ~2 GB of
    memory. While an install or removal runs, the card re-requests itself every
    two seconds, and when that finishes the page reloads so every book's cell
-   picks up whether it can be aligned now. #}
+   picks up whether it can be aligned now. The polling card is marked
+   ``polling`` so each refresh swaps in without the just-saved tint. #}
 {% set busy = runtime.status in ("installing", "removing") %}
-<section class="card" id="aligner-runtime"
+<section class="card{{ ' polling' if busy }}" id="aligner-runtime"
   {% if busy %}hx-get="/admin/audiobooks/runtime?was={{ runtime.status }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
-  <h2>Read-along</h2>
+  <h2>Canopy+ Audiobooks</h2>
 
   {% if runtime.status == "unconfigured" %}
     <p class="hint">
-      Read-along isn't set up on this deployment. It needs the
+      Canopy+ Audiobooks isn't set up on this deployment. It needs the
       <code>cplus-aligner</code> service from <code>docker-compose.yml</code>,
       sharing the <code>cplus-align</code> volume with this one, and
       <code>CPLUS_ALIGN_DIR</code> set on both.
@@ -45,18 +46,25 @@
     {% if runtime.status == "failed" and runtime.error %}
       <p class="hint err">The last attempt failed: {{ runtime.error }}</p>
     {% endif %}
+    {% if not runtime.enough_space %}
+      <p class="hint err">
+        Canopy+ Audiobooks requires {{ runtime.min_free_bytes|bytes }} of disk space
+        ({{ runtime.free_bytes|bytes }} available).
+      </p>
+    {% endif %}
     <div class="row">
       <button type="button"
               hx-post="/admin/audiobooks/runtime/enable"
-              hx-target="#aligner-runtime" hx-swap="outerHTML">
-        {{ "Try again" if runtime.status == "failed" else "Turn on read-along" }}
+              hx-target="#aligner-runtime" hx-swap="outerHTML"
+              {% if not runtime.enough_space %}disabled{% endif %}>
+        {{ "Try again" if runtime.status == "failed" else "Turn on Canopy+ Audiobooks" }}
       </button>
     </div>
 
   {% elif runtime.status == "installing" %}
     {% set pct = runtime.percent %}
     <div class="bar {{ 'indeterminate' if pct is none or (runtime.progress or {}).get('stage') != 'download' }}">
-      <span {% if pct is not none %}style="width: {{ pct|round(1) }}%"{% endif %}></span>
+      <span id="aligner-runtime-bar" {% if pct is not none %}style="width: {{ pct|round(1) }}%"{% endif %}></span>
     </div>
     <p class="status-line">
       {% set p = runtime.progress or {} %}
@@ -94,7 +102,7 @@
       <button type="button" class="secondary danger"
               hx-post="/admin/audiobooks/runtime/disable"
               hx-target="#aligner-runtime" hx-swap="outerHTML"
-              hx-confirm="Turn read-along off? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.">
+              hx-confirm="Turn off Canopy+ Audiobooks? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.">
         Turn off and remove the download
       </button>
     </div>

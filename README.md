@@ -103,7 +103,7 @@ Only the handful that must exist before the UI does:
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
 | `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
-| `CPLUS_ALIGN_DIR` | *(set to `/align` in `docker-compose.yml`)* | The volume shared with the `cplus-aligner` sidecar, on both services. Unset, the Audiobooks tab says read-along isn't set up. See [Audiobook read-along](#audiobook-read-along) |
+| `CPLUS_ALIGN_DIR` | *(set to `/align` in `docker-compose.yml`)* | The volume shared with the `cplus-aligner` sidecar, on both services. Unset, the Audiobooks tab says Canopy+ Audiobooks isn't set up. See [Canopy+ Audiobooks](#canopy-audiobooks) |
 | `CPLUS_INTERNAL_URL` | `http://cplus-service:8080` | How the aligner sidecar reaches this service for audio. The default is the compose service name; change it only if you rename the service |
 
 Every default above is baked into the image itself (the Dockerfile's own `ENV`),
@@ -594,7 +594,7 @@ migration deletes, so nothing can prove what they were resolved against.
 |---|---|---|
 | `GET /capabilities` | none | What this instance has switched on, before anyone signs in. Today just `{"notifications": bool}` |
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server` and `audiobooks` (whether there is a finished read-along book the caller can see); with `first_run=true`, bundles the Libraries seed and the caller's Home |
-| `GET /audiobooks` | cache + Plex | Finished read-along books in libraries the caller can see, with their progress. See [Read-along for clients](#read-along-for-clients) |
+| `GET /audiobooks` | cache + Plex | Finished read-along books in libraries the caller can see, with their progress. See [Audiobooks for clients](#audiobooks-for-clients) |
 | `GET /audiobooks/{ratingKey}` | cache + Plex | One book's index: files and their offsets, chapters, chunk time ranges, `version` |
 | `GET /audiobooks/{ratingKey}/chunks/{n}?v={version}` | cache + Plex | ~10 minutes of sentences. Immutable for its version; 409 once the book is re-aligned |
 | `GET`/`PUT /audiobooks/{ratingKey}/progress` | cache + Plex | Where the caller is in any audiobook they can see, aligned or not. Newest listen wins |
@@ -1309,7 +1309,7 @@ switch, and this works whether or not that switch is on.
 
 ---
 
-## Audiobook read-along
+## Canopy+ Audiobooks
 
 The **Audiobooks** tab aligns an epub to an audiobook in Plex, sentence by
 sentence, so Canopy+ can show the text as it is read. An admin picks the music
@@ -1321,12 +1321,16 @@ epub for a book, and a few hours later the book has a check mark.
 
 It is **off by default** and costs nothing until it is on. The
 `cplus-aligner` service in `docker-compose.yml` is the same image in another
-role; until an admin presses *Turn on read-along* it is one idle Python process.
+role; until an admin presses *Turn on Canopy+ Audiobooks* it is one idle Python process.
 Turning it on downloads **~1.5 GB once** — PyTorch (CPU build), the other
 Python packages, and the alignment model — into the `cplus-align` volume, where
 it takes ~2.5 GB. Nothing heavy is in the image, so installs that never use
 this never download it, and image builds stay fast. *Turn off* deletes the
 download; books already aligned keep working.
+
+The button stays disabled until the `cplus-align` volume has **10 GB free**:
+room for the runtime plus a book's working files, which hold its whole decoded
+audio while it is aligned.
 
 Every file is pinned by URL and SHA-256 in `src/cplus_align/runtime_lock.json`
 and installed with no package index at all. A download interrupted by a
@@ -1439,7 +1443,7 @@ per-job key that exists only in that job's row and its `job.json`. It stops
 working when the job is no longer active, and a wrong key, a finished job and
 an unknown job all get the same 404.
 
-### Read-along for clients
+### Audiobooks for clients
 
 Only finished books are served, and only to someone who can see the book's
 library in Plex. The access check asks Plex as the caller: plex.tv turns the

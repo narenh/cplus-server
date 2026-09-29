@@ -1,9 +1,12 @@
-{# One book's read-along cell: rendered in the list, and returned alone by every
+{# One book's audiobook cell: rendered in the list, and returned alone by every
    write to it and every poll of it.
 
    A cell with a job in flight re-requests itself — every 2 s while verifying,
    every 10 s while processing — and a cell with nothing in flight carries no
-   trigger at all, so a page of finished books makes no requests.
+   trigger at all, so a page of finished books makes no requests. A polling
+   cell is marked ``polling`` so each refresh swaps in without the just-saved
+   tint, and its bar's fill keeps one id so htmx slides it to the new width
+   rather than redrawing it.
 
    The "⋯" menu holds what is used rarely: uploading a finished alignment made
    elsewhere. It is left out while a job is in flight — the cell re-renders on
@@ -29,7 +32,7 @@
           hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
           hx-confirm="Stop aligning this book?">Cancel</button>
 {% endmacro %}
-<div class="book-status" id="book-{{ book.rating_key }}"
+<div class="book-status{{ ' polling' if book.polling }}" id="book-{{ book.rating_key }}"
   {% if book.polling %}hx-get="{{ base }}/status" hx-trigger="{{ book.polling }}" hx-swap="outerHTML"{% endif %}>
 
 {% if book.notice %}<p class="hint err">{{ book.notice }}</p>{% endif %}
@@ -37,7 +40,7 @@
 
 {% if book.kind == "verifying" %}
   {% set pct = book.job.progress or 0 %}
-  <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
+  <div class="bar {{ 'indeterminate' if pct <= 0 }}"><span id="bar-{{ book.rating_key }}" {% if pct > 0 %}style="width: {{ pct|round(1) }}%"{% endif %}></span></div>
   <div class="status-line">
     <span>Verifying…</span>
     <span class="muted">{{ book.job.stage or "" }}</span>
@@ -45,7 +48,7 @@
   </div>
 
 {% elif book.kind == "queued" %}
-  <div class="bar"><span style="width: 0%"></span></div>
+  <div class="bar"><span id="bar-{{ book.rating_key }}" style="width: 0%"></span></div>
   <div class="status-line">
     <span>Processing…</span>
     <span class="muted">
@@ -57,7 +60,7 @@
 
 {% elif book.kind == "running" %}
   {% set pct = book.job.progress or 0 %}
-  <div class="bar"><span style="width: {{ pct|round(1) }}%"></span></div>
+  <div class="bar"><span id="bar-{{ book.rating_key }}" style="width: {{ pct|round(1) }}%"></span></div>
   <div class="status-line">
     <span>Processing… {{ pct|round|int }}%</span>
     <span class="muted">
@@ -86,7 +89,7 @@
     {{ upload("Replace epub…") }}
     <button type="button" class="link danger" hx-post="{{ base }}/delete"
             hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
-            hx-confirm="Delete this book's alignment? Read-along stops working for it in the app.">Delete</button>
+            hx-confirm="Delete this book's alignment? Its text stops showing in Canopy+.">Delete</button>
   </div>
 
 {% elif book.kind == "failed" %}

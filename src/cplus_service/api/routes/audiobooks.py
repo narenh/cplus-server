@@ -104,7 +104,7 @@ async def _visible_alignment(
         )
     ).scalar_one_or_none()
     if alignment is None or alignment.library_id not in await _libraries(state, config, token):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No read-along for this book")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This book isn't aligned")
     return alignment
 
 

@@ -964,6 +964,9 @@ table.preview .dropped-by { color: var(--err); }
   to { background-color: transparent; }
 }
 .htmx-added { animation: just-saved var(--dur-slow) var(--ease); }
+/* Except where a poll swapped it in: nothing was saved, and a tint every few
+   seconds reads as flashing. */
+.polling.htmx-added { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .htmx-added { animation: none; }
