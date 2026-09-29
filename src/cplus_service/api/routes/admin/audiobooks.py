@@ -332,7 +332,7 @@ async def enable_runtime(request: Request, admin: AdminPageDep) -> Response:
     if not runtime.installed and not runtime.enough_space:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"Canopy+ Audiobooks requires {format_bytes(runtime.min_free_bytes)} of disk space "
+            f"Canopy+ Audiobooks requires {runtime.min_free} of disk space "
             f"({format_bytes(runtime.free_bytes)} available).",
         )
     aligner.request(paths, "install")

@@ -60,8 +60,9 @@ class RuntimeView:
         return max(0.0, min(100.0, 100.0 * done / total))
 
     @property
-    def min_free_bytes(self) -> int:
-        return MIN_FREE_BYTES
+    def min_free(self) -> str:
+        """The minimum as the card writes it: ``10GB``."""
+        return f"{MIN_FREE_BYTES // 10**9}GB"
 
     @property
     def enough_space(self) -> bool:

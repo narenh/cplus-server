@@ -31,8 +31,8 @@
       Canopy+ can play audiobooks on your TV synchronized with the book text.
       Upload DRM-free epub books to align them with your audiobooks. Alignment
       happens locally using
-      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">MMS forced aligner</a>
-      and requires {{ runtime.min_free_bytes|bytes }} of server storage for the
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">ctc-forced-aligner</a>
+      and requires {{ runtime.min_free }} of server storage for the
       model and intermediate files.
     </p>
     <p class="hint warn">
@@ -51,7 +51,7 @@
     {% endif %}
     {% if not runtime.enough_space %}
       <p class="hint err">
-        Canopy+ Audiobooks requires {{ runtime.min_free_bytes|bytes }} of disk space
+        Canopy+ Audiobooks requires {{ runtime.min_free }} of disk space
         ({{ runtime.free_bytes|bytes }} available).
       </p>
     {% endif %}
@@ -99,8 +99,8 @@
       Canopy+ can play audiobooks on your TV synchronized with the book text.
       Upload DRM-free epub books to align them with your audiobooks. Alignment
       happens locally using
-      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">MMS forced aligner</a>
-      and requires {{ runtime.min_free_bytes|bytes }} of server storage for the
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">ctc-forced-aligner</a>
+      and requires {{ runtime.min_free }} of server storage for the
       model and intermediate files.
     </p>
     <div class="row">

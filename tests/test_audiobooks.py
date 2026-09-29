@@ -171,7 +171,7 @@ async def test_enabling_is_disabled_without_10_gb_free(
     low_disk(monkeypatch, 4_200_000_000)
     await signed_in(client, db)
     response = await client.get("/admin/audiobooks")
-    assert "Canopy+ Audiobooks requires 10.0 GB of disk space (4.2 GB available)" in " ".join(
+    assert "Canopy+ Audiobooks requires 10GB of disk space (4.2 GB available)" in " ".join(
         response.text.split()
     )
     assert "disabled>" in " ".join(response.text.split())
