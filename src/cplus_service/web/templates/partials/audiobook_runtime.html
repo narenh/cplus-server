@@ -28,9 +28,12 @@
 
   {% elif runtime.status in ("absent", "failed") %}
     <p class="hint">
-      Aligns an epub you upload to a book's audio, sentence by sentence, so
-      Canopy+ can show the text as it's read. Books are aligned one at a time in
-      the background; a 20-hour book takes a few hours.
+      Canopy+ can play audiobooks on your TV synchronized with the book text.
+      Upload DRM-free epub books to align them with your audiobooks. Alignment
+      happens locally using
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">MMS forced aligner</a>
+      and requires {{ runtime.min_free_bytes|bytes }} of server storage for the
+      model and intermediate files.
     </p>
     <p class="hint warn">
       Turning this on downloads <strong>{{ runtime.download_bytes|bytes }}</strong> once —
@@ -57,7 +60,7 @@
               hx-post="/admin/audiobooks/runtime/enable"
               hx-target="#aligner-runtime" hx-swap="outerHTML"
               {% if not runtime.enough_space %}disabled{% endif %}>
-        {{ "Try again" if runtime.status == "failed" else "Turn on Canopy+ Audiobooks" }}
+        Enable
       </button>
     </div>
 
@@ -93,17 +96,19 @@
 
   {% elif runtime.status == "ready" %}
     <p class="hint">
-      <span class="ok">On.</span>
-      {% if runtime.engine_running %}Aligning now.{% else %}Idle.{% endif %}
-      The runtime takes {{ runtime.disk_bytes|bytes }} of disk.
-      Upload a DRM-free epub for a book below to align it.
+      Canopy+ can play audiobooks on your TV synchronized with the book text.
+      Upload DRM-free epub books to align them with your audiobooks. Alignment
+      happens locally using
+      <a href="https://github.com/MahmoudAshraf97/ctc-forced-aligner" target="_blank" rel="noopener">MMS forced aligner</a>
+      and requires {{ runtime.min_free_bytes|bytes }} of server storage for the
+      model and intermediate files.
     </p>
     <div class="row">
       <button type="button" class="secondary danger"
               hx-post="/admin/audiobooks/runtime/disable"
               hx-target="#aligner-runtime" hx-swap="outerHTML"
               hx-confirm="Turn off Canopy+ Audiobooks? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.">
-        Turn off and remove the download
+        Disable
       </button>
     </div>
   {% endif %}

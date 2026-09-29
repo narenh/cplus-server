@@ -79,9 +79,16 @@
 {% elif book.kind == "ready" %}
   {% set stats = book.alignment.stats or {} %}
   <div class="status-line">
-    <span class="ok">✓ Ready</span>
-    {% if stats.get("sentences") %}
-      <span class="muted">{{ "{:,}".format(stats.get("aligned", 0)) }} of {{ "{:,}".format(stats.get("sentences")) }} sentences</span>
+    {# How much of the epub was found in the audio. Under 80% is worth a look;
+       under 50% is almost always the wrong edition or recording. Rounded down,
+       so a book never shows a figure on the other side of its colour's line. #}
+    {% set matched = (100 * stats.get("aligned", 0) / stats.get("sentences"))|round(0, "floor")|int if stats.get("sentences") else none %}
+    {% if matched is none or matched >= 80 %}
+      <span class="ok">✓ Ready</span>
+    {% elif matched >= 50 %}
+      <span class="warn">Partial Match {{ matched }}%</span>
+    {% else %}
+      <span class="err">Incorrect Match {{ matched }}%</span>
     {% endif %}
   </div>
   {% if book.stale %}

@@ -142,7 +142,8 @@ async def test_enabling_is_offered_with_its_download_size_and_licence(
     sidecar_up(paths, status="absent")
     await signed_in(client, db)
     response = await client.get("/admin/audiobooks")
-    assert "Turn on Canopy+ Audiobooks" in response.text
+    after = response.text.split('hx-post="/admin/audiobooks/runtime/enable"')[1]
+    assert after.split(">", 1)[1].split("</button>")[0].strip() == "Enable"
     assert "GB</strong> once" in response.text
     assert "CC BY-NC 4.0" in response.text
     # Nothing can be aligned until it's on.
@@ -441,7 +442,7 @@ async def test_a_result_is_stored_in_chunks_and_the_job_directory_removed(
     assert sentences[1]["start"] is None and sentences[1]["flags"] == ["unspoken"]
 
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/status")
-    assert "✓ Ready" in response.text and "5 of 6 sentences" in response.text
+    assert "✓ Ready" in response.text and "%" not in response.text.split("✓ Ready")[1][:80]
 
     # The epub and everything else in the job's directory go once it is quiet.
     monkeypatch.setattr(monitor, "SWEEP_QUIET_SECONDS", 0)
@@ -645,7 +646,7 @@ async def test_a_bookalign_json_is_imported_without_the_aligner_at_all(
     await signed_in(client, db)
     response = await import_json(client, bookalign_output())
     assert response.status_code == 200
-    assert "✓ Ready" in response.text and "5 of 6 sentences" in response.text
+    assert "✓ Ready" in response.text and "%" not in response.text.split("✓ Ready")[1][:80]
 
     db.expire_all()
     alignment = (await db.execute(select(AudiobookAlignment))).scalar_one()
@@ -703,6 +704,28 @@ async def test_downloading_needs_an_alignment(client, db, connected, plex) -> No
     await signed_in(client, db)
     response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/alignment.json")
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("aligned", "shown"),
+    [
+        (6, '<span class="ok">✓ Ready</span>'),
+        (5, '<span class="ok">✓ Ready</span>'),  # 83%
+        (4, '<span class="warn">Partial Match 66%</span>'),  # 66.7%, rounded down
+        (3, '<span class="warn">Partial Match 50%</span>'),
+        (2, '<span class="err">Incorrect Match 33%</span>'),
+    ],
+)
+async def test_a_finished_book_says_how_well_it_matched(
+    client, db, connected, plex, aligned: int, shown: str
+) -> None:
+    await signed_in(client, db)
+    payload = json.loads(bookalign_output())
+    for sentence in payload["sentences"][aligned:]:
+        sentence["start"] = sentence["end"] = None
+    payload["stats"].update(sentences=6, aligned=aligned)
+    response = await import_json(client, json.dumps(payload).encode())
+    assert shown in response.text
 
 
 async def test_an_alignment_of_different_audio_is_refused(client, db, connected, plex) -> None:

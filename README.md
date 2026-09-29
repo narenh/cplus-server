@@ -1321,14 +1321,14 @@ epub for a book, and a few hours later the book has a check mark.
 
 It is **off by default** and costs nothing until it is on. The
 `cplus-aligner` service in `docker-compose.yml` is the same image in another
-role; until an admin presses *Turn on Canopy+ Audiobooks* it is one idle Python process.
+role; until an admin presses *Enable* it is one idle Python process.
 Turning it on downloads **~1.5 GB once** — PyTorch (CPU build), the other
 Python packages, and the alignment model — into the `cplus-align` volume, where
 it takes ~2.5 GB. Nothing heavy is in the image, so installs that never use
-this never download it, and image builds stay fast. *Turn off* deletes the
+this never download it, and image builds stay fast. *Disable* deletes the
 download; books already aligned keep working.
 
-The button stays disabled until the `cplus-align` volume has **10 GB free**:
+*Enable* stays disabled until the `cplus-align` volume has **10 GB free**:
 room for the runtime plus a book's working files, which hold its whole decoded
 audio while it is aligned.
 
