@@ -21,7 +21,7 @@ text = '''
 # Actions page, second hint below the list, explaining Name versus Button title.
 [name_hint]
 text = '''
-<strong>Name</strong> is the admin-facing action action name and should be unique and descriptive.<br>
+<strong>Name</strong> is the admin-facing action name and should be unique and descriptive.<br>
 <strong>Button title</strong> is the user-facing button title in Canopy+.<br>
 <strong>Example</strong> Name an action "Add best streaming Dolby Vision for 30 days" with title "Stream Now"
 '''

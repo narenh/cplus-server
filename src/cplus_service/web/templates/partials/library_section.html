@@ -1,26 +1,14 @@
 {# The whole "Default Libraries" card.
 
    Rendered by GET /admin/libraries and returned whole by every write here
-   (add, rename, remove, reorder) so the list and the "add" dropdown's
-   available-libraries set can never disagree — adding one has to remove it
-   from the dropdown in the same response that adds its row. #}
+   (add, rename, remove, reorder, refresh) so the list and the "Add library"
+   menu can never disagree — adding one has to remove it from the menu in the
+   same response that adds its row. #}
 <section class="card" id="default-libraries">
   <h2>Default Libraries</h2>
   <p class="lede">
     {{ t('partials_library_section.section.lede') }}
   </p>
-
-  <div class="row">
-    {% if plex_error %}
-      <span class="hint warn">{{ plex_error }}</span>
-    {% elif plex_server_name %}
-      <span class="hint">{{ t('partials_library_section.connected.hint') }}</span>
-    {% endif %}
-    <button type="button" class="secondary"
-            hx-post="/admin/libraries/reconnect"
-            hx-target="#plex-connection" hx-swap="innerHTML">Reconnect</button>
-    <span id="plex-connection" class="inline-result"></span>
-  </div>
 
   {% if not default_libraries %}
     <p class="empty">{{ t('partials_library_section.empty.text') }}</p>
@@ -61,20 +49,37 @@
     </div>
   {% endif %}
 
-  <form method="post" action="/admin/libraries" class="row add-rule"
-        hx-post="/admin/libraries" hx-target="#default-libraries" hx-swap="outerHTML">
-    <select name="library_id" aria-label="Library to add" {% if not available_sections %}disabled{% endif %}>
-      {% for section in available_sections %}
-        <option value="{{ section.id }}">
-          {{ section.name }} ({{ library_type_labels.get(section.type, section.type) }})
-        </option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="secondary" {% if not available_sections %}disabled{% endif %}>
-      {{ t('partials_library_section.add_button.label') }}
+  <div class="row library-add">
+    {% if available_sections %}
+      {# A menu rather than a select-then-button: picking a library is the add. #}
+      <details class="add-menu">
+        <summary class="button secondary">{{ t('partials_library_section.add_button.label') }}</summary>
+        <form method="post" action="/admin/libraries" class="add-menu-items"
+              hx-post="/admin/libraries" hx-target="#default-libraries" hx-swap="outerHTML">
+          {% for section in available_sections %}
+            <button type="submit" name="library_id" value="{{ section.id }}" class="link">
+              {{ section.name }}
+              <span class="muted">{{ library_type_labels.get(section.type, section.type) }}</span>
+            </button>
+          {% endfor %}
+        </form>
+      </details>
+    {% else %}
+      <button type="button" class="secondary" disabled>{{ t('partials_library_section.add_button.label') }}</button>
+    {% endif %}
+    {# Re-runs Plex server discovery and returns this whole card, so a server
+       that moved or came back shows up in the menu without a page reload. #}
+    <button type="button" class="icon refresh"
+            hx-post="/admin/libraries/reconnect"
+            hx-target="#default-libraries" hx-swap="outerHTML"
+            title="{{ t('partials_library_section.refresh_button.tooltip') }}"
+            aria-label="{{ t('partials_library_section.refresh_button.tooltip') }}">
+      {% include "partials/_refresh_icon.html" %}
     </button>
-  </form>
-  {% if not plex_error and not available_sections and default_libraries %}
-    <p class="hint">{{ t('partials_library_section.all_added.hint') }}</p>
-  {% endif %}
+    {% if plex_error %}
+      <span class="hint warn">{{ plex_error }}</span>
+    {% elif not available_sections and default_libraries %}
+      <span class="hint">{{ t('partials_library_section.all_added.hint') }}</span>
+    {% endif %}
+  </div>
 </section>

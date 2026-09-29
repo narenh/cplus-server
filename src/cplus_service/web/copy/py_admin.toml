@@ -62,12 +62,9 @@ text = '''Not connected to a Plex server.'''
 [plex_unreachable]
 text = '''Could not reach the Plex server: {{ error }}'''
 
-# Libraries tab: "Reconnect to Plex".
+# Libraries tab: shown beside "Add library" when the refresh button fails.
 [plex_no_signin_on_record]
 text = '''No Plex sign-in on record. Sign out and back in with Plex.'''
-
-[plex_connected]
-text = '''Connected to {{ server }}.'''
 
 [plex_no_reachable_server]
 text = '''Could not find a reachable Plex server for this account.'''

@@ -2,10 +2,6 @@
 [section]
 lede = '''Default libraries for new users. Only libraries users have access to will be shown in Canopy+.'''
 
-# Default Libraries card, beside the Reconnect button: shows the connected Plex server's name.
-[connected]
-hint = '''Connected to <strong>{{ plex_server_name }}</strong>.'''
-
 # Default Libraries card: shown when the list is empty.
 [empty]
 text = '''No default libraries yet — add one below.'''
@@ -18,10 +14,14 @@ tooltip = '''Drag to reorder'''
 [remove_button]
 tooltip = '''Remove {{ library.name }}'''
 
-# Default Libraries card: the button next to the "add library" dropdown.
+# Default Libraries card: the button that opens the menu of Plex libraries to add.
 [add_button]
 label = '''Add library'''
 
-# Default Libraries card: shown under the add form when nothing is left to add.
+# Default Libraries card: shown beside the add button when nothing is left to add.
 [all_added]
 hint = '''Every supported library on the server is already in this list.'''
+
+# Default Libraries card: tooltip and screen-reader label on the refresh glyph beside "Add library".
+[refresh_button]
+tooltip = '''Refresh libraries from Plex'''

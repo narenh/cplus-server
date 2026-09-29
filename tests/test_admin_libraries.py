@@ -116,12 +116,11 @@ async def test_the_page_lists_available_libraries_once_connected(
     response = await client.get("/admin/libraries")
 
     assert response.status_code == 200
-    assert '<option value="1">' in response.text
-    assert '<option value="2">' in response.text
-    assert "Naren&#39;s Server" in response.text or "Naren's Server" in response.text
+    assert 'name="library_id" value="1"' in response.text
+    assert 'name="library_id" value="2"' in response.text
 
 
-async def test_a_configured_library_is_not_offered_again_in_the_dropdown(
+async def test_a_configured_library_is_not_offered_again_in_the_add_menu(
     client: httpx.AsyncClient, db: AsyncSession, connected: Config, library_sections
 ) -> None:
     await default_library(db, library_id="1", server_title="Movies (4K HDR)")
@@ -129,11 +128,64 @@ async def test_a_configured_library_is_not_offered_again_in_the_dropdown(
 
     response = await client.get("/admin/libraries")
 
-    # Configured already: shown as a row, offered nowhere in the "add" dropdown.
+    # Configured already: shown as a row, offered nowhere in the "Add library" menu.
     assert 'value="Movies (4K HDR)"' in response.text
-    assert '<option value="1">' not in response.text
+    assert 'name="library_id" value="1"' not in response.text
     # The other library is still on offer.
-    assert '<option value="2">' in response.text
+    assert 'name="library_id" value="2"' in response.text
+
+
+async def test_with_nothing_left_to_add_the_add_button_is_disabled(
+    client: httpx.AsyncClient, db: AsyncSession, connected: Config, library_sections
+) -> None:
+    await default_library(db, library_id="1", server_title="Movies (4K HDR)")
+    await default_library(db, library_id="2", server_title="TV Shows")
+    await signed_in(client, db)
+
+    response = await client.get("/admin/libraries")
+
+    assert 'class="add-menu"' not in response.text
+    assert "Every supported library on the server is already in this list." in response.text
+
+
+async def test_refreshing_redraws_the_card_with_the_libraries_on_offer(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    connected: Config,
+    library_sections,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def found(*args, **kwargs) -> bool:
+        return True
+
+    monkeypatch.setattr("cplus_service.api.routes.admin.libraries.refresh_plex_server", found)
+    await signed_in(client, db)
+
+    response = await client.post("/admin/libraries/reconnect")
+
+    assert response.status_code == 200
+    assert 'id="default-libraries"' in response.text
+    assert 'name="library_id" value="1"' in response.text
+    assert 'class="hint warn"' not in response.text
+
+
+async def test_a_failed_refresh_says_so_on_the_card(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    connected: Config,
+    library_sections,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def not_found(*args, **kwargs) -> bool:
+        return False
+
+    monkeypatch.setattr("cplus_service.api.routes.admin.libraries.refresh_plex_server", not_found)
+    await signed_in(client, db)
+
+    response = await client.post("/admin/libraries/reconnect")
+
+    assert 'id="default-libraries"' in response.text
+    assert "Could not find a reachable Plex server for this account." in response.text
 
 
 # --------------------------------------------------------------------------- #
@@ -227,9 +279,9 @@ async def test_music_and_photo_libraries_are_not_offered(
         response = await client.get("/admin/libraries")
 
     assert response.status_code == 200
-    assert '<option value="1">' in response.text
-    assert '<option value="3">' not in response.text
-    assert '<option value="4">' not in response.text
+    assert 'name="library_id" value="1"' in response.text
+    assert 'name="library_id" value="3"' not in response.text
+    assert 'name="library_id" value="4"' not in response.text
     assert "Music" not in response.text
     assert "Photos" not in response.text
 

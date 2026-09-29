@@ -85,7 +85,7 @@ HOME_BASE_URL = "/admin/libraries/home"
 
 #: CanopyPlus itself only ever fetches these three — see ``PlexServer.fetchLibraries()``,
 #: which filters to exactly this set. Music and photo libraries are excluded from
-#: the "add" dropdown for the same reason: there is nothing in the app that
+#: the "Add library" menu for the same reason: there is nothing in the app that
 #: would ever show one, so offering them here would just be a way to configure
 #: something Canopy+ silently ignores.
 SUPPORTED_LIBRARY_TYPES = {"movie", "show", "video"}
@@ -105,7 +105,7 @@ PAGE_URL = "/admin/libraries"
 
 
 async def _live_sections(config: Config, state: AppState) -> tuple[list[dict], str | None]:
-    """The admin's Plex library sections Canopy+ can show, live — for the "add" dropdown.
+    """The admin's Plex library sections Canopy+ can show, live — for the "Add library" menu.
 
     Returns an error message instead of raising: this page must still show
     the admin's already-configured libraries even when the server cannot be
@@ -134,7 +134,7 @@ async def _library_context(db: DbDep, state: AppState) -> dict[str, object]:
     """Everything ``partials/library_section.html`` renders from.
 
     Shared by the full page and every write to Default Libraries, so the list
-    and the "add" dropdown's available set can never drift apart — an add or
+    and the "Add library" menu can never drift apart — an add or
     remove is only ever seen in the same response that also updates the other.
     """
     config = await get_config(db)
@@ -152,11 +152,18 @@ async def _library_context(db: DbDep, state: AppState) -> dict[str, object]:
     }
 
 
-async def _library_section(request: Request, db: DbDep, state: AppState) -> Response:
-    """The Default Libraries card alone, for every htmx write to it."""
-    return templates.TemplateResponse(
-        request, "partials/library_section.html", await _library_context(db, state)
-    )
+async def _library_section(
+    request: Request, db: DbDep, state: AppState, *, plex_error: str | None = None
+) -> Response:
+    """The Default Libraries card alone, for every htmx write to it.
+
+    ``plex_error`` overrides the one :func:`_live_sections` found, for a
+    refresh that failed before the sections were even asked for.
+    """
+    context = await _library_context(db, state)
+    if plex_error:
+        context["plex_error"] = plex_error
+    return templates.TemplateResponse(request, "partials/library_section.html", context)
 
 
 # --------------------------------------------------------------------------- #
@@ -224,30 +231,27 @@ async def libraries_page(
 
 @router.post("/reconnect", response_class=HTMLResponse)
 async def reconnect(request: Request, db: DbDep, state: StateDep, admin: AdminPageDep) -> Response:
-    """Re-run Plex server discovery with the token already on file.
+    """Re-run Plex server discovery with the token already on file, then redraw the card.
 
     The recovery path for a server that changed address, or a first attempt
-    that failed transiently — same idea as the Notifications tab's own
-    "Reconnect", but there is nothing to re-enrol: plex.tv is just asked again.
+    that failed transiently: plex.tv is just asked again. Returns the whole
+    Default Libraries card, so the "Add library" menu reflects whatever the
+    server offers now.
     """
     config = await get_config(db)
     if not config.plex_admin_token:
-        return templates.TemplateResponse(
-            request,
-            "partials/verify.html",
-            {"ok": False, "message": text("py_admin.plex_no_signin_on_record.text")},
+        return await _library_section(
+            request, db, state, plex_error=text("py_admin.plex_no_signin_on_record.text")
         )
 
     ok = await refresh_plex_server(
         config, config.plex_admin_token, config.plex_server_client_identifier or "", state.http
     )
-    message = (
-        text("py_admin.plex_connected.text", server=config.plex_server_name)
-        if ok
-        else text("py_admin.plex_no_reachable_server.text")
-    )
-    return templates.TemplateResponse(
-        request, "partials/verify.html", {"ok": ok, "message": message}
+    return await _library_section(
+        request,
+        db,
+        state,
+        plex_error=None if ok else text("py_admin.plex_no_reachable_server.text"),
     )
 
 

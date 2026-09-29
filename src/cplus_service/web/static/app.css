@@ -466,6 +466,35 @@ button.icon.danger:hover:not(:disabled) {
   border-color: var(--err);
 }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0; }
+
+/* A button that opens a list, where picking an entry is the action — the
+   Default Libraries "Add library". Floats like the user menu. */
+.add-menu { position: relative; }
+.add-menu > summary { list-style: none; user-select: none; }
+.add-menu > summary::-webkit-details-marker { display: none; }
+.add-menu[open] > summary { background: var(--bg); border-color: var(--muted); }
+.add-menu-items {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  min-width: 220px; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: 6px; box-shadow: var(--lift-2);
+}
+.add-menu-items button.link {
+  justify-content: space-between; gap: 16px; padding: 6px 10px;
+  color: var(--ink); white-space: nowrap; border-radius: var(--radius-control);
+}
+.add-menu-items button.link:hover:not(:disabled) { text-decoration: none; background: var(--bg); }
+.add-menu-items .muted { font-size: 13px; }
+
+/* The refresh glyph turns while its request is out. */
+button.refresh { align-self: stretch; }
+button.refresh.htmx-request svg { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  button.refresh.htmx-request svg { animation: none; }
+}
 form.inline { display: inline; }
 .inline-result { font-size: 14px; }
 .status { min-height: 1.4em; margin-top: 14px; }
