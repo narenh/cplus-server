@@ -21,6 +21,9 @@ of its files starts on it.
 * ``GET``/``PUT /audiobooks/{ratingKey}/progress`` — where this user is in the
   book, aligned or not. Newest listen wins; see
   :class:`~cplus_service.db.models.AudiobookProgress`.
+
+Progress is kept per Plex Home profile, named by ``X-Canopy-Profile`` (absent
+for the account owner); see :func:`~cplus_service.api.deps.get_profile`.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from ...audiobooks.access import AccessUnknown
 from ...audiobooks.ingest import decode_chunk
 from ...db.models import AudiobookAlignment, AudiobookChunk, AudiobookProgress, Config, User
 from ...db.session import get_config
-from ..deps import CachedUserDep, DbDep, PlexTokenDep, StateDep
+from ..deps import CachedUserDep, DbDep, PlexTokenDep, ProfileDep, StateDep
 from ..state import AppState
 
 router = APIRouter(prefix="/audiobooks", tags=["client"])
@@ -92,13 +95,14 @@ async def _visible_alignment(
 
 
 async def _progress_rows(
-    db: AsyncSession, user: User, server_id: str, rating_keys: list[str]
+    db: AsyncSession, user: User, profile: str, server_id: str, rating_keys: list[str]
 ) -> dict[str, AudiobookProgress]:
     if not rating_keys:
         return {}
     rows = await db.execute(
         select(AudiobookProgress).where(
             AudiobookProgress.user_id == user.id,
+            AudiobookProgress.profile == profile,
             AudiobookProgress.plex_server_id == server_id,
             AudiobookProgress.rating_key.in_(rating_keys),
         )
@@ -145,7 +149,7 @@ async def visible_books(
 
 @router.get("")
 async def list_books(
-    db: DbDep, state: StateDep, user: CachedUserDep, plex_token: PlexTokenDep
+    db: DbDep, state: StateDep, user: CachedUserDep, plex_token: PlexTokenDep, profile: ProfileDep
 ) -> dict[str, Any]:
     config = await get_config(db)
     try:
@@ -155,7 +159,7 @@ async def list_books(
             status.HTTP_502_BAD_GATEWAY, f"Couldn't check your access with Plex: {exc}"
         ) from exc
     progress = await _progress_rows(
-        db, user, config.plex_server_client_identifier or "", [b.rating_key for b in books]
+        db, user, profile, config.plex_server_client_identifier or "", [b.rating_key for b in books]
     )
     return {
         "books": [
@@ -167,7 +171,12 @@ async def list_books(
 
 @router.get("/{rating_key}")
 async def book_index(
-    rating_key: str, db: DbDep, state: StateDep, user: CachedUserDep, plex_token: PlexTokenDep
+    rating_key: str,
+    db: DbDep,
+    state: StateDep,
+    user: CachedUserDep,
+    plex_token: PlexTokenDep,
+    profile: ProfileDep,
 ) -> dict[str, Any]:
     config = await get_config(db)
     alignment = await _visible_alignment(db, state, config, plex_token, rating_key)
@@ -182,7 +191,7 @@ async def book_index(
         .where(AudiobookChunk.alignment_id == alignment.id)
         .order_by(AudiobookChunk.n)
     )
-    progress = await _progress_rows(db, user, alignment.plex_server_id, [rating_key])
+    progress = await _progress_rows(db, user, profile, alignment.plex_server_id, [rating_key])
     return {
         **_book_json(alignment),
         "tracks": alignment.tracks,
@@ -284,11 +293,16 @@ async def _check_album(
 
 @router.get("/{rating_key}/progress")
 async def get_progress(
-    rating_key: str, db: DbDep, state: StateDep, user: CachedUserDep, plex_token: PlexTokenDep
+    rating_key: str,
+    db: DbDep,
+    state: StateDep,
+    user: CachedUserDep,
+    plex_token: PlexTokenDep,
+    profile: ProfileDep,
 ) -> dict[str, Any]:
     config = await get_config(db)
     server_id = await _check_album(db, state, config, plex_token, rating_key)
-    row = await db.get(AudiobookProgress, (user.id, server_id, rating_key))
+    row = await db.get(AudiobookProgress, (user.id, server_id, rating_key, profile))
     return {"progress": _progress_json(row)}
 
 
@@ -300,6 +314,7 @@ async def put_progress(
     state: StateDep,
     user: CachedUserDep,
     plex_token: PlexTokenDep,
+    profile: ProfileDep,
 ) -> dict[str, Any]:
     """Record a position, unless a newer listen is already on file.
 
@@ -314,11 +329,13 @@ async def put_progress(
     if listened > now + MAX_CLOCK_SKEW:
         listened = now
 
-    row = await db.get(AudiobookProgress, (user.id, server_id, rating_key))
+    row = await db.get(AudiobookProgress, (user.id, server_id, rating_key, profile))
     if row is not None and _aware(row.listened_at) >= listened:
         return {"applied": False, "progress": _progress_json(row)}
     if row is None:
-        row = AudiobookProgress(user_id=user.id, plex_server_id=server_id, rating_key=rating_key)
+        row = AudiobookProgress(
+            user_id=user.id, plex_server_id=server_id, rating_key=rating_key, profile=profile
+        )
         db.add(row)
     row.position = body.position
     row.track_rating_key = body.track_rating_key

@@ -33,6 +33,7 @@ from ..settings import SEERR_URL_ENV, seerr_url
 from .state import AppState
 
 PLEX_TOKEN_HEADER = "X-Plex-Token"
+PROFILE_HEADER = "X-Canopy-Profile"
 
 
 def get_state(request: Request) -> AppState:
@@ -136,6 +137,21 @@ async def get_cached_user(db: DbDep, plex_token: PlexTokenDep) -> User:
 
 
 CachedUserDep = Annotated[User, Depends(get_cached_user)]
+
+
+async def get_profile(
+    x_canopy_profile: Annotated[str | None, Header(alias=PROFILE_HEADER, max_length=64)] = None,
+) -> str:
+    """Which Plex Home profile of the caller's account this is; ``""`` for the owner.
+
+    ``X-Plex-Token`` is account-level, so it cannot tell profiles apart; the
+    client says which one is signed in. Only state kept per listener (audiobook
+    progress and bookmarks) is keyed on it.
+    """
+    return x_canopy_profile or ""
+
+
+ProfileDep = Annotated[str, Depends(get_profile)]
 
 
 

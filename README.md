@@ -1522,6 +1522,12 @@ would instead let a device that reports on launch drag everyone back. A
 device with a wrong clock cannot freeze everyone else's progress. Write every
 15–30 seconds while playing and on pause: tvOS can end an app without warning.
 
+**Profiles.** `X-Plex-Token` is the account's, shared by every Plex Home
+profile, so a client sends `X-Canopy-Profile: <home user uuid>` to keep each
+profile's progress apart. Leave it out for the account owner. It isn't
+verified: whoever holds the token can switch to any of the account's profiles
+in Plex anyway.
+
 ### Limits
 
 English only. The model's alphabet is a–z and the apostrophe, and text is

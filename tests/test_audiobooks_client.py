@@ -373,3 +373,18 @@ async def test_progress_is_per_user_and_goes_with_them(
 def test_fixtures_are_consistent() -> None:
     assert json.loads(json.dumps(children_payload()))["MediaContainer"]["Metadata"]
     assert gzip.decompress(gzip.compress(b"x")) == b"x"
+
+
+async def test_each_home_profile_keeps_its_own_progress(
+    client, db, connected, listener, plex, plex_headers
+) -> None:
+    await aligned(db)
+    kid = {**plex_headers, "X-Canopy-Profile": "kid-uuid"}
+    await put(client, plex_headers, position=5000, minutes=0)
+    await put(client, kid, position=60, minutes=10)
+    owner = (await client.get("/audiobooks/501/progress", headers=plex_headers)).json()
+    theirs = (await client.get("/audiobooks/501/progress", headers=kid)).json()
+    assert owner["progress"]["position"] == 5000
+    assert theirs["progress"]["position"] == 60
+    listed = (await client.get("/audiobooks", headers=kid)).json()["books"][0]
+    assert listed["progress"]["position"] == 60

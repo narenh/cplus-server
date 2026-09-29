@@ -803,6 +803,12 @@ class AudiobookProgress(Base):
     — when the listener was at that position, by the device's clock — and the
     newest listen wins. Last-to-arrive would let a device that reports on launch
     drag everyone back to wherever it was last week.
+
+    ``profile`` separates the Plex Home profiles of one account. A client
+    authenticates with the account's token, which is the same for every
+    profile, so it names the profile itself (``X-Canopy-Profile``); ``""`` is
+    the account owner. Not verified: whoever holds the token can switch to any
+    of the account's profiles in Plex anyway.
     """
 
     __tablename__ = "audiobook_progress"
@@ -812,6 +818,7 @@ class AudiobookProgress(Base):
     )
     plex_server_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     rating_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    profile: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="")
     position: Mapped[float] = mapped_column(Float)
     track_rating_key: Mapped[str | None] = mapped_column(String(32))
     track_offset: Mapped[float | None] = mapped_column(Float)
