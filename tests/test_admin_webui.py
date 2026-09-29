@@ -396,7 +396,6 @@ async def test_the_config_page_shows_the_seerr_host_read_only(
     response = await client.get("/admin/config")
 
     assert SEERR_URL in response.text
-    assert SEERR_URL_ENV in response.text
     # Not even a disabled input: there is no endpoint behind it any more.
     assert 'name="seerr_url"' not in response.text
 

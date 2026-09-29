@@ -1,9 +1,6 @@
 # Libraries page, "Default Libraries" card: the paragraph under the heading.
 [section]
-lede = '''The libraries a fresh Canopy+ install starts with, in the order it shows
-    them. Renaming here only changes what Canopy+ displays — Plex's own
-    library name is never touched, and stays visible underneath so it is
-    always clear what you renamed.'''
+lede = '''Default libraries for new users. Only libraries users have access to will be shown in Canopy+.'''
 
 # Default Libraries card, beside the Reconnect button: shows the connected Plex server's name.
 [connected]

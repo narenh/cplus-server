@@ -1,10 +1,3 @@
-# Configuration page: help text under the Prowlarr "API key" field.
-[prowlarr_key]
-hint = '''
-{% if config.prowlarr_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-Your users never see this key.
-'''
-
 # Configuration page: help text under the "Preferred indexer" dropdown.
 [preferred_indexer]
 # Dropdown text before the indexer list loads
@@ -28,18 +21,7 @@ sensitive.
 
 # Configuration page, Seerr section: shown in place of the Seerr host when none is configured.
 [seerr_host]
-unset = '''Not set — no one can sign in.'''
-
-# Configuration page, Seerr section: explanation under the Seerr host.
-hint = '''
-Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
-what authenticates every user and files requests on their behalf, and it is
-what decides who counts as an admin — so it is deliberately not something
-any request to this service can change. To point at a different instance,
-change the variable and redeploy; on the next start every device and browser
-session is signed out, since permissions and the admin bit were all resolved
-against the old instance.
-'''
+unset = '''CPLUS_SEERR_URL must be set as an environment var.'''
 
 # Button under the Prowlarr fields
 [verify_button]

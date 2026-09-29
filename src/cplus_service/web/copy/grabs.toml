@@ -8,7 +8,7 @@ text = '''No grabs recorded yet.'''
 
 # Grabs page, Action column: tooltip on the "grab" pill for a release an admin grabbed directly.
 [admin_grab]
-tooltip = '''Grabbed by an admin from the admin app, without an action'''
+tooltip = '''Grabbed by an admin'''
 
 # Grabs page, Action column: label shown when the grab's action has since been deleted.
 [deleted_action]

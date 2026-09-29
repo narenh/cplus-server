@@ -11,9 +11,6 @@
   <label for="prowlarr_api_key">API key</label>
   <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off" data-original=""
          placeholder="{{ '············ (unchanged)' if config.prowlarr_api_key else 'required' }}">
-  <p class="hint">
-    {{ t('config.prowlarr_key.hint') }}
-  </p>
 
   <label for="preferred_indexer_id">Preferred indexer</label>
   {# Disabled until the real options arrive, and re-disabled if the fetch
@@ -73,9 +70,6 @@
     {% else %}
       <p class="readonly-value unset">{{ t('config.seerr_host.unset') }}</p>
     {% endif %}
-    <p class="hint">
-      {{ t('config.seerr_host.hint') }}
-    </p>
   </section>
 
   {# The one part of the Seerr relationship this page *can* change: whether

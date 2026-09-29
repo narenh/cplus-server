@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from ....db.models import Config
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
-from ....settings import SEERR_URL_ENV, seerr_url
+from ....settings import seerr_url
 from ....web import templates
 from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
@@ -78,7 +78,6 @@ async def config_page(request: Request, db: DbDep, admin: AdminPageDep) -> Respo
             # Straight from the environment, never from the database — the page
             # shows the one live answer rather than a copy that could drift.
             "seerr_url": seerr_url(),
-            "seerr_url_env": SEERR_URL_ENV,
             "title": "Configuration",
             "nav": "config",
         },

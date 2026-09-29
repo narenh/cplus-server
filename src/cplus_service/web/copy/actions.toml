@@ -4,44 +4,24 @@ text = '''Download clients unavailable: {{ client_error }}'''
 
 # Actions page, red line shown when no quality profile exists yet.
 [no_profiles]
-text = '''Create a quality profile first — every Prowlarr-backed action needs one.'''
+text = '''At least one quality profile is required to create an action.'''
 
 # Actions page, grey hint above the list of action cards, about dragging to reorder.
 [reorder_hint]
 text = '''
-<strong>Drag a card</strong> to reorder. Canopy+ draws the first two as
-buttons on the detail page and folds the rest into a &#8230; menu, so the
-order here is what decides which two a user sees. The built-in action is
-ranked like any other — put it wherever it belongs.
+Drag to reorder. The first two appear directly on a movie detail page and the rest are placed in an overflow menu.
 '''
 
 # Actions page, first hint below the list, explaining the Icon field.
 [icon_hint]
 text = '''
-<strong>Icon</strong> is an SF Symbol name. The field suggests the ones we
-know render, and warns on anything else without refusing it: no server can
-know what symbols a given tvOS version ships, and Canopy+ falls back to
-<code>arrow.down.circle</code> when it cannot draw the name. Leave it blank
-for the app's own default.
+<strong>Icon</strong> must be an SF Symbol (tvOS 18.6+). Invalid symbols default to <code>arrow.down.circle</code>.
 '''
 
 # Actions page, second hint below the list, explaining Name versus Button title.
 [name_hint]
 text = '''
-<strong>Name</strong> is yours — it identifies the action here, in the grab
-history and in notifications. <strong>Button title</strong> is what the
-Canopy+ app prints on the button; leave it blank and the name is used. Name an
-action <em>Add to library in HD</em> and title the button <em>Play Now</em>
-when those are the right words for two different audiences.
-'''
-
-# Actions page, third hint below the list, about the built-in action.
-[builtin_hint]
-text = '''
-The built-in action can be renamed like any other — nothing identifies an
-action by its name. It cannot be deleted (the next start would seed it again)
-and it takes no download client or quality profile, because it files a request
-in Seerr rather than grabbing anything. <strong>Request</strong> is the one
-word held back for it: on any other button it would promise a user the one
-thing that button cannot do.
+<strong>Name</strong> is the admin-facing action action name and should be unique and descriptive.<br>
+<strong>Button title</strong> is the user-facing button title in Canopy+.<br>
+<strong>Example</strong> Name an action "Add best streaming Dolby Vision for 30 days" with title "Stream Now"
 '''

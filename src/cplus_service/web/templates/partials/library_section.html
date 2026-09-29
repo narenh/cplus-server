@@ -52,7 +52,7 @@
                 hx-post="/admin/libraries/{{ library.id }}/remove"
                 hx-target="#default-libraries" hx-swap="outerHTML">
             <button type="submit" class="icon danger" title="{{ t('partials_library_section.remove_button.tooltip', library=library) }}"
-\1aria-label="{{ t('partials_library_section.remove_button.tooltip', library=library) }}">
+                    aria-label="{{ t('partials_library_section.remove_button.tooltip', library=library) }}">
               {% include "partials/_trash_icon.html" with context %}
             </button>
           </form>
