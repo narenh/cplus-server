@@ -1044,7 +1044,7 @@ table.preview .dropped-by { color: var(--err); }
   min-height: 0; padding: 6px 10px; border: none; font-weight: 400;
   border-radius: var(--radius-control); background: none;
   color: var(--ink); font: inherit; font-size: 14px; text-align: left;
-  white-space: nowrap; cursor: pointer;
+  white-space: nowrap; cursor: pointer; text-decoration: none;
 }
 .menu-item:hover:not(:disabled), .menu-item:focus-within, .menu-item:focus-visible {
   background: var(--bg); filter: none;

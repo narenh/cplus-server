@@ -9,7 +9,8 @@
    rather than redrawing it.
 
    The "⋯" menu holds what is used rarely: replacing a finished book's epub,
-   uploading an alignment made elsewhere, and deleting the alignment. It is
+   uploading an alignment made elsewhere, downloading this one, and deleting
+   it. It is
    left out while a job is in flight — the cell re-renders on every poll, which
    would snap an open menu shut — and an upload then would be overwritten by
    the job anyway. It is a popover, so it sits in the top layer rather than
@@ -125,6 +126,7 @@
       </label>
     </form>
     {% if book.kind == "ready" %}
+      <a class="menu-item" href="{{ base }}/alignment.json" download>Download alignment JSON</a>
       <button type="button" class="menu-item danger" hx-post="{{ base }}/delete"
               hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML"
               hx-confirm="Delete this book's alignment? Its text stops showing in Canopy+.">Delete</button>

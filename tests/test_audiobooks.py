@@ -674,6 +674,37 @@ async def test_an_import_replaces_the_existing_alignment_under_a_new_version(
     assert second.stats["sentences"] == 8
 
 
+async def test_a_downloaded_alignment_uploads_back_unchanged(client, db, connected, plex) -> None:
+    await signed_in(client, db)
+    await import_json(client, bookalign_output())
+    download = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/alignment.json")
+    assert download.status_code == 200
+    assert 'filename="The Hobbit.alignment.json"' in download.headers["content-disposition"]
+    exported = download.json()
+    assert exported["version"] == 1 and len(exported["sentences"]) == 6
+    assert exported["audio"]["tracks"] == [{"n": 0, "offset": 0.0, "duration": 37500.0}]
+
+    db.expire_all()
+
+    async def snapshot() -> tuple:
+        row = (await db.execute(select(AudiobookAlignment))).scalar_one()
+        chunks = [c.data for c in (await db.execute(select(AudiobookChunk))).scalars()]
+        return row.id, (row.tracks, row.sections, row.stats, chunks)
+
+    before_id, before = await snapshot()
+    await import_json(client, download.content)
+    db.expire_all()
+    after_id, after = await snapshot()
+    assert after_id != before_id  # a new version...
+    assert after == before  # ...of the same alignment
+
+
+async def test_downloading_needs_an_alignment(client, db, connected, plex) -> None:
+    await signed_in(client, db)
+    response = await client.get(f"/admin/audiobooks/books/{ALBUM_KEY}/alignment.json")
+    assert response.status_code == 404
+
+
 async def test_an_alignment_of_different_audio_is_refused(client, db, connected, plex) -> None:
     await signed_in(client, db)
     response = await import_json(client, bookalign_output(duration=3346.0))
@@ -775,7 +806,8 @@ async def test_a_finished_books_menu_offers_replace_upload_and_delete(
     await signed_in(client, db)
     ready = await import_json(client, bookalign_output())
     menu = ready.text[ready.text.index('class="popover-menu"') :]
-    assert menu.index("Replace epub") < menu.index("Upload alignment JSON") < menu.index("Delete")
+    order = ["Replace epub", "Upload alignment JSON", "Download alignment JSON", "Delete"]
+    assert [menu.index(item) for item in order] == sorted(menu.index(item) for item in order)
     assert "re-aligning the entire audiobook" in menu
 
 

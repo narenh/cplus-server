@@ -255,3 +255,30 @@ async def replace_alignment(db: AsyncSession, alignment: AudiobookAlignment) -> 
     )
     db.add(alignment)
     await db.flush()
+
+
+def export_result(alignment: AudiobookAlignment, chunks: list[bytes]) -> dict[str, Any]:
+    """A stored alignment as a ``version: 1`` document — one an upload accepts back.
+
+    ``chunks`` is each chunk's data, in order. Sentences come back with the
+    fields :data:`SENTENCE_FIELDS` kept; the aligner's diagnostics beyond those
+    were not stored, so they are not in the file.
+    """
+    sentences = [sentence for data in chunks for sentence in decode_chunk(data)]
+    tracks = alignment.tracks or []
+    audio: dict[str, Any] = {"duration": alignment.duration}
+    if tracks and all(t.get("offset") is not None for t in tracks):
+        audio["tracks"] = [
+            {"n": t["n"], "offset": t["offset"], "duration": t.get("duration")} for t in tracks
+        ]
+    book: dict[str, Any] = {"title": alignment.epub_title or alignment.title}
+    if alignment.epub_author:
+        book["authors"] = alignment.epub_author.split(", ")
+    return {
+        "version": 1,
+        "book": book,
+        "audio": audio,
+        "sections": alignment.sections or [],
+        "stats": alignment.stats or {},
+        "sentences": sentences,
+    }

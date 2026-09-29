@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
+import re
 import secrets
+import urllib.parse
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -37,6 +40,7 @@ from ....audiobooks.ingest import (
     MAX_IMPORT_BYTES,
     InvalidResult,
     build_alignment,
+    export_result,
     import_tracks,
     parse_result,
     replace_alignment,
@@ -54,6 +58,7 @@ from ....audiobooks.jobs import (
 )
 from ....db.models import (
     AudiobookAlignment,
+    AudiobookChunk,
     AudiobookJob,
     AudiobookJobStatus,
     Config,
@@ -434,6 +439,32 @@ async def align_book(
         "audiobook %s (%s): queued job %s for verification", album.title, rating_key, job.id
     )
     return await _cell(request, db, rating_key)
+
+
+@router.get("/books/{rating_key}/alignment.json")
+async def export_alignment(db: DbDep, admin: AdminPageDep, rating_key: str) -> Response:
+    """The book's alignment as a file *Upload alignment JSON* takes back."""
+    config = await get_config(db)
+    server_id = config.plex_server_client_identifier or ""
+    alignment = (await alignments_for(db, server_id, [rating_key])).get(rating_key)
+    if alignment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This book isn't aligned")
+    rows = await db.execute(
+        select(AudiobookChunk.data)
+        .where(AudiobookChunk.alignment_id == alignment.id)
+        .order_by(AudiobookChunk.n)
+    )
+    result = await asyncio.to_thread(export_result, alignment, list(rows.scalars()))
+    body = json.dumps(result, ensure_ascii=False, indent=1).encode("utf-8")
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", alignment.title).strip() or "audiobook"
+    ascii_name = name.encode("ascii", "ignore").decode() or "audiobook"
+    disposition = (
+        f'attachment; filename="{ascii_name}.alignment.json"; '
+        f"filename*=UTF-8''{urllib.parse.quote(name + '.alignment.json')}"
+    )
+    return Response(
+        body, media_type="application/json", headers={"Content-Disposition": disposition}
+    )
 
 
 @router.post("/books/{rating_key}/import", response_class=HTMLResponse)
