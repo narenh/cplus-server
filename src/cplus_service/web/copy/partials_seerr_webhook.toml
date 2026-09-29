@@ -1,0 +1,65 @@
+# Configuration page, "Requests made in Seerr" section, when the webhook is ON: setup instructions at the top.
+[on]
+intro = '''
+On. In Seerr, open <strong>Settings → Notifications → Webhook</strong>,
+switch it on, and fill in these two fields. Leave the JSON payload as
+Seerr's default — it already carries everything this reads.
+'''
+
+# ...second paragraph: what a customised JSON payload must keep.
+payload = '''
+If you have customised that payload for something else, it only needs to
+keep <code>notification_type</code>, <code>request_id</code>,
+<code>requestedBy_username</code>, <code>subject</code> and
+<code>media_tmdbid</code>. Anything else in it is ignored. Without the
+first two, deliveries are accepted and quietly do the wrong thing — the
+server log says which is missing.
+'''
+
+# ...under the "Webhook URL" value.
+url_hint = '''
+This is the address <em>you</em> reached this page on. If Seerr sees this
+service under a different name — a reverse proxy, a container network, a
+LAN address — use the one Seerr can resolve, keeping
+<code>{{ webhook_path }}</code> on the end.
+'''
+
+# ...under the "Authorization Header" value (the secret).
+secret_hint = '''
+Paste this into Seerr's <strong>Authorization Header</strong> field
+verbatim. It is the whole of what proves a post really came from your
+Seerr, so treat it like a password — though note that it authenticates
+that one endpoint and nothing else, and that endpoint can do nothing but
+log a request and notify you about it.
+'''
+
+# ...which Notification Types to tick in Seerr.
+types_hint = '''
+Under <strong>Notification Types</strong>, tick <strong>Request Pending
+Approval</strong> and <strong>Request Automatically Approved</strong>.
+Anything else you tick is accepted and ignored, so Seerr will not record
+a failed delivery for it.
+'''
+
+# ...button label and confirmation popup for issuing a new secret.
+regenerate_button = '''Generate a new secret'''
+regenerate_confirm = '''Issue a new secret? Seerr keeps sending the old one until you paste the new value over it there, and those deliveries are refused in the meantime.'''
+
+# ...confirmation popup for the "Turn off" button.
+disable_confirm = '''Turn the webhook off? Requests filed in Seerr stop being logged and stop reaching your phone.'''
+
+# Configuration page, "Requests made in Seerr" section, when the webhook is OFF.
+[off]
+status = '''Off — nothing posted to {{ webhook_path }} is accepted.'''
+hint = '''
+Requests filed in the app are logged and pushed to you already. This is
+the other door: someone opening Seerr in a browser and requesting there.
+Switching it on generates a secret to paste into Seerr's webhook
+settings, and from then on those requests land in your activity log and
+on your phone like any other.
+'''
+setup_button = '''Set up the Seerr webhook'''
+
+# Heading of the Seerr webhook section
+[heading]
+text = '''Requests made in Seerr'''

@@ -8,7 +8,7 @@
    Expects: profiles, summaries, in_use. #}
 <div id="profiles-list">
 {% if not profiles %}
-  <p class="empty">No quality profiles yet. Every action needs one, so start here.</p>
+  <p class="empty">{{ t('partials_profiles_list.empty.text') }}</p>
 {% else %}
 <div class="action-list">
   {% for profile in profiles %}
@@ -20,7 +20,7 @@
          one. #}
       <span class="muted profile-reading">
         {% if summary.is_empty %}
-          <em>takes anything, in indexer order</em>
+          <em>{{ t('partials_profiles_list.reading_empty.text') }}</em>
         {% else %}
           {% if summary.never_grab %}
             <span class="reading-part">
@@ -30,7 +30,7 @@
           {% if summary.choices %}
             <span class="reading-part">
               <span class="reading-label">prefer</span>
-              {{ summary.choices|join(", then ") }}, then everything else
+              {{ summary.choices|join(", then ") }}, {{ t('partials_profiles_list.prefer_suffix.text') }}
             </span>
           {% endif %}
           {% if summary.tie_breaks %}
@@ -42,13 +42,13 @@
       </span>
       <span class="row-controls">
         {% if profile.id in in_use %}
-          <span class="muted" title="Used by at least one action">in use</span>
+          <span class="muted" title="{{ t('partials_profiles_list.in_use.tooltip') }}">{{ t('partials_profiles_list.in_use.label') }}</span>
         {% else %}
           <form method="post" action="/admin/quality-profiles/{{ profile.id }}/delete"
                 hx-post="/admin/quality-profiles/{{ profile.id }}/delete"
                 hx-target="#profiles-list" hx-swap="outerHTML"
-                hx-confirm="Delete {{ profile.name }}?">
-            <button type="submit" class="icon danger" title="Delete {{ profile.name }}"
+                hx-confirm="{{ t('partials_profiles_list.delete_confirm.text', profile=profile) }}">
+            <button type="submit" class="icon danger" title="{{ t('partials_profiles_list.delete_button.tooltip', profile=profile) }}"
                     aria-label="Delete {{ profile.name }}">
               {% include "partials/_trash_icon.html" with context %}
             </button>

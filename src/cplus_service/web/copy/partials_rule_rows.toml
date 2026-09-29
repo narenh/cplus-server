@@ -1,0 +1,15 @@
+# Quality profile editor, tie-breaker rows only: tooltip on the up arrow.
+[move_up]
+title = '''Break ties earlier'''
+
+# Tie-breaker rows: tooltip on the down arrow.
+[move_down]
+title = '''Break ties later'''
+
+# Filter or tie-breaker row of the "prefer largest/smallest" kind: greyed hint inside the optional size cap box.
+[size_cap]
+placeholder = '''soft cap in GB (optional)'''
+
+# Filter or tie-breaker row with an ordered list of values (e.g. resolutions): small note under the text box.
+[ordered_values]
+hint = '''Best first. Available: {{ choices }}'''

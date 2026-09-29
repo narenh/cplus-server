@@ -2,7 +2,7 @@
 <option value="" {% if selected is none %}selected{% endif %}>All indexers</option>
 {% for indexer in indexers %}
   <option value="{{ indexer.id }}" {% if selected == indexer.id %}selected{% endif %}>
-    {{ indexer.name }}{% if not indexer.enable %} (disabled in Prowlarr){% endif %}
+    {{ indexer.name }}{% if not indexer.enable %} {{ t('partials_indexer_options.disabled.text') }}{% endif %}
   </option>
 {% endfor %}
 {% if error %}<option value="" disabled>— {{ error }} —</option>{% endif %}

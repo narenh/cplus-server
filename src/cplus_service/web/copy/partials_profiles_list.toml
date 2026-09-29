@@ -1,0 +1,24 @@
+# Quality profiles page: shown instead of the list when no profiles exist.
+[empty]
+text = '''No quality profiles yet. Every action needs one, so start here.'''
+
+# Quality profiles list, on a profile that has no rules at all.
+[reading_empty]
+text = '''takes anything, in indexer order'''
+
+# Quality profiles list, tooltip on the "in use" tag (a profile used by an action cannot be deleted).
+[in_use]
+label = '''in use'''
+tooltip = '''Used by at least one action'''
+
+# Quality profiles list, the trailing part of the "prefer" line on each profile row.
+[prefer_suffix]
+text = '''then everything else'''
+
+# Quality profiles list: the trash button's hover tooltip.
+[delete_button]
+tooltip = '''Delete {{ profile.name }}'''
+
+# Quality profiles list: the "are you sure" popup when deleting a profile.
+[delete_confirm]
+text = '''Delete {{ profile.name }}?'''

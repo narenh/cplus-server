@@ -16,6 +16,8 @@ from typing import Any
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
+from . import copy_strings
+
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
@@ -118,6 +120,7 @@ templates.env.filters["bytes"] = format_bytes
 templates.env.filters["eta"] = format_eta
 templates.env.filters["ordinal"] = ordinal
 templates.env.globals["static_url"] = static_url
+copy_strings.install(templates.env)
 
 __all__ = [
     "STATIC_DIR",

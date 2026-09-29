@@ -1,0 +1,31 @@
+# Users page: shown instead of the list when nobody has signed in yet.
+[empty]
+text = '''
+No users yet. A user appears here the first time their client signs in —
+identity comes from Seerr, so there is nobody to grant access to until then.
+'''
+
+# Users page: the trash button's hover tooltip on a user card.
+[remove_button]
+tooltip = '''Remove {{ user.plex_username }}'''
+
+# Users page: the "are you sure" popup when removing a user.
+[remove_confirm]
+text = '''Remove {{ user.plex_username }} and revoke access now?'''
+
+# Users page, permission checkboxes: small tag next to system actions.
+[built_in]
+badge = '''built in'''
+
+# Users page, link at the bottom of each user card.
+[edit_home]
+label = '''Edit Home Screen'''
+
+# Users page: note under the list of users.
+[footnote]
+hint = '''
+Granting takes effect at the user's next app launch, when their client calls
+<code>/register</code> again — actions and searches authenticate from a
+cache rather than re-checking Seerr on every request. Removing a user is
+immediate.
+'''

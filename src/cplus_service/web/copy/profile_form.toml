@@ -1,0 +1,31 @@
+# Profile name field on the quality-profile editor: greyed-out example text inside the empty box.
+[name_field]
+placeholder = '''4K, or 1080p if that's all there is'''
+
+# Editor: the submit button under the builder.
+[save_button]
+label = '''Save profile'''
+
+# Editor: heading of the live preview panel on the right.
+[preview_heading]
+title = '''What this would grab'''
+
+# Editor: explanatory line under the preview panel heading.
+[preview_intro]
+lede = '''
+Re-ranked as you edit, against the unsaved rules — including the releases
+they throw away.
+'''
+
+# Editor preview panel: the two radio choices for what the preview runs against.
+[preview_source]
+sample = '''Sample releases'''
+real = '''A real search'''
+
+# Editor preview panel: greyed-out example text in the search box.
+[preview_query]
+placeholder = '''tt0111161, or a film title'''
+
+# Editor preview panel: shown while the preview is first loading.
+[preview_loading]
+text = '''Loading…'''

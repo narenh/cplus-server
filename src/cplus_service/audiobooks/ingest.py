@@ -22,6 +22,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import AudiobookAlignment, AudiobookChunk, AudiobookJob
+from ..web.copy_strings import text
 from .jobs import fingerprint
 
 #: A chunk closes at the first paragraph break after this much audio.
@@ -61,26 +62,30 @@ def parse_result(data: bytes) -> dict[str, Any]:
     try:
         result = json.loads(data)
     except ValueError as exc:
-        raise InvalidResult(f"not JSON ({exc})") from exc
+        raise InvalidResult(text("py_audiobooks.alignment_not_json.text", error=exc)) from exc
     if not isinstance(result, dict) or result.get("version") != 1:
-        raise InvalidResult("not a version 1 alignment")
+        raise InvalidResult(text("py_audiobooks.alignment_not_v1.text"))
     sentences = result.get("sentences")
     if not isinstance(sentences, list) or not sentences:
-        raise InvalidResult("the alignment has no sentences")
+        raise InvalidResult(text("py_audiobooks.alignment_no_sentences.text"))
     for index, sentence in enumerate(sentences):
         if not isinstance(sentence, dict) or sentence.get("i") != index:
-            raise InvalidResult(f"sentence {index} is missing or out of order")
+            raise InvalidResult(text("py_audiobooks.alignment_sentence_order.text", index=index))
         if not isinstance(sentence.get("text"), str):
-            raise InvalidResult(f"sentence {index} has no text")
+            raise InvalidResult(text("py_audiobooks.alignment_sentence_no_text.text", index=index))
         if not isinstance(sentence.get("para"), int) or not isinstance(sentence.get("sec"), int):
-            raise InvalidResult(f"sentence {index} has no paragraph or section")
+            raise InvalidResult(text("py_audiobooks.alignment_sentence_no_para.text", index=index))
         start, end = sentence.get("start"), sentence.get("end")
         if (start is None) != (end is None):
-            raise InvalidResult(f"sentence {index} has a start or an end, not both")
+            raise InvalidResult(
+                text("py_audiobooks.alignment_sentence_half_timed.text", index=index)
+            )
         if start is not None and (not _number(start) or not _number(end) or end < start):
-            raise InvalidResult(f"sentence {index} has impossible times")
+            raise InvalidResult(
+                text("py_audiobooks.alignment_sentence_bad_times.text", index=index)
+            )
     if not isinstance(result.get("sections", []), list):
-        raise InvalidResult("sections is not a list")
+        raise InvalidResult(text("py_audiobooks.alignment_sections_not_list.text"))
     return result
 
 
@@ -88,7 +93,7 @@ def load_result(path: Path) -> dict[str, Any]:
     try:
         data = path.read_bytes()
     except OSError as exc:
-        raise InvalidResult(f"unreadable result: {exc}") from exc
+        raise InvalidResult(text("py_audiobooks.alignment_unreadable.text", error=exc)) from exc
     return parse_result(data)
 
 
@@ -109,23 +114,28 @@ def import_tracks(result: dict[str, Any], tracks: list[dict[str, Any]]) -> list[
     audio = result.get("audio") or {}
     duration = audio.get("duration")
     if not _number(duration) or duration <= 0:
-        raise InvalidResult("the alignment doesn't say how long its audio is")
+        raise InvalidResult(text("py_audiobooks.alignment_no_duration.text"))
     plex_total = sum(float(t.get("duration") or 0) for t in tracks)
     if abs(duration - plex_total) > max(5.0, 0.005 * plex_total):
         raise InvalidResult(
-            f"it was made from {_span(duration)} of audio, but Plex has {_span(plex_total)}"
-            " for this book — is it for a different book or recording?"
+            text(
+                "py_audiobooks.alignment_wrong_duration.text",
+                made=_span(duration),
+                plex=_span(plex_total),
+            )
         )
     last_end = max((s["end"] for s in result["sentences"] if s.get("end") is not None), default=0)
     if last_end > duration + 2:
-        raise InvalidResult("its sentences run past the end of its own audio")
+        raise InvalidResult(text("py_audiobooks.alignment_past_end.text"))
 
     given = audio.get("tracks")
     if isinstance(given, list) and len(given) == len(tracks):
         out = []
         for n, track in enumerate(given):
             if not isinstance(track, dict) or not _number(track.get("offset")):
-                raise InvalidResult(f"file {n + 1} has no offset")
+                raise InvalidResult(
+                    text("py_audiobooks.alignment_file_no_offset.text", number=n + 1)
+                )
             out.append(
                 {"n": n, "offset": float(track["offset"]), "duration": track.get("duration")}
             )
@@ -133,8 +143,7 @@ def import_tracks(result: dict[str, Any], tracks: list[dict[str, Any]]) -> list[
     if len(tracks) == 1:
         return [{"n": 0, "offset": 0.0, "duration": float(duration)}]
     raise InvalidResult(
-        f"Plex has {len(tracks)} files for this book, and the alignment doesn't say where each"
-        " one starts. Only an alignment made from all of them, in order, can be used."
+        text("py_audiobooks.alignment_multi_file_no_offsets.text", count=len(tracks))
     )
 
 
@@ -143,13 +152,12 @@ def summary(stats: dict[str, Any]) -> str | None:
     total, aligned = stats.get("sentences"), stats.get("aligned")
     if not total or aligned is None:
         return None
-    text = f"{aligned:,} of {total:,} sentences aligned."
+    message = text(
+        "py_audiobooks.alignment_summary.text", aligned=f"{aligned:,}", total=f"{total:,}"
+    )
     if aligned / total < 0.5:
-        text += (
-            " Less than half the book was found in the audio — check this is the right"
-            " edition."
-        )
-    return text
+        message += " " + text("py_audiobooks.alignment_low_match.text")
+    return message
 
 
 def chunk_sentences(sentences: list[dict[str, Any]]) -> list[dict[str, Any]]:

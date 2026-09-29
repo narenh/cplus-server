@@ -24,6 +24,7 @@ from cplus_align.protocol import (
 
 from ..db.models import AudiobookAlignment, AudiobookJob, AudiobookJobStatus, User
 from ..plex.client import PlexAlbum, PlexAudioPart
+from ..web.copy_strings import text
 
 INTERNAL_URL_ENV = "CPLUS_INTERNAL_URL"
 
@@ -131,7 +132,7 @@ async def start_job(
         title=album.title,
         author=album.author,
         status=AudiobookJobStatus.VERIFYING,
-        stage="Waiting for the aligner",
+        stage=text("py_audiobooks.stage_waiting.text"),
         progress=0.0,
         secret=secrets.token_urlsafe(32),
         tracks=tracks,

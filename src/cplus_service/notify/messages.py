@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..release.parser import parse_title
+from ..web.copy_strings import text
 from .types import NotificationType
 
 #: Words a title-caser should leave lowercase unless they lead the title.  Only
@@ -52,7 +53,7 @@ class MediaSummary:
         """``Title (Year)``, or just ``Title`` when the year is unknown."""
         if self.year is None:
             return self.title
-        return f"{self.title} ({self.year})"
+        return text("py_notify.media_with_year.text", title=self.title, year=self.year)
 
 
 @dataclass(frozen=True)
@@ -124,7 +125,7 @@ def user_requested(media: MediaSummary, *, username: str, **data: Any) -> Notifi
     return Notification(
         type=NotificationType.USER_REQUESTED,
         title=media.display,
-        subtitle=f"Requested by {username}",
+        subtitle=text("py_notify.user_requested_subtitle.text", username=username),
         data={"type": NotificationType.USER_REQUESTED.value, **data},
     )
 
@@ -136,7 +137,9 @@ def user_action(
     return Notification(
         type=NotificationType.USER_ACTION,
         title=media.display,
-        subtitle=f"{username}: {action_name}",
+        subtitle=text(
+            "py_notify.user_action_subtitle.text", username=username, action_name=action_name
+        ),
         data={"type": NotificationType.USER_ACTION.value, **data},
     )
 

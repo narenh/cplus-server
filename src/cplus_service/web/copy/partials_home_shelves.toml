@@ -1,0 +1,12 @@
+# Home shelves list (Libraries page and user Home editor): tooltip on the drag grip of each shelf row.
+[drag_handle]
+tooltip = '''Drag to reorder'''
+
+# Home shelves list: hover tooltips on each row's up and down arrow buttons.
+[move_buttons]
+up = '''Move up'''
+down = '''Move down'''
+
+# Home shelves list: button under the list that adds a shelf.
+[new_shelf]
+label = '''New Shelf'''

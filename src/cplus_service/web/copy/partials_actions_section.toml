@@ -1,0 +1,13 @@
+# New-action card at the bottom of the Actions page, example text greyed inside the Name box.
+[new_name]
+placeholder = '''Add to library in HD'''
+
+# New-action card, example text greyed inside the Button title box.
+[new_title]
+placeholder = '''Play Now'''
+
+# New-action card, note under the Confirmation text box. Followed by extra help text supplied by the server.
+[confirm_note]
+text = '''
+Leave blank to let the app word it. {{ confirm_help }}
+'''

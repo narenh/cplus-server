@@ -6,14 +6,13 @@
 <section class="card">
   <h2>Books</h2>
   <p class="hint">
-    In Plex, an audiobook is an album in a music library. Pick the library your
-    audiobooks are in; each book aligned here appears in Canopy+ with its text.
+    {{ t('audiobooks.books.lede') }}
   </p>
 
   {% if plex_error %}
     <p class="hint err">{{ plex_error }}</p>
   {% elif not libraries %}
-    <p class="empty">This Plex server has no music libraries, which is where Plex keeps audiobooks.</p>
+    <p class="empty">{{ t('audiobooks.no_music_libraries.empty') }}</p>
   {% else %}
     <form method="get" action="/admin/audiobooks" class="filter">
       <select name="library" aria-label="Library" onchange="this.form.submit()">
@@ -26,7 +25,7 @@
     </form>
 
     {% if not books %}
-      <p class="empty">{% if q %}No books match “{{ q }}”.{% else %}This library has no albums.{% endif %}</p>
+      <p class="empty">{{ t('audiobooks.no_books.empty') }}</p>
     {% else %}
       <div class="table-scroll">
         <table class="books">

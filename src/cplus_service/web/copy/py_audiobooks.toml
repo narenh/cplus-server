@@ -1,0 +1,85 @@
+# Read-along (audiobook alignment) status text the admin sees on the Audiobooks
+# tab, on a book's row after an upload, import or aligner run.
+
+# A book's row: the stage label before the aligner has reported anything.
+[stage_waiting]
+text = '''Waiting for the aligner'''
+
+# A book's row: the stage label while verifying, if the aligner gave none.
+[stage_verifying]
+text = '''Verifying'''
+
+# Failure messages on a book's row.
+[job_disappeared]
+text = '''The aligner's copy of this job disappeared. Upload the epub again.'''
+
+[aligner_stopped]
+text = '''The aligner stopped without saying why.'''
+
+# `error` is why the result file was unusable (see the "alignment_*" reasons below).
+[result_unreadable]
+text = '''The aligner's result couldn't be read: {{ error }}'''
+
+[epub_mismatch]
+text = '''The epub doesn't match the audio.'''
+
+# Success message on a finished book: "6,320 of 6,411 sentences aligned." `aligned`, `total` (already formatted with commas).
+[alignment_summary]
+text = '''{{ aligned }} of {{ total }} sentences aligned.'''
+
+# Appended (after a space) when under half the book was found.
+[alignment_low_match]
+text = '''Less than half the book was found in the audio — check this is the right edition.'''
+
+# Reasons an uploaded or produced alignment file is rejected. Each is slotted
+# into a sentence such as "That isn't an alignment this can use: <reason>.", so
+# they start lowercase and have no full stop (except where a second sentence follows).
+# `error` is the parser's own message where there is one.
+[alignment_not_json]
+text = '''not JSON ({{ error }})'''
+
+[alignment_not_v1]
+text = '''not a version 1 alignment'''
+
+[alignment_no_sentences]
+text = '''the alignment has no sentences'''
+
+# `index` is the sentence number.
+[alignment_sentence_order]
+text = '''sentence {{ index }} is missing or out of order'''
+
+[alignment_sentence_no_text]
+text = '''sentence {{ index }} has no text'''
+
+[alignment_sentence_no_para]
+text = '''sentence {{ index }} has no paragraph or section'''
+
+[alignment_sentence_half_timed]
+text = '''sentence {{ index }} has a start or an end, not both'''
+
+[alignment_sentence_bad_times]
+text = '''sentence {{ index }} has impossible times'''
+
+[alignment_sections_not_list]
+text = '''sections is not a list'''
+
+[alignment_unreadable]
+text = '''unreadable result: {{ error }}'''
+
+[alignment_no_duration]
+text = '''the alignment doesn't say how long its audio is'''
+
+# `made` and `plex` are durations like "9 h 12 min".
+[alignment_wrong_duration]
+text = '''it was made from {{ made }} of audio, but Plex has {{ plex }} for this book — is it for a different book or recording?'''
+
+[alignment_past_end]
+text = '''its sentences run past the end of its own audio'''
+
+# `number` is the file's position in the book (1-based).
+[alignment_file_no_offset]
+text = '''file {{ number }} has no offset'''
+
+# `count` is how many audio files Plex has for the book.
+[alignment_multi_file_no_offsets]
+text = '''Plex has {{ count }} files for this book, and the alignment doesn't say where each one starts. Only an alignment made from all of them, in order, can be used.'''

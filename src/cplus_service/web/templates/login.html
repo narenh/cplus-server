@@ -15,14 +15,14 @@
 {% block content %}
 <div class="card narrow signin-card">
   {% if seerr_url %}
-    <p class="lede">Sign in with the Plex account that owns</p>
+    <p class="lede">{{ t('login.signin.lede') }}</p>
     <p class="signin-host">{{ seerr_url }}</p>
-    <button type="button" id="go" class="plex">Sign in with Plex</button>
+    <button type="button" id="go" class="plex">{{ t('login.sign_in_button.label') }}</button>
   {% else %}
     {# Nothing to sign in against. Say so plainly rather than offering a button
        that can only fail — fixing it means a redeploy, not a form on this page. #}
-    <p class="lede">This install has no Seerr host configured.</p>
-    <p class="hint center">Set it in the deployment's environment and restart.</p>
+    <p class="lede">{{ t('login.no_seerr.lede') }}</p>
+    <p class="hint center">{{ t('login.no_seerr.hint') }}</p>
   {% endif %}
 
   <p id="status" class="status" role="status"></p>
@@ -49,16 +49,16 @@
     try {
       response = await fetch("/admin/plex/pin/" + pinId);
     } catch (err) {
-      return stop("Lost contact with the server.", "err");
+      return stop({{ t('login.status.lost_contact')|tojson }}, "err");
     }
     const body = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      return stop(body.detail || "Sign-in failed.", "err");
+      return stop(body.detail || {{ t('login.status.failed')|tojson }}, "err");
     }
     if (body.claimed) {
       clearInterval(timer);
-      say("Signed in. Redirecting…", "ok");
+      say({{ t('login.status.signed_in')|tojson }}, "ok");
       window.location = body.redirect || "/admin/grabs";
       return;
     }
@@ -72,7 +72,7 @@
 
   button.addEventListener("click", async function () {
     button.disabled = true;
-    say("Opening Plex…");
+    say({{ t('login.status.opening_plex')|tojson }});
 
     // No body: the Seerr instance to validate against comes from the server's
     // own environment, so there is nothing for this page to send.
@@ -80,15 +80,15 @@
     try {
       response = await fetch("/admin/plex/pin", { method: "POST" });
     } catch (err) {
-      return stop("Could not reach the server.", "err");
+      return stop({{ t('login.status.unreachable')|tojson }}, "err");
     }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return stop(body.detail || "Could not start the Plex sign-in.", "err");
+      return stop(body.detail || {{ t('login.status.could_not_start')|tojson }}, "err");
     }
 
     window.open(body.auth_url, "plex-auth", "width=800,height=720");
-    say("Waiting for you to approve access in the Plex window…");
+    say({{ t('login.status.waiting')|tojson }});
     timer = setInterval(function () { poll(body.pin_id); }, 2000);
   });
 })();

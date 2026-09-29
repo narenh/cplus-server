@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ....quality.models import RuleType, TieBreak
+from ....web.copy_strings import text
 
 #: Ordered-list rules take a comma-separated text input rather than a
 #: multi-select: order is meaningful in these rules and a multi-select cannot
@@ -60,61 +61,61 @@ class RuleSpec:
 RULE_SPECS: tuple[RuleSpec, ...] = (
     RuleSpec(
         RuleType.EXCLUDE_PRERELEASE,
-        "Pre-releases",
+        text("py_admin.rule_prerelease.label"),
         FILTER_KIND,
-        "CAM, HDCAM, TS/HDTS, telecine, HDRip, screener, DCP/DCPRip.",
+        text("py_admin.rule_prerelease.help"),
     ),
     RuleSpec(
         RuleType.KEYWORD_EXCLUDE,
-        "Titles containing…",
+        text("py_admin.rule_keywords.label"),
         FILTER_KIND,
-        "Comma-separated. Matched anywhere in the release title, ignoring case.",
+        text("py_admin.rule_keywords.help"),
     ),
     RuleSpec(
         RuleType.SIZE_CAP_GB,
-        "Anything over… (GB)",
+        text("py_admin.rule_size_cap.label"),
         FILTER_KIND,
-        "A release with no reported size is kept — an unknown size is not evidence.",
+        text("py_admin.rule_size_cap.help"),
     ),
     RuleSpec(
         RuleType.REPACK_PROPER_PRIORITY,
-        "REPACK / PROPER first",
+        text("py_admin.rule_repack.label"),
         PREFERENCE_KIND,
-        "Only against the release it replaces, matched on the title itself.",
+        text("py_admin.rule_repack.help"),
     ),
     RuleSpec(
         RuleType.RESOLUTION_ORDER,
-        "Resolution order",
+        text("py_admin.rule_resolution.label"),
         PREFERENCE_KIND,
-        "Anything unlisted ranks last — it is not dropped.",
+        text("py_admin.rule_resolution.help"),
         ("2160p", "1080p", "720p", "480p", "unknown"),
     ),
     RuleSpec(
         RuleType.SOURCE_ORDER,
-        "Source order",
+        text("py_admin.rule_source.label"),
         PREFERENCE_KIND,
-        "Anything unlisted ranks last — it is not dropped.",
+        text("py_admin.rule_source.help"),
         ("WEB-DL", "WEBRip", "BluRay", "REMUX", "encode", "unknown"),
     ),
     RuleSpec(
         RuleType.HDR_MATCH,
-        "Dynamic range order",
+        text("py_admin.rule_hdr.label"),
         PREFERENCE_KIND,
-        "DV matches any Dolby Vision profile; DV_P8 matches only that one.",
+        text("py_admin.rule_hdr.help"),
         ("DV_P7", "DV_P8", "DV_P5", "DV", "HDR10+", "HDR10", "SDR"),
     ),
     RuleSpec(
         RuleType.AUDIO_MATCH,
-        "Audio order",
+        text("py_admin.rule_audio.label"),
         PREFERENCE_KIND,
-        "A release may carry several; it scores on its best match.",
+        text("py_admin.rule_audio.help"),
         ("Atmos", "DTS:X", "TrueHD"),
     ),
     RuleSpec(
         RuleType.SIZE,
-        "File size",
+        text("py_admin.rule_size.label"),
         PREFERENCE_KIND,
-        "A cap here only demotes larger releases; to drop them, filter instead.",
+        text("py_admin.rule_size.help"),
     ),
 )
 
@@ -137,19 +138,19 @@ AUDIO_OPTIONS = ("Atmos", "DTS:X", "TrueHD")
 #: ``value, label`` — the empty value defers to the profile's tie-breakers,
 #: which is the default and reads as such in the dropdown.
 TIE_BREAK_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("", "the tie-breakers below"),
-    (TieBreak.BIGGEST.value, "the biggest file"),
-    (TieBreak.SMALLEST.value, "the smallest file"),
-    (TieBreak.CLOSEST_TO_GB.value, "the closest to a size"),
-    (TieBreak.NEWEST.value, "the newest"),
-    (TieBreak.MOST_SEEDERS.value, "the most seeders"),
+    ("", text("py_admin.tie_default.text")),
+    (TieBreak.BIGGEST.value, text("py_admin.tie_biggest.text")),
+    (TieBreak.SMALLEST.value, text("py_admin.tie_smallest.text")),
+    (TieBreak.CLOSEST_TO_GB.value, text("py_admin.tie_closest.text")),
+    (TieBreak.NEWEST.value, text("py_admin.tie_newest.text")),
+    (TieBreak.MOST_SEEDERS.value, text("py_admin.tie_seeders.text")),
 )
 
 CHOICE_FIELDS = (
-    ("resolutions", "Resolution", RESOLUTION_OPTIONS),
-    ("sources", "Source", SOURCE_OPTIONS),
-    ("hdr", "Dynamic range", HDR_OPTIONS),
-    ("audio", "Audio", AUDIO_OPTIONS),
+    ("resolutions", text("py_admin.choice_resolution.text"), RESOLUTION_OPTIONS),
+    ("sources", text("py_admin.choice_source.text"), SOURCE_OPTIONS),
+    ("hdr", text("py_admin.choice_hdr.text"), HDR_OPTIONS),
+    ("audio", text("py_admin.choice_audio.text"), AUDIO_OPTIONS),
 )
 
 

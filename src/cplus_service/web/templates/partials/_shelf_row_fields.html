@@ -77,7 +77,7 @@
     <label class="check">
       <input type="checkbox" name="title_only" form="shelf-{{ id }}" data-auto-apply
              {% if current.titleOnly %}checked{% endif %}>
-      Hide release year
+      {{ t('partials__shelf_row_fields.hide_year.label') }}
     </label>
   {% elif current.titleOnly %}
     {# No checkbox to show it, but the value itself is still whatever the
@@ -98,7 +98,7 @@
   {% if show_remove %}
     <form method="post" action="{{ remove_url }}" class="remove-form"
           hx-post="{{ remove_url }}" hx-target="{{ swap_target }}" hx-swap="outerHTML">
-      <button type="submit" class="icon danger" title="Remove shelf" aria-label="Remove shelf"
+      <button type="submit" class="icon danger" title="{{ t('partials__shelf_row_fields.remove_button.tooltip') }}" aria-label="Remove shelf"
               {% if disable_remove %}disabled{% endif %}>
         {% include "partials/_trash_icon.html" with context %}
       </button>

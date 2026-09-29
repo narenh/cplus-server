@@ -24,6 +24,7 @@ from starlette.background import BackgroundTask
 from ...db.models import AudiobookJob
 from ...db.session import get_config
 from ...plex.client import PlexServerClient
+from ...web.copy_strings import text
 from ..deps import StateDep
 
 router = APIRouter(prefix="/internal/aligner", include_in_schema=False)
@@ -58,7 +59,9 @@ async def track_audio(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     if not base or not token:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Not connected to Plex")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, text("py_errors.internal_not_connected.text")
+        )
 
     plex = PlexServerClient(base, token, client=state.http)
     headers = {}
@@ -69,12 +72,15 @@ async def track_audio(
             plex.open_stream(job.tracks[n]["key"], headers=headers), stream=True
         )
     except httpx.HTTPError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Plex didn't answer") from exc
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.internal_plex_silent.text")
+        ) from exc
     if upstream.status_code >= 400:
         await upstream.aclose()
         code = upstream.status_code
         raise HTTPException(
-            code if code == 416 else status.HTTP_502_BAD_GATEWAY, f"Plex answered {code}"
+            code if code == 416 else status.HTTP_502_BAD_GATEWAY,
+            text("py_errors.internal_plex_answered.text", code=code),
         )
     return StreamingResponse(
         upstream.aiter_raw(),

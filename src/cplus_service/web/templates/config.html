@@ -12,8 +12,7 @@
   <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off" data-original=""
          placeholder="{{ '············ (unchanged)' if config.prowlarr_api_key else 'required' }}">
   <p class="hint">
-    {% if config.prowlarr_api_key %}A key is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-    Your users never see this key.
+    {{ t('config.prowlarr_key.hint') }}
   </p>
 
   <label for="preferred_indexer_id">Preferred indexer</label>
@@ -30,19 +29,17 @@
           hx-target="this"
           hx-swap="innerHTML"
           hx-on::after-swap="this.disabled = this.querySelector('option[disabled]') !== null">
-    <option value="">Loading indexers…</option>
+    <option value="">{{ t('config.preferred_indexer.loading') }}</option>
   </select>
   <p class="hint">
-    Applies to every quality profile. When set, a search is scored against this
-    indexer's results if it returned any, and falls back to all indexers if it
-    returned none.
+    {{ t('config.preferred_indexer.hint') }}
   </p>
 
   <div class="row">
     <button type="button" class="secondary"
             hx-post="/admin/config/verify-prowlarr?format=html"
             hx-target="#verify-result"
-            hx-swap="innerHTML">Verify Prowlarr connection</button>
+            hx-swap="innerHTML">{{ t('config.verify_button.label') }}</button>
     <span id="verify-result" class="inline-result"></span>
   </div>
 
@@ -51,12 +48,7 @@
   <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off" data-original=""
          placeholder="{{ '············ (unchanged)' if config.tmdb_bearer_token else 'required' }}">
   <p class="hint">
-    {% if config.tmdb_bearer_token %}A token is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-    A TMDB v4 read-access token. Unlike the keys above, this one is readable
-    over the API (<code>GET /manager/tmdb-token</code>) by anyone who can
-    manage requests, because the admin app needs it to look titles up — fine
-    for a low-impact, easily rotated key, not a place to put anything more
-    sensitive.
+    {{ t('config.tmdb_token.hint') }}
   </p>
 
   <div class="row">
@@ -79,16 +71,10 @@
     {% if seerr_url %}
       <p class="readonly-value">{{ seerr_url }}</p>
     {% else %}
-      <p class="readonly-value unset">Not set — no one can sign in.</p>
+      <p class="readonly-value unset">{{ t('config.seerr_host.unset') }}</p>
     {% endif %}
     <p class="hint">
-      Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
-      what authenticates every user and files requests on their behalf, and it is
-      what decides who counts as an admin — so it is deliberately not something
-      any request to this service can change. To point at a different instance,
-      change the variable and redeploy; on the next start every device and browser
-      session is signed out, since permissions and the admin bit were all resolved
-      against the old instance.
+      {{ t('config.seerr_host.hint') }}
     </p>
   </section>
 

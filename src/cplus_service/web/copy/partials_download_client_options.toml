@@ -1,0 +1,7 @@
+# Download client dropdown, suffix after the name of a client switched off in Prowlarr.
+[disabled]
+text = '''(disabled in Prowlarr)'''
+
+# Download client dropdown, only entry when Prowlarr has no download clients at all.
+[none]
+text = '''No download clients in Prowlarr'''

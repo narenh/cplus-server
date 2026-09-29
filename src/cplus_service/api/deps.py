@@ -30,6 +30,7 @@ from ..prowlarr.client import ProwlarrClient
 from ..seerr.client import SeerrClient
 from ..seerr.models import SeerrAuth
 from ..settings import SEERR_URL_ENV, seerr_url
+from ..web.copy_strings import text
 from .state import AppState
 
 PLEX_TOKEN_HEADER = "X-Plex-Token"
@@ -79,7 +80,7 @@ async def get_prowlarr(state: StateDep, config: ConfigDep) -> ProwlarrClient:
     if not config.prowlarr_url or not config.prowlarr_api_key:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Prowlarr is not configured yet. Set it in the admin settings.",
+            text("py_errors.prowlarr_not_configured.text"),
         )
     return ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
 
@@ -99,7 +100,7 @@ async def get_seerr(state: StateDep) -> SeerrClient:
     if not url:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
+            text("py_errors.seerr_not_configured.text", env=SEERR_URL_ENV),
         )
     return SeerrClient(url, client=state.seerr_http)
 
@@ -112,7 +113,8 @@ async def get_plex_token(
 ) -> str:
     if not x_plex_token:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, f"Missing {PLEX_TOKEN_HEADER} header"
+            status.HTTP_401_UNAUTHORIZED,
+            text("py_errors.missing_plex_token.text", header=PLEX_TOKEN_HEADER),
         )
     return x_plex_token
 
@@ -131,7 +133,7 @@ async def get_cached_user(db: DbDep, plex_token: PlexTokenDep) -> User:
     if user is None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            "Unrecognised Plex token. Call GET /register to authenticate first.",
+            text("py_errors.unrecognised_plex_token.text"),
         )
     return user
 
@@ -169,5 +171,5 @@ def require_request_manager(auth: SeerrAuth) -> None:
     if not auth.user.can_manage_requests:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "This action is limited to users who can manage requests.",
+            text("py_errors.manage_requests_only.text"),
         )

@@ -44,6 +44,7 @@ from ....db.models import Action, QualityProfile
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from .deps import AdminPageDep
 
@@ -55,7 +56,7 @@ router = APIRouter(prefix="/actions", tags=["admin"])
 async def _download_clients(state: StateDep, db: DbDep) -> tuple[list[dict], str | None]:
     config = await get_config(db)
     if not config.prowlarr_url or not config.prowlarr_api_key:
-        return [], "Prowlarr is not configured yet."
+        return [], text("py_admin.prowlarr_not_configured.text")
     prowlarr = ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
     try:
         return [
@@ -89,11 +90,10 @@ _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 
 #: What the field shows when empty, and the sentence under it. Both name the
 #: placeholders, so the one list above stays the only place they are decided.
-CONFIRM_EXAMPLE = "{release} will be added, using {size} of storage."
-CONFIRM_HELP = (
-    "You can use "
-    + " and ".join(f"{{{name}}}" for name in CONFIRM_PLACEHOLDERS)
-    + ", which the app fills in from the release being confirmed."
+CONFIRM_EXAMPLE = text("py_admin.confirm_example.text")
+CONFIRM_HELP = text(
+    "py_admin.confirm_help.text",
+    placeholders=" and ".join(f"{{{name}}}" for name in CONFIRM_PLACEHOLDERS),
 )
 
 #: SF Symbols the icon field offers, and the only ones it can vouch for.
@@ -132,13 +132,12 @@ def _clean_icon(raw: str) -> str | None:
     if len(clean) > MAX_ICON:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"A symbol name can be at most {MAX_ICON} characters.",
+            text("py_admin.icon_too_long.text", max=MAX_ICON),
         )
     if not set(clean) <= ICON_CHARSET:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "An SF Symbol name is lowercase words separated by dots, like"
-            " 'arrow.down.circle'.",
+            text("py_admin.icon_bad_chars.text"),
         )
     return clean
 
@@ -151,7 +150,7 @@ def _clean_display_title(raw: str) -> str | None:
     if len(clean) > MAX_DISPLAY_TITLE:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"A button title can be at most {MAX_DISPLAY_TITLE} characters.",
+            text("py_admin.title_too_long.text", max=MAX_DISPLAY_TITLE),
         )
     return clean
 
@@ -164,7 +163,7 @@ def _clean_confirm_body(raw: str) -> str | None:
     if len(clean) > MAX_CONFIRM_BODY:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Confirmation text can be at most {MAX_CONFIRM_BODY} characters.",
+            text("py_admin.confirm_too_long.text", max=MAX_CONFIRM_BODY),
         )
 
     # A typo in a placeholder is silent otherwise: the client cannot fill in
@@ -178,8 +177,7 @@ def _clean_confirm_body(raw: str) -> str | None:
         offered = " and ".join(f"{{{name}}}" for name in CONFIRM_PLACEHOLDERS)
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Nothing can be filled in for {listed}. The placeholders are"
-            f" {offered}.",
+            text("py_admin.confirm_bad_placeholders.text", listed=listed, offered=offered),
         )
     return clean
 
@@ -195,9 +193,7 @@ def _reject_reserved_word(value: str | None, *, field: str) -> None:
         return
     raise HTTPException(
         status.HTTP_409_CONFLICT,
-        f"'{REQUEST_ACTION_NAME}' belongs to the built-in action — it means"
-        " filing a request in Seerr, which this action cannot do. Pick another"
-        f" {field}.",
+        text("py_admin.reserved_word.text", name=REQUEST_ACTION_NAME, field=field),
     )
 
 
@@ -303,7 +299,7 @@ async def create_action(
     _reject_reserved_word(clean, field="name")
     _reject_reserved_word(clean_title, field="button title")
     if await db.get(QualityProfile, quality_profile_id) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_admin.no_such_profile.text"))
 
     # Last in the ranking rather than first: a new action appearing at the top
     # would push whatever was there into the overflow menu on every tvOS in the
@@ -421,10 +417,10 @@ async def update_action(
         if download_client_id is None or quality_profile_id is None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                "An action needs a download client and a quality profile.",
+                text("py_admin.action_needs_targets.text"),
             )
         if await db.get(QualityProfile, quality_profile_id) is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such quality profile")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_admin.no_such_profile.text"))
 
     # Validated first, applied second: raising mid-update would roll the
     # request's transaction back anyway, but a half-applied action is not a

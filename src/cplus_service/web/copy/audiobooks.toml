@@ -1,0 +1,12 @@
+# The "Books" card on the Audiobooks tab: the paragraph under the heading.
+[books]
+lede = '''In Plex, an audiobook is an album in a music library. Pick the library your
+    audiobooks are in; each book aligned here appears in Canopy+ with its text.'''
+
+# Books card: shown instead of the book list when the Plex server has no music libraries.
+[no_music_libraries]
+empty = '''This Plex server has no music libraries, which is where Plex keeps audiobooks.'''
+
+# Books card: shown in place of the table when the list is empty (a search with no hits, or an empty library).
+[no_books]
+empty = '''{% if q %}No books match “{{ q }}”.{% else %}This library has no albums.{% endif %}'''

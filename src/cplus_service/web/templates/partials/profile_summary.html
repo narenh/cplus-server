@@ -4,19 +4,13 @@
 
 <div class="profile-summary">
   {% if summary is none %}
-    <p class="err">
-      Something below is not valid yet, so there is nothing to read back. Save to
-      see what needs fixing.
-    </p>
+    <p class="err">{{ t('partials_profile_summary.invalid.text') }}</p>
   {% elif summary.is_empty %}
-    <p class="muted">
-      This profile takes anything, in the order the indexer listed it. Add a
-      choice below to say what you would rather have.
-    </p>
+    <p class="muted">{{ t('partials_profile_summary.empty.text') }}</p>
   {% else %}
     <dl>
       {% if summary.never_grab %}
-        <dt>Never grab</dt>
+        <dt>{{ t('partials_profile_summary.never_grab.label') }}</dt>
         <dd>{{ summary.never_grab|join("; ") }}</dd>
       {% endif %}
 
@@ -25,22 +19,19 @@
         <dd>
           <ol class="summary-choices">
             {% for reading in summary.choices %}<li>{{ reading }}</li>{% endfor %}
-            <li class="muted">everything else</li>
+            <li class="muted">{{ t('partials_profile_summary.everything_else.text') }}</li>
           </ol>
         </dd>
       {% endif %}
 
       {% if summary.tie_breaks %}
-        <dt>Break ties by</dt>
+        <dt>{{ t('partials_profile_summary.tie_breaks.label') }}</dt>
         <dd>{{ summary.tie_breaks|join(", then ") }}</dd>
       {% endif %}
     </dl>
 
     {% if summary.catch_all_choice is not none %}
-      <p class="hint warn">
-        The {{ ordinal(summary.catch_all_choice) }} choice matches anything, so
-        nothing after it can ever apply.
-      </p>
+      <p class="hint warn">{{ t('partials_profile_summary.catch_all_warning.text', summary=summary) }}</p>
     {% endif %}
   {% endif %}
 </div>

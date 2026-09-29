@@ -3,7 +3,7 @@
 {% include "partials/user_filter.html" %}
 
 {% if not entries %}
-  <p class="empty">Nothing logged yet.</p>
+  <p class="empty">{{ t('activity.empty.text') }}</p>
 {% else %}
 <div class="table-scroll">
 <table>
@@ -45,8 +45,7 @@
              column can read "—" while still naming who asked — the payload
              carries a username but no id to match a local row on. #}
           {% if detail.get("source") == "seerr" %}
-            <span class="muted">· via Seerr{% if detail.get("unmatched_user") and detail.get("requested_by") %}
-              as {{ detail.requested_by }}{% endif %}</span>
+            <span class="muted">{{ t('activity.via_seerr.note', detail=detail) }}</span>
           {% endif %}
         {% elif (detail.get("kind") or "").startswith("request_") %}
           request {{ detail.get("seerr_request_id", "?") }}
@@ -54,7 +53,7 @@
           {{ detail.get("query") or detail.get("imdb_id") or "all indexers" }}
         {% elif entry.event_type == "search" %}
           {{ detail.get("imdb_id", "?") }}
-          <span class="muted">· {{ detail.get("action_ids", [])|length }} action(s)</span>
+          <span class="muted">{{ t('activity.search_actions.note', detail=detail) }}</span>
         {% else %}
           {{ detail.get("release_title") or detail.get("release_guid") or "—" }}
         {% endif %}

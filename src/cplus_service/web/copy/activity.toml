@@ -1,0 +1,12 @@
+# Activity log page: shown instead of the table when nothing has been logged.
+[empty]
+text = '''Nothing logged yet.'''
+
+# Activity log, Detail column of a request made through Seerr's own UI.
+[via_seerr]
+note = '''· via Seerr{% if detail.get("unmatched_user") and detail.get("requested_by") %}
+              as {{ detail.requested_by }}{% endif %}'''
+
+# Activity log, Detail column of a search: how many actions it matched.
+[search_actions]
+note = '''· {{ detail.get("action_ids", [])|length }} action(s)'''

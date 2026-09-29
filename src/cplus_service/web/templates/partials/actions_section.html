@@ -38,12 +38,12 @@
     <div class="field">
       <label for="new-name">Name</label>
       <input form="new-action" id="new-name" type="text" name="name"
-             placeholder="Add to library in HD" required>
+             placeholder="{{ t('partials_actions_section.new_name.placeholder') }}" required>
     </div>
     <div class="field">
       <label for="new-title">Button title</label>
       <input form="new-action" id="new-title" type="text" name="display_title"
-             maxlength="128" placeholder="Play Now">
+             maxlength="128" placeholder="{{ t('partials_actions_section.new_title.placeholder') }}">
     </div>
     <div class="field">
       <label for="new-icon">Icon</label>
@@ -58,7 +58,7 @@
       <textarea form="new-action" id="new-confirm" name="confirm_body" rows="2"
                 maxlength="512" placeholder="{{ confirm_placeholder }}"></textarea>
       <p class="field-note muted">
-        Leave blank to let the app word it. {{ confirm_help }}
+        {{ t('partials_actions_section.confirm_note.text') }}
       </p>
     </div>
     <div class="field">

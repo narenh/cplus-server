@@ -1,0 +1,52 @@
+# Book row, while aligning: confirmation dialog for the Cancel link.
+[cancel]
+confirm = '''Stop aligning this book?'''
+
+# Book row, queued: the label next to the position in line.
+[queued]
+label = '''Processing…'''
+
+# Book row, queued: how far back in line (position is passed in).
+[queued_position]
+text = '''{% if book.position and book.position > 1 %}{{ book.position|ordinal }} in line{% else %}starting{% endif %}'''
+
+# Book row, while aligning: red warning when the aligner has gone quiet; {{ book.stalled_minutes }} is how long.
+[stalled]
+hint = '''No word from the aligner for {{ book.stalled_minutes }} minutes. If it doesn't pick back up, check the <code>cplus-aligner</code> container.'''
+
+# Book row, aligned: yellow warning when the Plex audio changed after aligning.
+[stale]
+hint = '''The audio in Plex has changed since this was aligned, so the timings may be off. Upload the epub again to re-align.'''
+
+# Book row, aligned: red message when replacing the epub failed; {{ book.message }} is the reason.
+[replace_failed]
+hint = '''The replacement didn't go through: {{ book.message }}'''
+
+# Book row, aligned: the "Replace epub" file button.
+[replace_button]
+label = '''Replace epub…'''
+
+# Book row, aligned: confirmation dialog for the Delete link.
+[delete]
+confirm = '''Delete this book's alignment? Read-along stops working for it in the app.'''
+
+# Book row, after a failed alignment: fallback message if none was given.
+[failed]
+fallback = '''That didn't work.'''
+
+# Book row, after a failed alignment: the file button to try again.
+[failed_button]
+label = '''Try another epub…'''
+
+# Book row, no alignment yet: the file button that starts one.
+[align_button]
+label = '''Align…'''
+
+# Book row, "⋯" menu: the button to upload an alignment file made elsewhere.
+[import_button]
+label = '''Upload alignment JSON…'''
+
+# Book row, "⋯" menu: explanation under that button.
+[import_hint]
+hint = '''A finished alignment made elsewhere (<code>bookalign.py</code>'s output) from this
+        book's audio. It replaces any alignment the book has; nothing needs to run.'''

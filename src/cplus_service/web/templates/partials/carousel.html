@@ -12,11 +12,11 @@
   <h2>Carousel</h2>
   <div class="carousel-toggle">
     <span class="carousel-switch">
-      {% with checked = carousel.home_carousel_enabled, url = carousel.enabled_toggle_url, label = "Enable Home Carousel" %}
+      {% with checked = carousel.home_carousel_enabled, url = carousel.enabled_toggle_url, label = t('partials_carousel.enable_switch.label') %}
         {% include "partials/carousel_switch.html" %}
       {% endwith %}
     </span>
-    <span>Enable Home Carousel</span>
+    <span>{{ t('partials_carousel.enable_switch.label') }}</span>
   </div>
 
   {% if carousel.home_carousel_enabled %}

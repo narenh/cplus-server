@@ -1,0 +1,15 @@
+# Quality profile preview panel, red line shown when the rules being edited are not valid.
+[invalid]
+text = '''The rules are not valid yet, so there is nothing to preview.'''
+
+# Preview panel, shown when the candidate list is empty. The live variant names the search that was run.
+[empty]
+text = '''Nothing came back{% if live %} for “{{ query }}”{% endif %}.'''
+
+# Preview table, Verdict column of a release the profile dropped.
+[dropped]
+text = '''dropped: {{ by }}'''
+
+# Preview table, Verdict column of a release that survived the filters but matched none of the choices.
+[no_choice]
+text = '''matched no choice'''

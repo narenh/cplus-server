@@ -1,0 +1,34 @@
+# Action card, tooltip on the drag handle at the left of the card.
+[drag_handle]
+title = '''Drag to reorder'''
+
+# Action card, note under the Confirmation text box. Followed by extra help text supplied by the server.
+[confirm_note]
+text = '''
+Shown when the user confirms this action. Leave blank to let the app
+word it. {{ confirm_help }}
+'''
+
+# Action card of the built-in action, grey note where the download client and quality profile fields would be.
+[system_note]
+text = '''
+Files a request in Seerr. Never touches Prowlarr, so it has no
+download client or quality profile — and it is the only action that
+supports TV as well as films.
+'''
+
+# Action card, dropdown entry shown when the saved download client no longer exists in Prowlarr.
+[client_missing]
+text = '''#{{ action.download_client_id }} (not in Prowlarr)'''
+
+# Action card, trash button: the "are you sure" dialog.
+[delete_confirm]
+text = '''Delete {{ action.name }}?'''
+
+# Action card, trash button: tooltip and screen-reader label.
+[delete_button]
+text = '''Delete {{ action.name }}'''
+
+# Action card of the built-in action, small grey text where the trash button would be.
+[system_controls]
+text = '''grant per user'''

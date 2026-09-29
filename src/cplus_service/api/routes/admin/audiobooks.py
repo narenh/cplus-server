@@ -62,6 +62,7 @@ from ....db.models import (
 from ....db.session import get_config
 from ....plex.client import PlexAlbum, PlexServerClient, PlexServerError
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from ...state import AppState
 from .deps import AdminPageDep
@@ -239,9 +240,7 @@ async def audiobooks_page(
     plex = _plex(config, state)
     server_id = config.plex_server_client_identifier or ""
     if plex is None or not server_id:
-        context["plex_error"] = (
-            "Not connected to a Plex server yet. Sign out and back in with Plex."
-        )
+        context["plex_error"] = text("py_admin.plex_not_connected_signin.text")
         return templates.TemplateResponse(request, "audiobooks.html", context)
 
     try:
@@ -276,7 +275,7 @@ async def audiobooks_page(
             ]
     except PlexServerError as exc:
         logger.warning("could not list audiobooks: %s", exc)
-        context["plex_error"] = f"Could not reach the Plex server: {exc}"
+        context["plex_error"] = text("py_admin.plex_unreachable.text", error=exc)
 
     return templates.TemplateResponse(request, "audiobooks.html", context)
 
@@ -380,19 +379,21 @@ async def align_book(
     paths = aligner.paths()
     runtime = aligner.read_runtime(paths)
     if paths is None or not runtime.ready:
-        return await reject("Read-along isn't enabled, so nothing can be aligned yet.")
+        return await reject(text("py_admin.audiobook_read_along_off.text"))
     plex = _plex(config, state)
     server_id = config.plex_server_client_identifier
     if plex is None or not server_id:
-        return await reject("Not connected to a Plex server.")
+        return await reject(text("py_admin.plex_not_connected.text"))
 
     active = (await latest_jobs(db, server_id, [rating_key])).get(rating_key)
     if active is not None and active.is_active:
-        return await reject("This book is already being aligned. Cancel that first.")
+        return await reject(text("py_admin.audiobook_already_aligning_epub.text"))
 
     data = await _read_upload(epub)
     if data is None:
-        return await reject(f"That file is over {MAX_EPUB_BYTES // (1024 * 1024)} MB.")
+        return await reject(
+            text("py_admin.audiobook_file_too_big.text", mb=MAX_EPUB_BYTES // (1024 * 1024))
+        )
     info = await asyncio.to_thread(inspect_epub, io.BytesIO(data))
     if not info.ok:
         return await reject(" ".join(info.problems))
@@ -401,11 +402,11 @@ async def align_book(
         album = await plex.album(rating_key)
         parts = await plex.album_parts(rating_key) if album else []
     except PlexServerError as exc:
-        return await reject(f"Could not reach the Plex server: {exc}")
+        return await reject(text("py_admin.plex_unreachable.text", error=exc))
     if album is None:
-        return await reject("Plex no longer has this album.")
+        return await reject(text("py_admin.audiobook_album_gone.text"))
     if not parts:
-        return await reject("Plex lists no audio files for this album.")
+        return await reject(text("py_admin.audiobook_no_audio_files.text"))
 
     job = await start_job(
         db, paths, server_id=server_id, album=album, parts=parts, epub=data, info=info, admin=admin
@@ -441,33 +442,35 @@ async def import_alignment(
     plex = _plex(config, state)
     server_id = config.plex_server_client_identifier
     if plex is None or not server_id:
-        return await reject("Not connected to a Plex server.")
+        return await reject(text("py_admin.plex_not_connected.text"))
     active = (await latest_jobs(db, server_id, [rating_key])).get(rating_key)
     if active is not None and active.is_active:
-        return await reject("This book is being aligned. Cancel that first.")
+        return await reject(text("py_admin.audiobook_being_aligned.text"))
 
     data = await _read_upload(alignment, MAX_IMPORT_BYTES)
     if data is None:
-        return await reject(f"That file is over {MAX_IMPORT_BYTES // (1024 * 1024)} MB.")
+        return await reject(
+            text("py_admin.audiobook_file_too_big.text", mb=MAX_IMPORT_BYTES // (1024 * 1024))
+        )
     try:
         result = await asyncio.to_thread(parse_result, data)
     except InvalidResult as exc:
-        return await reject(f"That isn't an alignment this can use: {exc}.")
+        return await reject(text("py_admin.audiobook_import_unusable.text", error=exc))
 
     try:
         album = await plex.album(rating_key)
         parts = await plex.album_parts(rating_key) if album else []
     except PlexServerError as exc:
-        return await reject(f"Could not reach the Plex server: {exc}")
+        return await reject(text("py_admin.plex_unreachable.text", error=exc))
     if album is None:
-        return await reject("Plex no longer has this album.")
+        return await reject(text("py_admin.audiobook_album_gone.text"))
     if not parts:
-        return await reject("Plex lists no audio files for this album.")
+        return await reject(text("py_admin.audiobook_no_audio_files.text"))
     tracks = track_payload(parts)
     try:
         offsets = import_tracks(result, tracks)
     except InvalidResult as exc:
-        return await reject(f"That alignment doesn't fit this book: {exc}")
+        return await reject(text("py_admin.audiobook_import_mismatch.text", error=exc))
 
     result["audio"] = {**(result.get("audio") or {}), "tracks": offsets}
     book = result.get("book") or {}
@@ -494,7 +497,12 @@ async def import_alignment(
     stored = await asyncio.to_thread(build_alignment, job, result)
     await replace_alignment(db, stored)
     job.message = " ".join(
-        part for part in (f"Imported from {name}.", summary(stored.stats or {})) if part
+        part
+        for part in (
+            text("py_admin.audiobook_imported_from.text", name=name),
+            summary(stored.stats or {}),
+        )
+        if part
     )
     logger.info("audiobook %s (%s): imported alignment %s", album.title, rating_key, name)
     return await _cell(request, db, rating_key)

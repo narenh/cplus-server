@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.models import ApnsDevice
 from ..db.session import get_config
+from ..web.copy_strings import text
 from .messages import Notification
 from .prefs import is_enabled
 from .relay import RelayClient, RelaySettings, SendOutcome
@@ -48,16 +49,9 @@ logger = logging.getLogger(__name__)
 #: What the Notifications tab says when the master switch is off.  Kept here
 #: rather than at the call site so the emitting path and the "send a test"
 #: button cannot drift into explaining the same state two different ways.
-DISABLED_REASON = (
-    "Notifications are switched off for this instance. Turn them on at the top "
-    "of the Notifications tab."
-)
+DISABLED_REASON = text("py_notify.skipped_disabled.text")
 
-UNCONFIGURED_REASON = (
-    "This instance is not connected to the notification relay. Notifications "
-    "are on, but enrolling did not succeed — press “Reconnect” on the "
-    "Notifications tab."
-)
+UNCONFIGURED_REASON = text("py_notify.skipped_unconfigured.text")
 
 
 @dataclass(frozen=True)
@@ -185,7 +179,7 @@ async def deliver(
                 raise
     except Exception:  # pragma: no cover - defensive; the event already happened
         logger.exception("failed to deliver a %s notification", notification.type.value)
-        return DispatchReport(skipped_reason="delivery raised")
+        return DispatchReport(skipped_reason=text("py_notify.skipped_delivery_raised.text"))
 
 
 async def _deliver_in_session(
@@ -203,7 +197,7 @@ async def _deliver_in_session(
         return DispatchReport(skipped_reason=DISABLED_REASON)
 
     if not await is_enabled(session, notification.type):
-        return DispatchReport(skipped_reason="This notification type is switched off.")
+        return DispatchReport(skipped_reason=text("py_notify.skipped_type_off.text"))
 
     settings = RelaySettings.from_config(config)
     if settings is None:
@@ -211,7 +205,7 @@ async def _deliver_in_session(
 
     devices = await eligible_devices(session, exclude_user_id=exclude_user_id)
     if not devices:
-        return DispatchReport(skipped_reason="No devices are registered for push.")
+        return DispatchReport(skipped_reason=text("py_notify.skipped_no_devices.text"))
 
     return await send_to_devices(
         session,

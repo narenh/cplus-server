@@ -1,0 +1,71 @@
+# Notifications tab, top card: the plaintext warning under the "Enable push notifications" switch.
+[master]
+warning = '''
+Notifications are delivered <strong>in plaintext</strong> through
+<code>{{ relay_host }}</code>, a forwarding service run by the Canopy+
+maintainers rather than by you. Apple has to be able to read a notification
+to display it, so there is no arrangement where the relay forwards without
+seeing the contents.
+'''
+
+# Notifications tab, top card: the privacy note below the warning.
+privacy = '''
+Each notification carries a media title and a username. The relay stores
+none of it and keeps no record of which devices belong to which instance —
+but it does see it in passing. If that is not acceptable for your instance,
+leave this off; everything else works without it.
+'''
+
+# Notifications tab: the only content shown while the master switch is off.
+[off]
+empty = '''
+Notifications are off. Nothing is sent, no device can register, and the
+app is told so by <code>GET /capabilities</code> — so it will not ask
+anyone for permission it cannot use.
+'''
+
+# Notifications tab, "Relay" card: connection status text.
+[relay]
+connected = '''
+Connected to <code>{{ relay_host }}</code>{% if config.notification_relay_instance_id %}
+as <code>{{ config.notification_relay_instance_id }}</code>{% endif %}.
+There is nothing to configure — this instance registered itself when you
+switched notifications on.
+'''
+not_connected = '''
+Not connected. Notifications are on but nothing can be sent until this
+instance has registered with the relay.
+'''
+
+# Notifications tab, "Relay" card: button labels and the confirmation popup for Reconnect.
+send_test_button = '''Send a test notification'''
+reconnect_confirm = '''Register with the relay again? Your current relay identity is discarded. Registered devices are not affected.'''
+
+# Notifications tab, "What to notify me about" card: help text above the list of notification types.
+[types]
+hint = '''
+Everything is on until you turn it off, including any type added by a later
+version. You are never notified about your own requests or grabs.
+'''
+
+# Notifications tab, "Devices" card: empty state, the remove confirmation popup, and the note under the table.
+[devices]
+empty = '''
+No devices registered. The app registers itself the next time it checks
+<code>GET /capabilities</code> and finds notifications switched on —
+there is nothing to enter here by hand.
+'''
+remove_confirm = '''Stop sending notifications to this device?'''
+hint = '''
+A device removed here comes back the next time that app launches and
+registers again. To stop one for good, sign out of the app on it.
+Devices Apple reports as gone are removed on their own.
+'''
+
+# Master switch at the top of the Notifications tab
+[enable_switch]
+label = '''Enable push notifications'''
+
+# Heading above the per-type switches
+[types_heading]
+text = '''What to notify me about'''

@@ -1,0 +1,23 @@
+# Sign-in page: the line above the Seerr host, when a Seerr host is configured.
+[signin]
+lede = '''Sign in with the Plex account that owns'''
+
+# Sign-in page: message shown instead of the sign-in button when no Seerr host is configured.
+[no_seerr]
+lede = '''This install has no Seerr host configured.'''
+hint = '''Set it in the deployment's environment and restart.'''
+
+# Sign-in page: status line messages shown under the button while signing in.
+# Some appear when something goes wrong (lost contact, refused, could not start).
+[status]
+lost_contact = '''Lost contact with the server.'''
+failed = '''Sign-in failed.'''
+signed_in = '''Signed in. Redirecting…'''
+opening_plex = '''Opening Plex…'''
+unreachable = '''Could not reach the server.'''
+could_not_start = '''Could not start the Plex sign-in.'''
+waiting = '''Waiting for you to approve access in the Plex window…'''
+
+# Big button on the sign-in page
+[sign_in_button]
+label = '''Sign in with Plex'''

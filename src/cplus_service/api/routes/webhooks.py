@@ -43,6 +43,7 @@ from ...db.models import ActivityLog, EventType, SeerrRequestNotice, User
 from ...db.session import get_config
 from ...notify.messages import MediaSummary, user_requested
 from ...seerr.webhook import SeerrWebhookEvent, parse_event, split_year
+from ...web.copy_strings import text
 from ..deps import DbDep, StateDep
 from ..notifications import schedule
 
@@ -79,8 +80,7 @@ async def seerr_webhook(
         )
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The Seerr webhook is switched off on this server. Generate a secret"
-            " on the Configuration tab first.",
+            text("py_errors.webhook_off.text"),
         )
 
     if not _authorised(authorization, secret):
@@ -92,7 +92,7 @@ async def seerr_webhook(
         )
         # The response itself deliberately says nothing about which half was
         # wrong; the admin gets the detail from the line above instead.
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Rejected")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, text("py_errors.webhook_rejected.text"))
 
     payload = await _body(request)
     event = parse_event(payload)
@@ -206,7 +206,7 @@ async def _body(request: Request) -> dict[str, Any]:
             " Check Seerr's JSON payload template for a syntax error."
         )
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "The webhook body was not valid JSON"
+            status.HTTP_400_BAD_REQUEST, text("py_errors.webhook_not_json.text")
         ) from exc
 
     if not isinstance(payload, dict):
@@ -215,9 +215,7 @@ async def _body(request: Request) -> dict[str, Any]:
             " JSON object.",
             type(payload).__name__,
         )
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "The webhook body was not a JSON object"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_errors.webhook_not_object.text"))
     return payload
 
 
@@ -273,8 +271,8 @@ def _media_of(event: SeerrWebhookEvent) -> MediaSummary:
         title, year = split_year(event.subject)
         return MediaSummary(title=title, year=year)
     if event.tmdb_id is not None:
-        return MediaSummary(title=f"TMDB {event.tmdb_id}")
-    return MediaSummary(title="A new request")
+        return MediaSummary(title=text("py_notify.title_from_tmdb_id.text", tmdb_id=event.tmdb_id))
+    return MediaSummary(title=text("py_notify.title_new_request.text"))
 
 
 def _notification_data(event: SeerrWebhookEvent) -> dict[str, Any]:

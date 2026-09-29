@@ -1,0 +1,6 @@
+# Top Shelf section (Libraries page and user Home editor): note under the "Top Shelf" heading.
+[intro]
+hint = '''
+What the tvOS Top Shelf widget above the app icon shows. Always on —
+tvOS itself requires it.
+'''

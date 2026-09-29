@@ -56,6 +56,7 @@ from ...auth.identity import authenticate_plex_token
 from ...db.models import AudiobookAlignment, Config
 from ...db.session import get_config
 from ...seerr.client import SeerrAuthError, SeerrError
+from ...web.copy_strings import text
 from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
 from .audiobooks import visible_books
 from .defaults import defaults_payload
@@ -115,13 +116,13 @@ async def register(
         user, _auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+            status.HTTP_401_UNAUTHORIZED, exc.detail or text("py_errors.seerr_rejected_token.text")
         ) from exc
     except SeerrError as exc:
         # Seerr being unreachable is an upstream fault, not a bad token; saying
         # 401 here would make the client throw away a perfectly good token.
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     config = await get_config(db)

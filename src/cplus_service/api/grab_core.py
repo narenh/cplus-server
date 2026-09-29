@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db.models import Action, ActivityLog, EventType, Grab, User
 from ..notify.messages import media_from_release_title, user_action
 from ..prowlarr.client import ProwlarrClient, ProwlarrError
+from ..web.copy_strings import text
 from .notifications import media_of, schedule
 from .schemas import GrabResponse, ReleaseFields
 from .state import AppState
@@ -89,7 +90,7 @@ async def execute_grab(
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
             content=GrabResponse(
-                success=False, message=f"Prowlarr rejected the grab. {exc.summary}"
+                success=False, message=text("py_errors.grab_rejected.text", summary=exc.summary)
             ).model_dump(),
         )
 

@@ -21,6 +21,7 @@ import httpx
 
 from ..release.models import ParsedRelease
 from ..release.parser import parse_prowlarr_results
+from ..web.copy_strings import text
 from .models import DownloadClient, GrabResult, Indexer, SystemStatus
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class ProwlarrError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
-        self.summary = summary or "Prowlarr could not be reached."
+        self.summary = summary or text("py_errors.prowlarr_default.text")
 
 
 class ProwlarrClient:
@@ -129,13 +130,13 @@ class ProwlarrClient:
         except httpx.HTTPError as exc:
             raise ProwlarrError(
                 f"{method} {url} failed: {exc}",
-                summary="Could not reach Prowlarr.",
+                summary=text("py_errors.prowlarr_unreachable.text"),
             ) from exc
 
         if response.status_code >= 400:
             raise ProwlarrError(
                 f"{method} {url} returned {response.status_code}: {response.text[:500]}",
-                summary=f"Prowlarr returned HTTP {response.status_code}.",
+                summary=text("py_errors.prowlarr_http_status.text", status=response.status_code),
                 status_code=response.status_code,
             )
         if not response.content:
@@ -145,7 +146,7 @@ class ProwlarrClient:
         except ValueError as exc:
             raise ProwlarrError(
                 f"{method} {url} returned a non-JSON body",
-                summary="Prowlarr returned a response this service could not read.",
+                summary=text("py_errors.prowlarr_unreadable.text"),
             ) from exc
 
     async def _request_list(
@@ -176,14 +177,13 @@ class ProwlarrClient:
         url = f"{self.base_url}/api/v1/{path.lstrip('/')}"
         if not isinstance(payload, list):
             raise ProwlarrError(
-                f"{method} {url} returned a JSON {type(payload).__name__}, "
-                f"expected an array",
-                summary="Prowlarr returned a response this service could not read.",
+                f"{method} {url} returned a JSON {type(payload).__name__}, expected an array",
+                summary=text("py_errors.prowlarr_unreadable.text"),
             )
         if not all(isinstance(item, Mapping) for item in payload):
             raise ProwlarrError(
                 f"{method} {url} returned an array holding something other than objects",
-                summary="Prowlarr returned a response this service could not read.",
+                summary=text("py_errors.prowlarr_unreadable.text"),
             )
         return payload
 

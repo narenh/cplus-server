@@ -1,0 +1,46 @@
+# Quality profile editor, heading of section 1 (the filters). The number is drawn separately.
+[filters]
+heading = '''Never grab'''
+# Section 1, paragraph under the heading.
+lede = '''
+A filter removes releases from consideration entirely — nothing below can
+bring one back. Order does not matter here: one filter anywhere applies to
+everything.
+'''
+# Section 1, message shown when the profile has no filters.
+empty = '''No filters. Every release an indexer returns is eligible.'''
+# Section 1, screen-reader label of the dropdown for choosing which filter to add.
+select_label = '''Filter to add'''
+# Section 1, button that adds the filter chosen in the dropdown.
+add_button = '''Add filter'''
+
+# Quality profile editor, heading of section 2 (the ordered choices). The number is drawn separately.
+[choices]
+heading = '''Prefer, in order'''
+# Section 2, paragraph under the heading.
+lede = '''
+Each row describes a <em>kind</em> of release you would rather have. Every
+release matching the 1st choice beats every release matching the 2nd,
+whatever the tie-breakers say. A release matching none of them ranks last —
+still eligible, just last. This is how "the biggest 4K WEB copy, or failing
+that the biggest 1080p under 15 GB" gets said.
+'''
+# Section 2, button that adds a new choice.
+add_button = '''Add choice'''
+
+# Quality profile editor, heading of section 3 (the tie-breakers). The number is drawn separately.
+[preferences]
+heading = '''Break ties by'''
+# Section 3, paragraph under the heading.
+lede = '''
+Used inside a choice, when several releases are the same kind. Order matters:
+the first decides, each later one breaks the ties the previous one left. A
+choice that takes "the biggest file" has already decided, so these only
+settle what it could not.
+'''
+# Section 3, message shown when the profile has no tie-breakers.
+empty = '''No tie-breakers. Equally-matched releases keep the order the indexer gave them.'''
+# Section 3, screen-reader label of the dropdown for choosing which tie-breaker to add.
+select_label = '''Tie-breaker to add'''
+# Section 3, button that adds the tie-breaker chosen in the dropdown.
+add_button = '''Add tie-breaker'''

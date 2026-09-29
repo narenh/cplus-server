@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..web.copy_strings import text
+
 
 class NotificationType(StrEnum):
     """A kind of event an admin can be notified about."""
@@ -49,23 +51,15 @@ class NotificationTypeInfo:
 NOTIFICATION_TYPES: tuple[NotificationTypeInfo, ...] = (
     NotificationTypeInfo(
         type=NotificationType.USER_REQUESTED,
-        label="A user requested something",
-        description=(
-            "Sent when someone files a request through the built-in Request "
-            "action, whether or not you go on to approve it. Covers requests "
-            "made in Seerr's own UI too, once you have set up its webhook on "
-            "the Configuration tab."
-        ),
-        example_subtitle="Requested by Robin Example",
+        label=text("py_notify.type_user_requested.label"),
+        description=text("py_notify.type_user_requested.description"),
+        example_subtitle=text("py_notify.type_user_requested.example_subtitle"),
     ),
     NotificationTypeInfo(
         type=NotificationType.USER_ACTION,
-        label="A user performed an action",
-        description=(
-            "Sent when someone runs one of your actions on a release. Your own "
-            "grabs never notify you."
-        ),
-        example_subtitle="Robin Example: Stream Now",
+        label=text("py_notify.type_user_action.label"),
+        description=text("py_notify.type_user_action.description"),
+        example_subtitle=text("py_notify.type_user_action.example_subtitle"),
     ),
 )
 

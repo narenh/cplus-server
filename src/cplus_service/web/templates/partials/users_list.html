@@ -8,10 +8,7 @@
    Expects: users, actions, granted. #}
 <div id="users-list">
 {% if not users %}
-  <p class="empty">
-    No users yet. A user appears here the first time their client signs in —
-    identity comes from Seerr, so there is nobody to grant access to until then.
-  </p>
+  <p class="empty">{{ t('partials_users_list.empty.text') }}</p>
 {% else %}
 <div class="action-list">
   {% for user in users %}
@@ -22,8 +19,8 @@
       <form class="row-controls" method="post" action="/admin/users/{{ user.id }}/delete"
             hx-post="/admin/users/{{ user.id }}/delete"
             hx-target="#users-list" hx-swap="outerHTML"
-            hx-confirm="Remove {{ user.plex_username }} and revoke access now?">
-        <button type="submit" class="icon danger" title="Remove {{ user.plex_username }}"
+            hx-confirm="{{ t('partials_users_list.remove_confirm.text', user=user) }}">
+        <button type="submit" class="icon danger" title="{{ t('partials_users_list.remove_button.tooltip', user=user) }}"
                 aria-label="Remove {{ user.plex_username }}">
           {% include "partials/_trash_icon.html" with context %}
         </button>
@@ -37,19 +34,14 @@
               {% include "partials/permission_cell.html" %}
             {% endwith %}
           </span>
-          {{ action.name }}{% if action.is_system %} <span class="badge">built in</span>{% endif %}
+          {{ action.name }}{% if action.is_system %} <span class="badge">{{ t('partials_users_list.built_in.badge') }}</span>{% endif %}
         </label>
       {% endfor %}
     </div>
-    <a class="link-button" href="/admin/users/{{ user.id }}/home">Edit Home Screen</a>
+    <a class="link-button" href="/admin/users/{{ user.id }}/home">{{ t('partials_users_list.edit_home.label') }}</a>
   </div>
   {% endfor %}
 </div>
-<p class="hint">
-  Granting takes effect at the user's next app launch, when their client calls
-  <code>/register</code> again — actions and searches authenticate from a
-  cache rather than re-checking Seerr on every request. Removing a user is
-  immediate.
-</p>
+<p class="hint">{{ t('partials_users_list.footnote.hint') }}</p>
 {% endif %}
 </div>

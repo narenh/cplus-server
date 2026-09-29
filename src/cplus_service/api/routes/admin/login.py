@@ -43,6 +43,7 @@ from ....plex.client import PlexError, PlexPinClient
 from ....seerr.client import SeerrAuthError, SeerrClient, SeerrError
 from ....settings import SEERR_URL_ENV, seerr_url
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from ...state import AppState, PendingPlexLogin
 
@@ -114,7 +115,7 @@ async def start_pin(state: StateDep, db: DbDep) -> JSONResponse:
     if seerr_url() is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
+            text("py_admin.login_seerr_not_configured.text", env=SEERR_URL_ENV),
         )
 
     _sweep_expired_logins(state)
@@ -152,7 +153,7 @@ async def poll_pin(
     if target is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"Seerr is not configured. Set {SEERR_URL_ENV} and restart.",
+            text("py_admin.login_seerr_not_configured.text", env=SEERR_URL_ENV),
         )
 
     plex = await _pin_client(state, db)
@@ -161,7 +162,7 @@ async def poll_pin(
     except PlexError as exc:
         state.pending_plex_logins.pop(pin_id, None)
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"plex.tv rejected the PIN: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_admin.login_pin_rejected.text", error=exc)
         ) from exc
 
     if not plex_token:
@@ -175,17 +176,18 @@ async def poll_pin(
     except SeerrAuthError as exc:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            exc.detail or "Seerr does not recognise this Plex account.",
+            exc.detail or text("py_admin.login_seerr_unknown_account.text"),
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr at {target}: {exc}"
+            status.HTTP_502_BAD_GATEWAY,
+            text("py_admin.login_seerr_unreachable.text", url=target, error=exc),
         ) from exc
 
     if not auth.user.is_admin:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "That account is not the Seerr admin. The cplus-service web UI is admin-only.",
+            text("py_admin.login_not_admin.text"),
         )
 
     # Best-effort: a Plex server this admin's account cannot currently reach

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ApnsDevice, ApnsEnvironment, User
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
+from ...web.copy_strings import text
 from ..deps import ConfigDep, DbDep, PlexTokenDep, SeerrDep
 from ..schemas import PushDeviceRegistration, PushDeviceResponse
 
@@ -47,17 +48,17 @@ async def _admin_caller(db: AsyncSession, seerr: SeerrClient, plex_token: str) -
     except SeerrAuthError as exc:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            exc.detail or "Seerr rejected this Plex token",
+            exc.detail or text("py_errors.seerr_rejected_token.text"),
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     if not auth.user.is_admin:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Notifications are limited to Seerr administrators.",
+            text("py_errors.push_admins_only.text"),
         )
     return user
 
@@ -89,8 +90,7 @@ async def register_push_device(
     if not config.notifications_enabled:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Notifications are switched off for this instance. Watch "
-            "GET /capabilities for when that changes.",
+            text("py_errors.push_switched_off.text"),
         )
 
     device = await db.get(ApnsDevice, body.device_token)

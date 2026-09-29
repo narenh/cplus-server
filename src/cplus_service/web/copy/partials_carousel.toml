@@ -1,0 +1,4 @@
+# Carousel section (Libraries page and user Home editor): on/off switch label, shown next to
+# the switch (and used as the switch's screen-reader label).
+[enable_switch]
+label = '''Enable Home Carousel'''

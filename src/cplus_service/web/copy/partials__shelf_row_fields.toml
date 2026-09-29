@@ -1,0 +1,7 @@
+# Shelf row (Carousel, Top Shelf and each Home shelf): checkbox next to the Style dropdown.
+[hide_year]
+label = '''Hide release year'''
+
+# Shelf row: hover tooltip on the trash button that removes a Home shelf.
+[remove_button]
+tooltip = '''Remove shelf'''

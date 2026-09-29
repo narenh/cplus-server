@@ -1,0 +1,3 @@
+# Activity and Grabs pages: label beside the user dropdown at the top.
+[filter]
+label = '''Filter by user'''

@@ -43,6 +43,7 @@ from ....db.models import Config, User, UserHomeSettings
 from ....db.session import get_config
 from ....home import get_or_create_home, touched
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from ...state import AppState
 from .deps import AdminPageDep
@@ -235,7 +236,7 @@ async def remove_shelf(
         # Unreachable through the page — the button is disabled — but this
         # user's Home should never be left with an empty shelf list any
         # more than the admin's global default is.
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Keep at least one home shelf.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_admin.keep_one_shelf.text"))
 
     home.home_shelves = [shelf for shelf in home.home_shelves if shelf["id"] != shelf_id]
     touched(home)

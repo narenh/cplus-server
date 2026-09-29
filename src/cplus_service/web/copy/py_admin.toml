@@ -1,0 +1,242 @@
+# Messages the admin web UI shows in banners, inline notices and error dialogs,
+# produced by the admin routes (not by the page templates themselves).
+
+# Sign-in page, when the server has no Seerr URL. `env` is the environment variable's name.
+[login_seerr_not_configured]
+text = '''Seerr is not configured. Set {{ env }} and restart.'''
+
+# Sign-in page: plex.tv refused the PIN. `error`.
+[login_pin_rejected]
+text = '''plex.tv rejected the PIN: {{ error }}'''
+
+# Sign-in page: Seerr does not know this Plex account (fallback when Seerr gives no reason).
+[login_seerr_unknown_account]
+text = '''Seerr does not recognise this Plex account.'''
+
+# Sign-in page: Seerr unreachable. `url`, `error`.
+[login_seerr_unreachable]
+text = '''Could not reach Seerr at {{ url }}: {{ error }}'''
+
+# Sign-in page: the account signed in but is not the Seerr admin.
+[login_not_admin]
+text = '''That account is not the Seerr admin. The cplus-service web UI is admin-only.'''
+
+# Any admin page whose session has expired (HTMX request) / that needs sign-in.
+[session_expired]
+text = '''Session expired'''
+
+[not_signed_in]
+text = '''Not signed in'''
+
+# Prowlarr-backed dropdowns (indexers, download clients) and the preview panel
+# when Prowlarr has no URL or key saved.
+[prowlarr_not_configured]
+text = '''Prowlarr is not configured yet.'''
+
+[prowlarr_not_configured_preview]
+text = '''Prowlarr is not configured yet — the sample releases still work.'''
+
+# Configuration tab: "Save" confirmation.
+[config_saved]
+text = '''Configuration saved.'''
+
+# Configuration tab: "Check connection" for Prowlarr.
+[prowlarr_set_first]
+text = '''Set the Prowlarr URL and API key first, then save.'''
+
+# `name` is the app name Prowlarr reports (or "Prowlarr"), `version` its version (or "unknown version").
+[prowlarr_connected]
+text = '''Connected to {{ name }} {{ version }}.'''
+
+[prowlarr_unknown_version]
+text = '''unknown version'''
+
+# Plex server connection (Libraries, Audiobooks, Home editors).
+[plex_not_connected_signin]
+text = '''Not connected to a Plex server yet. Sign out and back in with Plex.'''
+
+[plex_not_connected]
+text = '''Not connected to a Plex server.'''
+
+# `error` is the underlying error text.
+[plex_unreachable]
+text = '''Could not reach the Plex server: {{ error }}'''
+
+# Libraries tab: "Reconnect to Plex".
+[plex_no_signin_on_record]
+text = '''No Plex sign-in on record. Sign out and back in with Plex.'''
+
+[plex_connected]
+text = '''Connected to {{ server }}.'''
+
+[plex_no_reachable_server]
+text = '''Could not find a reachable Plex server for this account.'''
+
+# Home shelf editor: refusing to remove the last shelf.
+[keep_one_shelf]
+text = '''Keep at least one home shelf.'''
+
+# Home shelf editor: a collection or source that no longer exists / has none.
+[no_such_collection]
+text = '''No such collection.'''
+
+[library_no_collections]
+text = '''That library has no collections.'''
+
+[no_such_source]
+text = '''No such content source.'''
+
+# Quality profile builder / list.
+[profile_needs_name]
+text = '''A profile needs a name.'''
+
+[preview_needs_query]
+text = '''Type a title or an IMDB id to search for.'''
+
+# `name` is the profile's name.
+[profile_name_taken]
+text = '''A quality profile named '{{ name }}' already exists.'''
+
+# `name` is the profile, `action` the action using it.
+[profile_in_use]
+text = ''''{{ name }}' is still used by the action '{{ action }}'.'''
+
+# Actions tab: saving an action.
+[action_needs_targets]
+text = '''An action needs a download client and a quality profile.'''
+
+[no_such_profile]
+text = '''No such quality profile'''
+
+# `max` is the character limit.
+[icon_too_long]
+text = '''A symbol name can be at most {{ max }} characters.'''
+
+[icon_bad_chars]
+text = '''An SF Symbol name is lowercase words separated by dots, like 'arrow.down.circle'.'''
+
+[title_too_long]
+text = '''A button title can be at most {{ max }} characters.'''
+
+[confirm_too_long]
+text = '''Confirmation text can be at most {{ max }} characters.'''
+
+# `listed` and `offered` are the unknown / allowed placeholders, e.g. "{relase}".
+[confirm_bad_placeholders]
+text = '''Nothing can be filled in for {{ listed }}. The placeholders are {{ offered }}.'''
+
+# `name` is the reserved word ("Request"), `field` is "name" or "button title".
+[reserved_word]
+text = ''''{{ name }}' belongs to the built-in action — it means filing a request in Seerr, which this action cannot do. Pick another {{ field }}.'''
+
+# Actions tab: what the confirmation-text field shows when empty, and the line under it.
+# `placeholders` is a list like "{release} and {size}".
+[confirm_example]
+text = '''{release} will be added, using {size} of storage.'''
+
+[confirm_help]
+text = '''You can use {{ placeholders }}, which the app fills in from the release being confirmed.'''
+
+# Audiobooks tab: uploading an epub / importing an alignment, shown above the book's row.
+[audiobook_read_along_off]
+text = '''Read-along isn't enabled, so nothing can be aligned yet.'''
+
+[audiobook_already_aligning_epub]
+text = '''This book is already being aligned. Cancel that first.'''
+
+[audiobook_being_aligned]
+text = '''This book is being aligned. Cancel that first.'''
+
+# `mb` is the size limit in megabytes.
+[audiobook_file_too_big]
+text = '''That file is over {{ mb }} MB.'''
+
+[audiobook_album_gone]
+text = '''Plex no longer has this album.'''
+
+[audiobook_no_audio_files]
+text = '''Plex lists no audio files for this album.'''
+
+# `error` is why the file was rejected.
+[audiobook_import_unusable]
+text = '''That isn't an alignment this can use: {{ error }}.'''
+
+[audiobook_import_mismatch]
+text = '''That alignment doesn't fit this book: {{ error }}'''
+
+# Shown on the book after an import. `name` is the uploaded file's name.
+[audiobook_imported_from]
+text = '''Imported from {{ name }}.'''
+
+# Rule descriptions on the quality profile builder: the label and the hint under it.
+[rule_prerelease]
+label = '''Pre-releases'''
+help = '''CAM, HDCAM, TS/HDTS, telecine, HDRip, screener, DCP/DCPRip.'''
+
+[rule_keywords]
+label = '''Titles containing…'''
+help = '''Comma-separated. Matched anywhere in the release title, ignoring case.'''
+
+[rule_size_cap]
+label = '''Anything over… (GB)'''
+help = '''A release with no reported size is kept — an unknown size is not evidence.'''
+
+[rule_repack]
+label = '''REPACK / PROPER first'''
+help = '''Only against the release it replaces, matched on the title itself.'''
+
+[rule_resolution]
+label = '''Resolution order'''
+help = '''Anything unlisted ranks last — it is not dropped.'''
+
+[rule_source]
+label = '''Source order'''
+help = '''Anything unlisted ranks last — it is not dropped.'''
+
+[rule_hdr]
+label = '''Dynamic range order'''
+help = '''DV matches any Dolby Vision profile; DV_P8 matches only that one.'''
+
+[rule_audio]
+label = '''Audio order'''
+help = '''A release may carry several; it scores on its best match.'''
+
+[rule_size]
+label = '''File size'''
+help = '''A cap here only demotes larger releases; to drop them, filter instead.'''
+
+# Quality profile builder: the "prefer ..." dropdown on a choice.
+[tie_default]
+text = '''the tie-breakers below'''
+
+[tie_biggest]
+text = '''the biggest file'''
+
+[tie_smallest]
+text = '''the smallest file'''
+
+[tie_closest]
+text = '''the closest to a size'''
+
+[tie_newest]
+text = '''the newest'''
+
+[tie_seeders]
+text = '''the most seeders'''
+
+# Quality profile builder: labels above each group of tick-boxes in a choice.
+[choice_resolution]
+text = '''Resolution'''
+
+[choice_source]
+text = '''Source'''
+
+[choice_hdr]
+text = '''Dynamic range'''
+
+[choice_audio]
+text = '''Audio'''
+
+# Home shelf editor: the Carousel's extra tick-box.
+[carousel_include_on_deck]
+text = '''Include "Continue Watching" items'''

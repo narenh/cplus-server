@@ -1,0 +1,45 @@
+# Quality profile editor, section 2: message shown when there are no choices yet.
+[empty]
+text = '''
+No choices yet — every release that survives the filters is treated as the
+same kind of thing, and the tie-breakers below decide between them.
+'''
+
+# Choice row, tooltip on the up arrow.
+[move_up]
+title = '''Prefer this sooner'''
+
+# Choice row, tooltip on the down arrow.
+[move_down]
+title = '''Prefer this later'''
+
+# Choice row, greyed hint inside the minimum size box.
+[min_size]
+placeholder = '''at least (GB)'''
+
+# Choice row, greyed hint inside the maximum size box.
+[max_size]
+placeholder = '''at most (GB)'''
+
+# Choice row, note under the Size boxes.
+[size_hint]
+text = '''
+A release whose size the indexer did not report never satisfies a size
+bound — it falls through to a later choice rather than being let in on
+a guess.
+'''
+
+# Choice row, greyed hint inside the target size box next to the "Of these, take" dropdown.
+[target_size]
+placeholder = '''target GB'''
+
+# Choice row, note under the "Of these, take" dropdown.
+[tie_break_hint]
+text = '''
+The biggest file is the closest thing to "highest bitrate" a release
+name will tell you. Target GB applies only to <em>closest to a size</em>.
+'''
+
+# Label before the final tie-break picker in a quality profile
+[tiebreak_label]
+text = '''Of these, take'''

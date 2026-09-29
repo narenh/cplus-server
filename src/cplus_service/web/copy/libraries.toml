@@ -1,0 +1,4 @@
+# Libraries page, "Home" card: the paragraph under the heading.
+[home]
+lede = '''The Carousel, the Top Shelf, and the shelves a fresh install's Home tab
+    shows, and what each is built from.'''

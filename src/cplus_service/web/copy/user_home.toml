@@ -1,0 +1,8 @@
+# Per-user Home editor page (Users > Edit Home Screen): intro paragraph under the "Home" heading.
+[intro]
+lede = '''
+{{ target_user.plex_username }}'s own Carousel, Top Shelf and Shelves —
+seeded from the admin's defaults the first time this page was opened,
+and independent of them from then on. Changes here affect only this
+user.
+'''

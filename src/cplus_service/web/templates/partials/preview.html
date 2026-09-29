@@ -13,11 +13,11 @@
 </div>
 
 {% if invalid %}
-  <p class="err">The rules are not valid yet, so there is nothing to preview.</p>
+  <p class="err">{{ t('partials_preview.invalid.text') }}</p>
 {% elif error %}
   <p class="err">{{ error }}</p>
 {% elif not judgements %}
-  <p class="empty">Nothing came back{% if live %} for “{{ query }}”{% endif %}.</p>
+  <p class="empty">{{ t('partials_preview.empty.text') }}</p>
 {% else %}
   <div class="table-scroll">
   <table class="preview">
@@ -49,12 +49,12 @@
           </td>
           <td>
             {% if not judgement.kept %}
-              <span class="verdict dropped-by">dropped: {{ judgement.dropped_by }}</span>
+              <span class="verdict dropped-by">{{ t('partials_preview.dropped.text', by=judgement.dropped_by) }}</span>
             {% elif judgement.choice is not none %}
               <span class="verdict">{{ ordinal(judgement.choice) }} choice</span>
               <span class="muted">{{ summary.choices[judgement.choice] }}</span>
             {% elif summary and summary.choices %}
-              <span class="verdict muted">matched no choice</span>
+              <span class="verdict muted">{{ t('partials_preview.no_choice.text') }}</span>
             {% endif %}
           </td>
         </tr>

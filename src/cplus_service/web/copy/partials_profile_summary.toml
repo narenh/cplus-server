@@ -1,0 +1,32 @@
+# Profile editor, plain-English reading under the name box, when the rules are currently invalid.
+[invalid]
+text = '''
+Something below is not valid yet, so there is nothing to read back. Save to
+see what needs fixing.
+'''
+
+# Profile editor reading, when the profile has no rules.
+[empty]
+text = '''
+This profile takes anything, in the order the indexer listed it. Add a
+choice below to say what you would rather have.
+'''
+
+# Profile editor reading: label for the list of things never grabbed.
+[never_grab]
+label = '''Never grab'''
+
+# Profile editor reading: last item in the "Prefer" ranked list.
+[everything_else]
+text = '''everything else'''
+
+# Profile editor reading: label for the tie-break line.
+[tie_breaks]
+label = '''Break ties by'''
+
+# Profile editor reading: warning when an earlier choice matches every release, making later ones dead.
+[catch_all_warning]
+text = '''
+The {{ ordinal(summary.catch_all_choice) }} choice matches anything, so
+nothing after it can ever apply.
+'''

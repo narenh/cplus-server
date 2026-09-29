@@ -34,6 +34,7 @@ from ....quality.models import QualityProfile as ProfileSchema
 from ....quality.samples import sample_releases
 from ....release.models import ParsedRelease
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from .deps import AdminPageDep
 from .rules_form import (
@@ -267,11 +268,11 @@ async def _live_candidates(
     didn't work".
     """
     if not query:
-        return [], "Type a title or an IMDB id to search for."
+        return [], text("py_admin.preview_needs_query.text")
 
     config = await get_config(db)
     if not config.prowlarr_url or not config.prowlarr_api_key:
-        return [], "Prowlarr is not configured yet — the sample releases still work."
+        return [], text("py_admin.prowlarr_not_configured_preview.text")
 
     prowlarr = ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
     try:
@@ -293,7 +294,7 @@ async def save_profile(request: Request, db: DbDep, admin: AdminPageDep) -> Resp
 
     errors: list[str] = []
     if not name:
-        errors.append("A profile needs a name.")
+        errors.append(text("py_admin.profile_needs_name.text"))
 
     try:
         # Stage 1 owns what a valid rule list is; do not second-guess it here.
@@ -338,7 +339,7 @@ async def save_profile(request: Request, db: DbDep, admin: AdminPageDep) -> Resp
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(
-            status.HTTP_409_CONFLICT, f"A quality profile named '{name}' already exists."
+            status.HTTP_409_CONFLICT, text("py_admin.profile_name_taken.text", name=name)
         ) from exc
 
     return RedirectResponse("/admin/quality-profiles", status_code=status.HTTP_303_SEE_OTHER)
@@ -362,7 +363,7 @@ async def delete_profile(
     if blocking is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"'{profile.name}' is still used by the action '{blocking.name}'.",
+            text("py_admin.profile_in_use.text", name=profile.name, action=blocking.name),
         )
 
     await db.delete(profile)

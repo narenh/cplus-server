@@ -12,7 +12,7 @@
 <select data-collection-source data-apply-url="{{ apply_url }}" data-swap-target="{{ swap_target }}"
         aria-label="Collection">
   {% if not collections %}
-    <option value="" disabled selected>{{ error or "No collections in this library" }}</option>
+    <option value="" disabled selected>{{ error or t('partials_collections_picker.empty.option') }}</option>
   {% else %}
     {% for collection in collections %}
       <option value="col:{{ library_id }}:{{ collection.id }}"

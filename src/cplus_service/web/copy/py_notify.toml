@@ -1,0 +1,113 @@
+# Push notifications: the two lines iOS shows (title, then subtitle), the
+# descriptions on the admin Notifications tab, and the messages that tab shows
+# when something goes wrong with delivery.
+
+# First line of every notification when the year is known. `title`, `year`.
+[media_with_year]
+text = '''{{ title }} ({{ year }})'''
+
+# Second line: someone filed a request. `username`.
+[user_requested_subtitle]
+text = '''Requested by {{ username }}'''
+
+# Second line: someone ran a Prowlarr action. `username`, `action_name`.
+[user_action_subtitle]
+text = '''{{ username }}: {{ action_name }}'''
+
+# First line when the request has no title and only a TMDB id. `tmdb_id`.
+# Used by POST /request and by the Seerr webhook.
+[title_from_tmdb_id]
+text = '''TMDB {{ tmdb_id }}'''
+
+# First line of a Seerr-webhook notification that carried neither title nor id.
+[title_new_request]
+text = '''A new request'''
+
+# Notifications tab: the "user requested" switch.
+[type_user_requested]
+label = '''A user requested something'''
+description = '''Sent when someone files a request through the built-in Request action, whether or not you go on to approve it. Covers requests made in Seerr's own UI too, once you have set up its webhook on the Configuration tab.'''
+example_subtitle = '''Requested by Robin Example'''
+
+# Notifications tab: the "user performed an action" switch.
+[type_user_action]
+label = '''A user performed an action'''
+description = '''Sent when someone runs one of your actions on a release. Your own grabs never notify you.'''
+example_subtitle = '''Robin Example: Stream Now'''
+
+# Test-send result / delivery report: why nothing was sent.
+[skipped_disabled]
+text = '''Notifications are switched off for this instance. Turn them on at the top of the Notifications tab.'''
+
+[skipped_unconfigured]
+text = '''This instance is not connected to the notification relay. Notifications are on, but enrolling did not succeed — press “Reconnect” on the Notifications tab.'''
+
+[skipped_type_off]
+text = '''This notification type is switched off.'''
+
+[skipped_no_devices]
+text = '''No devices are registered for push.'''
+
+[skipped_delivery_raised]
+text = '''delivery raised'''
+
+# Notifications tab: relay enrolment errors (shown when switching on or pressing Reconnect).
+# `url` is the relay's address, `error` the underlying error.
+[relay_unreachable]
+text = '''Could not reach the notification relay at {{ url }}. Check this server's outbound connectivity and try again. ({{ error }})'''
+
+[relay_not_issuing_keys]
+text = '''The notification relay is not issuing new keys at the moment. This is not something you can fix from here — try again later.'''
+
+[relay_rate_limited]
+text = '''The notification relay is rate-limiting requests from this address. Wait a minute and try again.'''
+
+# `detail` is the relay's own message, or "it answered <status>".
+[relay_refused_enrol]
+text = '''The notification relay refused to enrol us: {{ detail }}'''
+
+[relay_it_answered]
+text = '''it answered {{ status }}'''
+
+[relay_bad_response]
+text = '''The notification relay returned a response we did not understand. It may be running a newer version than this server expects.'''
+
+# Test-send "N failed: reason" details. `status`, `result` (already quoted).
+[relay_push_answered]
+text = '''the relay answered {{ status }}'''
+
+[relay_unrecognised_result]
+text = '''the relay reported an unrecognised result: {{ result }}'''
+
+# Notifications tab: shown after switching notifications on.
+[relay_no_apple_key_on]
+text = '''Connected, but the relay has no Apple signing key installed yet, so nothing can be delivered. Nothing is wrong on this end — the relay's operator has to finish setting it up.'''
+
+# Notifications tab: after pressing Reconnect. `instance_id`.
+[reconnected]
+text = '''Reconnected as {{ instance_id }}.'''
+
+[reconnected_no_apple_key]
+text = '''The relay still has no Apple signing key of its own, so nothing can be delivered yet.'''
+
+# Notifications tab: "Send a test" pressed while switched on but not connected.
+[test_not_connected]
+text = '''Not connected to the relay. Press “Reconnect” and try again.'''
+
+# Notifications tab: "Send a test" with nobody to send to.
+[test_no_devices]
+text = '''No devices are registered. Open the app on a device signed in as an admin — it registers itself once notifications are switched on here.'''
+
+# Notifications tab: "Send a test" result, joined with spaces.
+# `delivered`, `unregistered`, `failed`, `reason`.
+[test_sent]
+text = '''Sent to {{ delivered }} device{% if delivered != 1 %}s{% endif %}.'''
+
+[test_removed]
+text = '''Removed {{ unregistered }} device{% if unregistered != 1 %}s{% endif %} Apple no longer recognises.'''
+
+[test_failed_with_reason]
+text = '''{{ failed }} failed: {{ reason }}.'''
+
+[test_failed_no_reason]
+text = '''{{ failed }} failed — the server log has the reason.'''

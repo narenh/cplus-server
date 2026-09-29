@@ -1,0 +1,72 @@
+# Read-along card: shown when the aligner service isn't set up on this deployment.
+[unconfigured]
+hint = '''Read-along isn't set up on this deployment. It needs the
+      <code>cplus-aligner</code> service from <code>docker-compose.yml</code>,
+      sharing the <code>cplus-align</code> volume with this one, and
+      <code>CPLUS_ALIGN_DIR</code> set on both.'''
+
+# Read-along card: red warning when the aligner service hasn't checked in for over a minute.
+[offline]
+hint = '''The <code>cplus-aligner</code> service isn't running — it hasn't checked in
+      for over a minute. Nothing can be aligned until it is back; finished books
+      keep working in the app.'''
+
+# Read-along card, when read-along is off (or a previous install failed): what it does.
+[off_intro]
+hint = '''Aligns an epub you upload to a book's audio, sentence by sentence, so
+      Canopy+ can show the text as it's read. Books are aligned one at a time in
+      the background; a 20-hour book takes a few hours.'''
+
+# Read-along card, when off: yellow warning about the download size and memory cost, above the "Turn on" button.
+[off_cost]
+warning = '''Turning this on downloads <strong>{{ runtime.download_bytes|bytes }}</strong> once —
+      the alignment model and what runs it — into the aligner's volume. While a
+      book is being aligned the aligner uses about <strong>2.1 GB of memory</strong>
+      and the CPUs you've given it; between books it uses almost nothing.'''
+
+# Read-along card, when off: licence note under the cost warning.
+[off_license]
+hint = '''The model and the alignment code are licensed
+      <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>:
+      non-commercial use only.'''
+
+# Read-along card, when off: red line shown after a failed install attempt; {{ runtime.error }} is the reason.
+[install_failed]
+hint = '''The last attempt failed: {{ runtime.error }}'''
+
+# Read-along card: the button that starts the download when read-along is off.
+[enable_button]
+label = '''Turn on read-along'''
+
+# Read-along card: the same button after a failed attempt.
+[retry_button]
+label = '''Try again'''
+
+# Read-along card, while installing: the line under the progress bar. Uses p (the progress details).
+[installing]
+status = '''{% if p.get("stage") == "download" and p.get("total") %}Downloading {{ p.get("done")|bytes }} of {{ p.get("total")|bytes }}…{% else %}{{ p.get("label") or "Starting" }}…{% endif %}'''
+
+# Read-along card, while the runtime is being removed: the line under the progress bar.
+[removing]
+status = '''Removing the runtime…'''
+
+# Read-along card: yellow warning when the aligner runtime needs updating, above the "Update" button.
+[outdated]
+warning = '''This version of cplus-server needs an updated aligner runtime
+      ({{ runtime.download_bytes|bytes }} to download). Books already aligned keep
+      working; nothing new is aligned until it's updated.'''
+
+# Read-along card, when read-along is on: the status line (On / Aligning now or Idle / disk use / upload prompt).
+[ready]
+hint = '''<span class="ok">On.</span>
+      {% if runtime.engine_running %}Aligning now.{% else %}Idle.{% endif %}
+      The runtime takes {{ runtime.disk_bytes|bytes }} of disk.
+      Upload a DRM-free epub for a book below to align it.'''
+
+# Read-along card, when on: the button that turns read-along off.
+[disable_button]
+label = '''Turn off and remove the download'''
+
+# Read-along card: the confirmation dialog for that button.
+[disable_confirm]
+message = '''Turn read-along off? This stops anything being aligned and deletes the downloaded runtime ({{ runtime.disk_bytes|bytes }}). Books already aligned stay and keep working in the app.'''

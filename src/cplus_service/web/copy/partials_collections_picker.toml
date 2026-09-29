@@ -1,0 +1,3 @@
+# Shelf row's "Collection Items…" picker: the greyed-out choice shown when the library has no collections (unless an error message is available).
+[empty]
+option = '''No collections in this library'''

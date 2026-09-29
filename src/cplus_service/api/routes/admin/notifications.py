@@ -47,6 +47,7 @@ from ....notify.types import (
     NotificationTypeInfo,
 )
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from .deps import AdminPageDep
 
@@ -156,11 +157,7 @@ async def toggle_enabled(
                 "enrolled with the notification relay as %s", enrollment.instance_id
             )
             if not enrollment.ready:
-                error = (
-                    "Connected, but the relay has no Apple signing key installed "
-                    "yet, so nothing can be delivered. Nothing is wrong on this "
-                    "end — the relay's operator has to finish setting it up."
-                )
+                error = text("py_notify.relay_no_apple_key_on.text")
 
     config.notifications_enabled = wants_on
     await db.flush()
@@ -233,12 +230,9 @@ async def reconnect(
 
     logger.info("re-enrolled with the notification relay as %s", enrollment.instance_id)
 
-    message = f"Reconnected as {enrollment.instance_id}."
+    message = text("py_notify.reconnected.text", instance_id=enrollment.instance_id)
     if not enrollment.ready:
-        message += (
-            " The relay still has no Apple signing key of its own, so nothing "
-            "can be delivered yet."
-        )
+        message += " " + text("py_notify.reconnected_no_apple_key.text")
 
     return templates.TemplateResponse(
         request, "partials/verify.html", {"ok": enrollment.ready, "message": message}
@@ -269,7 +263,7 @@ async def send_test(
         message = (
             DISABLED_REASON
             if not config.notifications_enabled
-            else "Not connected to the relay. Press “Reconnect” and try again."
+            else text("py_notify.test_not_connected.text")
         )
         return templates.TemplateResponse(
             request, "partials/verify.html", {"ok": False, "message": message}
@@ -282,11 +276,7 @@ async def send_test(
             "partials/verify.html",
             {
                 "ok": False,
-                "message": (
-                    "No devices are registered. Open the app on a device signed "
-                    "in as an admin — it registers itself once notifications are "
-                    "switched on here."
-                ),
+                "message": text("py_notify.test_no_devices.text"),
             },
         )
 
@@ -308,18 +298,15 @@ def _test_result(report: DispatchReport) -> dict[str, object]:
     if report.skipped_reason:
         return {"ok": False, "message": report.skipped_reason}
 
-    parts = [f"Sent to {report.delivered} device{'' if report.delivered == 1 else 's'}."]
+    parts = [text("py_notify.test_sent.text", delivered=report.delivered)]
     if report.unregistered:
-        plural = "" if report.unregistered == 1 else "s"
-        parts.append(
-            f"Removed {report.unregistered} device{plural} Apple no longer recognises."
-        )
+        parts.append(text("py_notify.test_removed.text", unregistered=report.unregistered))
     if report.failed:
         reason = report.failure_reason
         parts.append(
-            f"{report.failed} failed: {reason}."
+            text("py_notify.test_failed_with_reason.text", failed=report.failed, reason=reason)
             if reason
-            else f"{report.failed} failed — the server log has the reason."
+            else text("py_notify.test_failed_no_reason.text", failed=report.failed)
         )
 
     return {

@@ -16,7 +16,7 @@
         hx-post="/admin/actions/{{ action.id }}"
         hx-target="closest .action-card" hx-swap="outerHTML"></form>
 
-  <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+  <span class="drag-handle" title="{{ t('partials_action_card.drag_handle.title') }}" aria-hidden="true">&#8942;&#8942;</span>
 
   <div class="action-fields">
     <div class="field">
@@ -59,16 +59,13 @@
                 maxlength="512" placeholder="{{ confirm_placeholder }}"
                 >{{ action.confirm_body or '' }}</textarea>
       <p class="field-note muted">
-        Shown when the user confirms this action. Leave blank to let the app
-        word it. {{ confirm_help }}
+        {{ t('partials_action_card.confirm_note.text') }}
       </p>
     </div>
 
     {% if action.is_system %}
       <p class="field-note muted">
-        Files a request in Seerr. Never touches Prowlarr, so it has no
-        download client or quality profile — and it is the only action that
-        supports TV as well as films.
+        {{ t('partials_action_card.system_note.text') }}
       </p>
     {% else %}
       <div class="field">
@@ -82,7 +79,7 @@
           {% endfor %}
           {% if action.download_client_id not in client_names %}
             <option value="{{ action.download_client_id }}" selected>
-              #{{ action.download_client_id }} (not in Prowlarr)
+              {{ t('partials_action_card.client_missing.text') }}
             </option>
           {% endif %}
         </select>
@@ -109,16 +106,16 @@
             data-save-for="action-{{ action.id }}">Save</button>
 
     {% if action.is_system %}
-      <span class="muted nowrap">grant per user</span>
+      <span class="muted nowrap">{{ t('partials_action_card.system_controls.text') }}</span>
     {% else %}
       {# The list comes back whole: deleting a card changes the ranking of
          every card below it. #}
       <form method="post" action="/admin/actions/{{ action.id }}/delete" class="remove-form"
             hx-post="/admin/actions/{{ action.id }}/delete"
             hx-target="#actions-section" hx-swap="outerHTML"
-            hx-confirm="Delete {{ action.name }}?">
-        <button type="submit" class="icon danger" title="Delete {{ action.name }}"
-                aria-label="Delete {{ action.name }}">
+            hx-confirm="{{ t('partials_action_card.delete_confirm.text') }}">
+        <button type="submit" class="icon danger" title="{{ t('partials_action_card.delete_button.text') }}"
+                aria-label="{{ t('partials_action_card.delete_button.text') }}">
           {% include "partials/_trash_icon.html" with context %}
         </button>
       </form>

@@ -60,6 +60,7 @@ from ....db.session import get_config
 from ....home import touched
 from ....plex.client import PlexServerClient, PlexServerError
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from ...state import AppState
 from .deps import AdminPageDep
@@ -113,14 +114,14 @@ async def _live_sections(config: Config, state: AppState) -> tuple[list[dict], s
     ``default_libraries`` is a row from before this filter existed.
     """
     if not config.plex_server_base_url or not config.plex_admin_token:
-        return [], "Not connected to a Plex server yet. Sign out and back in with Plex."
+        return [], text("py_admin.plex_not_connected_signin.text")
 
     plex = PlexServerClient(config.plex_server_base_url, config.plex_admin_token, client=state.http)
     try:
         sections = await plex.list_library_sections()
     except PlexServerError as exc:
         logger.warning("could not list Plex libraries: %s", exc)
-        return [], f"Could not reach the Plex server: {exc}"
+        return [], text("py_admin.plex_unreachable.text", error=exc)
 
     return [
         {"id": section.id, "name": section.name, "type": section.type}
@@ -234,16 +235,16 @@ async def reconnect(request: Request, db: DbDep, state: StateDep, admin: AdminPa
         return templates.TemplateResponse(
             request,
             "partials/verify.html",
-            {"ok": False, "message": "No Plex sign-in on record. Sign out and back in with Plex."},
+            {"ok": False, "message": text("py_admin.plex_no_signin_on_record.text")},
         )
 
     ok = await refresh_plex_server(
         config, config.plex_admin_token, config.plex_server_client_identifier or "", state.http
     )
     message = (
-        f"Connected to {config.plex_server_name}."
+        text("py_admin.plex_connected.text", server=config.plex_server_name)
         if ok
-        else "Could not find a reachable Plex server for this account."
+        else text("py_admin.plex_no_reachable_server.text")
     )
     return templates.TemplateResponse(
         request, "partials/verify.html", {"ok": ok, "message": message}

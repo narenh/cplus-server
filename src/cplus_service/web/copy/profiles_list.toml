@@ -1,0 +1,3 @@
+# Quality profiles page: button above the list that starts a new profile.
+[new_button]
+label = '''New quality profile'''

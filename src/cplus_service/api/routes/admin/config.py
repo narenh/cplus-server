@@ -20,6 +20,7 @@ from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
 from ....settings import SEERR_URL_ENV, seerr_url
 from ....web import templates
+from ....web.copy_strings import text
 from ...deps import DbDep, StateDep
 from .deps import AdminPageDep
 
@@ -119,7 +120,7 @@ async def save_config(
     return templates.TemplateResponse(
         request,
         "partials/saved.html",
-        {"message": "Configuration saved."},
+        {"message": text("py_admin.config_saved.text")},
     )
 
 
@@ -178,13 +179,16 @@ async def verify_prowlarr(
     """Ping Prowlarr's system status with the saved credentials."""
     prowlarr = await _prowlarr(state, db)
     if prowlarr is None:
-        result = {"ok": False, "message": "Set the Prowlarr URL and API key first, then save."}
+        result = {"ok": False, "message": text("py_admin.prowlarr_set_first.text")}
     else:
         try:
             status_info = await prowlarr.verify_connection()
             name = status_info.app_name or "Prowlarr"
-            version = status_info.version or "unknown version"
-            result = {"ok": True, "message": f"Connected to {name} {version}."}
+            version = status_info.version or text("py_admin.prowlarr_unknown_version.text")
+            result = {
+                "ok": True,
+                "message": text("py_admin.prowlarr_connected.text", name=name, version=version),
+            }
         except ProwlarrError as exc:
             result = {"ok": False, "message": str(exc)}
 
@@ -204,7 +208,7 @@ async def list_indexers(
     indexers: list[dict[str, object]] = []
     error: str | None = None
     if prowlarr is None:
-        error = "Prowlarr is not configured yet."
+        error = text("py_admin.prowlarr_not_configured.text")
     else:
         try:
             indexers = [
@@ -237,7 +241,7 @@ async def list_download_clients(
     clients: list[dict[str, object]] = []
     error: str | None = None
     if prowlarr is None:
-        error = "Prowlarr is not configured yet."
+        error = text("py_admin.prowlarr_not_configured.text")
     else:
         try:
             clients = [

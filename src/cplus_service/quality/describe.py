@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..release.models import Resolution, Source
+from ..web.copy_strings import text
 from .models import (
     AudioMatchRule,
     Choice,
@@ -36,17 +37,17 @@ from .models import (
 
 #: The words for a resolution, where the bare token is not what an admin says.
 _RESOLUTION_WORDS = {
-    Resolution.UHD_2160P: "4K",
-    Resolution.UNKNOWN: "no resolution in the name",
+    Resolution.UHD_2160P: text("py_quality.resolution_4k.text"),
+    Resolution.UNKNOWN: text("py_quality.resolution_unknown.text"),
 }
-_SOURCE_WORDS = {Source.UNKNOWN: "no source in the name"}
+_SOURCE_WORDS = {Source.UNKNOWN: text("py_quality.source_unknown.text")}
 
-ANYTHING = "anything"
+ANYTHING = text("py_quality.anything.text")
 
 
 def gb(value: float) -> str:
     """A GB number as an admin would write it: ``15 GB``, not ``15.0 GB``."""
-    return f"{value:g} GB"
+    return text("py_quality.size_gb.text", amount=f"{value:g}")
 
 
 def _join(parts: list[str], conjunction: str = "or") -> str:
@@ -69,15 +70,15 @@ def describe_filter(rule: QualityRule) -> str:
     """
     if isinstance(rule, ExcludePrereleaseRule):
         if not rule.enabled:
-            return "nothing — pre-releases are allowed"
-        return "CAM, telesync, telecine and screener releases"
+            return text("py_quality.filter_prerelease_off.text")
+        return text("py_quality.filter_prerelease_on.text")
     if isinstance(rule, KeywordExcludeRule):
         words = [value.strip() for value in rule.values if value.strip()]
         if not words:
-            return "nothing — no keywords listed"
-        return f"titles containing {_join([repr(word) for word in words])}"
+            return text("py_quality.filter_keywords_none.text")
+        return text("py_quality.filter_keywords.text", words=_join([repr(word) for word in words]))
     if isinstance(rule, SizeCapGbRule):
-        return f"anything over {gb(rule.value)}"
+        return text("py_quality.filter_size_cap.text", size=gb(rule.value))
     return ""
 
 
@@ -85,28 +86,36 @@ def describe_preference(rule: QualityRule) -> str:
     """What this preference prefers, as the object of "prefer …"."""
     if isinstance(rule, RepackProperPriorityRule):
         if not rule.enabled:
-            return "no REPACK preference"
-        return "a REPACK or PROPER over the release it replaces"
+            return text("py_quality.prefer_repack_off.text")
+        return text("py_quality.prefer_repack_on.text")
     if isinstance(rule, ResolutionOrderRule):
-        return _ordered("resolution", [value.value for value in rule.values])
+        return _ordered(
+            text("py_quality.label_resolution.text"), [value.value for value in rule.values]
+        )
     if isinstance(rule, SourceOrderRule):
-        return _ordered("source", list(rule.values))
+        return _ordered(text("py_quality.label_source.text"), list(rule.values))
     if isinstance(rule, HdrMatchRule):
-        return _ordered("dynamic range", list(rule.values))
+        return _ordered(text("py_quality.label_hdr.text"), list(rule.values))
     if isinstance(rule, AudioMatchRule):
-        return _ordered("audio", [value.value for value in rule.values])
+        return _ordered(text("py_quality.label_audio.text"), [value.value for value in rule.values])
     if isinstance(rule, SizeRule):
-        direction = "the biggest" if rule.direction is SizeDirection.LARGEST else "the smallest"
+        direction = (
+            text("py_quality.direction_largest.text")
+            if rule.direction is SizeDirection.LARGEST
+            else text("py_quality.direction_smallest.text")
+        )
         if rule.cap_gb is not None:
-            return f"{direction} file, with anything over {gb(rule.cap_gb)} demoted"
-        return f"{direction} file"
+            return text(
+                "py_quality.prefer_size_capped.text", direction=direction, size=gb(rule.cap_gb)
+            )
+        return text("py_quality.prefer_size.text", direction=direction)
     return ""
 
 
 def _ordered(label: str, values: list[str]) -> str:
     if not values:
-        return f"{label} — nothing listed, so this rule decides nothing"
-    return f"{label}: {' → '.join(values)}"
+        return text("py_quality.prefer_ordered_empty.text", label=label)
+    return text("py_quality.prefer_ordered.text", label=label, values=" → ".join(values))
 
 
 # --------------------------------------------------------------------------- #
@@ -132,11 +141,17 @@ def describe_match(match: ChoiceMatch) -> str:
         parts.append(_join([value.value for value in match.audio]))
 
     if match.min_size_gb is not None and match.max_size_gb is not None:
-        parts.append(f"between {gb(match.min_size_gb)} and {gb(match.max_size_gb)}")
+        parts.append(
+            text(
+                "py_quality.match_between.text",
+                low=gb(match.min_size_gb),
+                high=gb(match.max_size_gb),
+            )
+        )
     elif match.max_size_gb is not None:
-        parts.append(f"under {gb(match.max_size_gb)}")
+        parts.append(text("py_quality.match_under.text", size=gb(match.max_size_gb)))
     elif match.min_size_gb is not None:
-        parts.append(f"over {gb(match.min_size_gb)}")
+        parts.append(text("py_quality.match_over.text", size=gb(match.min_size_gb)))
 
     return " · ".join(parts)
 
@@ -150,25 +165,29 @@ def describe_tie_break(choice: Choice) -> str:
     if choice.tie_break is None:
         return ""
     if choice.tie_break is TieBreak.BIGGEST:
-        return "biggest file"
+        return text("py_quality.tie_biggest.text")
     if choice.tie_break is TieBreak.SMALLEST:
-        return "smallest file"
+        return text("py_quality.tie_smallest.text")
     if choice.tie_break is TieBreak.NEWEST:
-        return "newest"
+        return text("py_quality.tie_newest.text")
     if choice.tie_break is TieBreak.MOST_SEEDERS:
-        return "most seeders"
+        return text("py_quality.tie_seeders.text")
     if choice.tie_break_gb is None:
         # The size was never filled in; say what will happen rather than
         # printing a target that does not exist.
-        return "biggest file"
-    return f"closest to {gb(choice.tie_break_gb)}"
+        return text("py_quality.tie_biggest.text")
+    return text("py_quality.tie_closest.text", size=gb(choice.tie_break_gb))
 
 
 def describe_choice(choice: Choice) -> str:
     """One rung, whole: ``4K WEB-DL, biggest file``."""
     tie_break = describe_tie_break(choice)
     if tie_break:
-        return f"{describe_match(choice.match)}, {tie_break}"
+        return text(
+            "py_quality.choice_with_tie_break.text",
+            match=describe_match(choice.match),
+            tie_break=tie_break,
+        )
     return describe_match(choice.match)
 
 
@@ -192,24 +211,17 @@ class ProfileSummary:
     never_grab: list[str] = field(default_factory=list)
     choices: list[str] = field(default_factory=list)
     tie_breaks: list[str] = field(default_factory=list)
+    #: Index of a choice that matches everything and is not the last. Choices
+    #: after it can never apply — a real mistake, and an invisible one without
+    #: something to point at it. Taken from the profile, not the rendered text,
+    #: so rewording the copy cannot hide it.
+    catch_all_choice: int | None = None
 
     #: True when the profile would take literally anything, in indexer order —
     #: worth saying out loud, since it looks like a profile but decides nothing.
     @property
     def is_empty(self) -> bool:
         return not (self.never_grab or self.choices or self.tie_breaks)
-
-    @property
-    def catch_all_choice(self) -> int | None:
-        """Index of a choice that matches everything and is not the last.
-
-        Choices after it can never apply — a real mistake, and an invisible one
-        without something to point at it.
-        """
-        for index, text in enumerate(self.choices[:-1]):
-            if text == ANYTHING or text.startswith(f"{ANYTHING},"):
-                return index
-        return None
 
 
 def summarise(profile: QualityProfile) -> ProfileSummary:
@@ -218,4 +230,12 @@ def summarise(profile: QualityProfile) -> ProfileSummary:
         never_grab=[describe_filter(rule) for rule in profile.filters],
         choices=[describe_choice(choice) for choice in profile.choices],
         tie_breaks=[describe_preference(rule) for rule in profile.preferences],
+        catch_all_choice=next(
+            (
+                index
+                for index, choice in enumerate(profile.choices[:-1])
+                if choice.match.is_anything
+            ),
+            None,
+        ),
     )

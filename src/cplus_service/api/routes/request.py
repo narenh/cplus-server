@@ -26,6 +26,7 @@ from ...bootstrap import REQUEST_ACTION_NAME, get_request_action
 from ...db.models import ActivityLog, EventType, Permission, SeerrRequestNotice
 from ...notify.messages import MediaSummary, user_requested
 from ...seerr.client import SeerrAuthError, SeerrError
+from ...web.copy_strings import text
 from ..deps import DbDep, PlexTokenDep, SeerrDep, StateDep
 from ..notifications import media_of, schedule
 from ..schemas import RequestCreate, RequestResponse
@@ -53,18 +54,18 @@ async def create_request(
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+            status.HTTP_401_UNAUTHORIZED, exc.detail or text("py_errors.seerr_rejected_token.text")
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     action = await get_request_action(db)
     if action is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"The built-in {REQUEST_ACTION_NAME} action is not available on this server.",
+            text("py_errors.request_action_unavailable.text", name=REQUEST_ACTION_NAME),
         )
 
     granted = await db.execute(
@@ -75,7 +76,7 @@ async def create_request(
     if granted.scalars().first() is None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            f"You do not have permission to use '{action.name}'",
+            text("py_errors.action_not_permitted_named.text", name=action.name),
         )
 
     try:
@@ -149,7 +150,12 @@ async def create_request(
         background,
         state,
         user_requested(
-            media_of(body, fallback=MediaSummary(title=f"TMDB {body.tmdb_id}")),
+            media_of(
+                body,
+                fallback=MediaSummary(
+                    title=text("py_notify.title_from_tmdb_id.text", tmdb_id=body.tmdb_id)
+                ),
+            ),
             username=user.plex_username,
             tmdb_id=body.tmdb_id,
             media_type=body.type,

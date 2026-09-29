@@ -1,0 +1,15 @@
+# Grabs page: link at the top to the full activity log.
+[activity_link]
+label = '''View all activity &rarr;'''
+
+# Grabs page: shown instead of the table when nothing has been grabbed.
+[empty]
+text = '''No grabs recorded yet.'''
+
+# Grabs page, Action column: tooltip on the "grab" pill for a release an admin grabbed directly.
+[admin_grab]
+tooltip = '''Grabbed by an admin from the admin app, without an action'''
+
+# Grabs page, Action column: label shown when the grab's action has since been deleted.
+[deleted_action]
+label = '''deleted action'''

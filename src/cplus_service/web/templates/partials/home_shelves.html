@@ -16,13 +16,13 @@
     {% for row in shelf_rows %}
       <div class="reorder-row shelf-row" draggable="true" data-reorder-id="{{ row.row_id }}">
         <div class="reorder-controls">
-          <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+          <span class="drag-handle" title="{{ t('partials_home_shelves.drag_handle.tooltip') }}" aria-hidden="true">&#8942;&#8942;</span>
           {# Alongside dragging, not instead of it — a plain form POST that
              needs no native HTML5 drag-and-drop support from the browser or
              input device. #}
           <form method="post" action="{{ row.move_up_url }}" class="move-form"
                 hx-post="{{ row.move_up_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
-            <button type="submit" class="icon" title="Move up" aria-label="Move shelf up"
+            <button type="submit" class="icon" title="{{ t('partials_home_shelves.move_buttons.up') }}" aria-label="Move shelf up"
                     {% if row.is_first %}disabled{% endif %}>
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -32,7 +32,7 @@
           </form>
           <form method="post" action="{{ row.move_down_url }}" class="move-form"
                 hx-post="{{ row.move_down_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
-            <button type="submit" class="icon" title="Move down" aria-label="Move shelf down"
+            <button type="submit" class="icon" title="{{ t('partials_home_shelves.move_buttons.down') }}" aria-label="Move shelf down"
                     {% if row.is_last %}disabled{% endif %}>
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -57,6 +57,6 @@
 
   <form method="post" action="{{ add_url }}" class="row"
         hx-post="{{ add_url }}" hx-target="#home-shelves" hx-swap="outerHTML">
-    <button type="submit" class="secondary">New Shelf</button>
+    <button type="submit" class="secondary">{{ t('partials_home_shelves.new_shelf.label') }}</button>
   </form>
 </div>

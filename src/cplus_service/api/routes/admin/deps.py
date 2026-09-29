@@ -18,6 +18,7 @@ from fastapi import Cookie, Depends, HTTPException, Request, status
 
 from ....auth.sessions import SESSION_COOKIE_NAME, resolve_session
 from ....db.models import User
+from ....web.copy_strings import text
 from ...deps import DbDep
 
 LOGIN_PATH = "/admin/login"
@@ -36,11 +37,13 @@ async def require_admin_page(
     if request.headers.get("HX-Request"):
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            "Session expired",
+            text("py_admin.session_expired.text"),
             headers={"HX-Redirect": LOGIN_PATH},
         )
     raise HTTPException(
-        status.HTTP_303_SEE_OTHER, "Not signed in", headers={"Location": LOGIN_PATH}
+        status.HTTP_303_SEE_OTHER,
+        text("py_admin.not_signed_in.text"),
+        headers={"Location": LOGIN_PATH},
     )
 
 

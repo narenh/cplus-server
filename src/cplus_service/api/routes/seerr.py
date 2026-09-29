@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ActivityLog, EventType
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
+from ...web.copy_strings import text
 from ..deps import DbDep, PlexTokenDep, SeerrDep, require_request_manager
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,11 @@ async def _authenticate(db: DbDep, seerr: SeerrClient, plex_token: str):  # noqa
         return await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+            status.HTTP_401_UNAUTHORIZED, exc.detail or text("py_errors.seerr_rejected_token.text")
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
 

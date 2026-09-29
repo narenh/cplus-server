@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.models import Action, Permission
+from ...web.copy_strings import text
 from ..deps import CachedUserDep, DbDep, ProwlarrDep, StateDep
 from ..grab_core import execute_grab
 from ..schemas import GrabRequest, GrabResponse
@@ -40,9 +41,7 @@ async def permitted_action(session: AsyncSession, user_id: int, action_id: int) 
     )
     action = result.scalars().first()
     if action is None:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "You do not have permission to use that action"
-        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, text("py_errors.action_not_permitted.text"))
     return action
 
 
@@ -60,7 +59,7 @@ async def grab(
     if action.is_system:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"'{action.name}' is not a Prowlarr action. Use POST /request instead.",
+            text("py_errors.not_a_prowlarr_action.text", name=action.name),
         )
     if action.download_client_id is None:  # pragma: no cover - see below
         # Unreachable as the schema stands: ``ck_action_targets_required_unless_system``
@@ -74,7 +73,7 @@ async def grab(
         # decision, not Prowlarr's.
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"Action '{action.name}' has no download client configured.",
+            text("py_errors.no_download_client.text", name=action.name),
         )
 
     return await execute_grab(

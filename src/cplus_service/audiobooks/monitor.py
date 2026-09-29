@@ -31,6 +31,7 @@ from cplus_align.protocol import (
 
 from ..db.models import AudiobookJob, AudiobookJobStatus
 from ..db.session import session_scope
+from ..web.copy_strings import text
 from .ingest import InvalidResult, build_alignment, load_result, replace_alignment, summary
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
 
     if not files["exists"]:
         job.status = AudiobookJobStatus.FAILED
-        job.message = "The aligner's copy of this job disappeared. Upload the epub again."
+        job.message = text("py_audiobooks.job_disappeared.text")
         job.finished_at = now
         return
 
@@ -76,7 +77,7 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
         cancelled = error.get("code") == "cancelled"
         job.status = AudiobookJobStatus.CANCELLED if cancelled else AudiobookJobStatus.FAILED
         if not cancelled:
-            job.message = error.get("message") or "The aligner stopped without saying why."
+            job.message = error.get("message") or text("py_audiobooks.aligner_stopped.text")
         job.stage = None
         job.finished_at = now
         return
@@ -86,7 +87,7 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
             result = await asyncio.to_thread(load_result, paths.job(job.id) / RESULT_FILE)
         except InvalidResult as exc:
             job.status = AudiobookJobStatus.FAILED
-            job.message = f"The aligner's result couldn't be read: {exc}"
+            job.message = text("py_audiobooks.result_unreadable.text", error=exc)
             job.finished_at = now
             return
         alignment = await asyncio.to_thread(build_alignment, job, result)
@@ -106,12 +107,12 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
         job.status = AudiobookJobStatus.VERIFYING
         if status.get("phase") == "verifying":
             job.progress = float(status.get("pct") or 0.0)
-            job.stage = status.get("label") or "Verifying"
+            job.stage = status.get("label") or text("py_audiobooks.stage_verifying.text")
         return
 
     if not verify.get("ok"):
         job.status = AudiobookJobStatus.FAILED
-        job.message = verify.get("message") or "The epub doesn't match the audio."
+        job.message = verify.get("message") or text("py_audiobooks.epub_mismatch.text")
         job.finished_at = now
         return
 

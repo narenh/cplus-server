@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<p class="row"><a href="/admin/activity-log">View all activity &rarr;</a></p>
+<p class="row"><a href="/admin/activity-log">{{ t('grabs.activity_link.label') }}</a></p>
 {% include "partials/user_filter.html" %}
 
 {% if not grabs %}
-  <p class="empty">No grabs recorded yet.</p>
+  <p class="empty">{{ t('grabs.empty.text') }}</p>
 {% else %}
 <div class="table-scroll">
 <table>
@@ -28,9 +28,9 @@
       <td>
         {% if grab.via_manager %}
           <span class="badge by-admin"
-                title="Grabbed by an admin from the admin app, without an action">grab</span>
+                title="{{ t('grabs.admin_grab.tooltip') }}">grab</span>
         {% else %}
-          <span class="badge by-user">{{ action_names.get(grab.action_id, "deleted action") }}</span>
+          <span class="badge by-user">{{ action_names.get(grab.action_id, t('grabs.deleted_action.label')) }}</span>
         {% endif %}
       </td>
       <td class="release">{{ grab.release_title }}</td>

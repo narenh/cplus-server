@@ -43,6 +43,7 @@ from ....bootstrap import upnext_shelf
 from ....db.models import Config
 from ....home import HomeSettingsLike
 from ....plex.client import PlexServerClient, PlexServerError
+from ....web.copy_strings import text
 from ...state import AppState
 from .home_sources import (
     COLLECTION_PREFIX,
@@ -114,13 +115,13 @@ async def collections_for_library(
     once each.
     """
     if not config.plex_server_base_url or not config.plex_admin_token:
-        return [], "Not connected to a Plex server."
+        return [], text("py_admin.plex_not_connected.text")
 
     plex = PlexServerClient(config.plex_server_base_url, config.plex_admin_token, client=state.http)
     try:
         collections = await plex.list_collections(library_id)
     except PlexServerError as exc:
-        return [], f"Could not reach the Plex server: {exc}"
+        return [], text("py_admin.plex_unreachable.text", error=exc)
     return [{"id": c.id, "title": c.title} for c in collections], None
 
 
@@ -136,14 +137,14 @@ async def first_collection_defaults(
     edit. ``None`` means the library has no collections to default to.
     """
     if not config.plex_server_base_url or not config.plex_admin_token:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Not connected to a Plex server.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_admin.plex_not_connected.text"))
 
     plex = PlexServerClient(config.plex_server_base_url, config.plex_admin_token, client=state.http)
     try:
         collections = await plex.list_collections(library_id)
     except PlexServerError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach the Plex server: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_admin.plex_unreachable.text", error=exc)
         ) from exc
     if not collections:
         return None
@@ -221,7 +222,9 @@ async def apply_shelf_update(
     if source.startswith(COLLECTION_PREFIX):
         defaults = resolve_collection_source(source, collection_title, libraries_by_id)
         if defaults is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such collection.")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, text("py_admin.no_such_collection.text")
+            )
         return {**current, **defaults}
 
     parsed = collection_shelf_library_id(current, libraries_by_id)
@@ -239,12 +242,14 @@ async def apply_shelf_update(
         library_id = source[len(COLLECTIONS_PREFIX) :]
         defaults = await first_collection_defaults(config, state, library_id)
         if defaults is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "That library has no collections.")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, text("py_admin.library_no_collections.text")
+            )
         return {**current, **defaults}
 
     defaults = resolve_source(source, libraries_by_id)
     if defaults is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No such content source.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, text("py_admin.no_such_source.text"))
     return {**current, **defaults}
 
 
@@ -358,7 +363,7 @@ async def carousel_context(
                 {
                     "toggle_url": f"{base_url}/carousel-include-on-deck",
                     "checked": home.home_carousel_include_on_deck,
-                    "label": 'Include "Continue Watching" items',
+                    "label": text("py_admin.carousel_include_on_deck.text"),
                 }
                 if current.get("path") != ON_DECK_PATH
                 else None

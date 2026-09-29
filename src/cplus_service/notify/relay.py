@@ -45,6 +45,7 @@ from typing import Any
 import httpx
 
 from ..db.models import ApnsEnvironment, Config
+from ..web.copy_strings import text
 from .messages import Notification
 
 logger = logging.getLogger(__name__)
@@ -252,7 +253,9 @@ class RelayClient:
             return SendResult(outcome=SendOutcome.FAILED, reason=str(exc))
 
         if response.status_code != 200:
-            reason = _detail_of(response) or f"the relay answered {response.status_code}"
+            reason = _detail_of(response) or text(
+                "py_notify.relay_push_answered.text", status=response.status_code
+            )
             logger.warning("the notification relay refused a push: %s", reason)
             return SendResult(
                 outcome=SendOutcome.FAILED,
@@ -282,25 +285,20 @@ async def enrol(*, client: httpx.AsyncClient) -> Enrollment:
         response = await client.post(url)
     except httpx.HTTPError as exc:
         raise EnrollmentError(
-            f"Could not reach the notification relay at {relay_base_url()}. "
-            f"Check this server's outbound connectivity and try again. ({exc})"
+            text("py_notify.relay_unreachable.text", url=relay_base_url(), error=exc)
         ) from exc
 
     if response.status_code == 403:
-        raise EnrollmentError(
-            "The notification relay is not issuing new keys at the moment. "
-            "This is not something you can fix from here — try again later."
-        )
+        raise EnrollmentError(text("py_notify.relay_not_issuing_keys.text"))
 
     if response.status_code == 429:
-        raise EnrollmentError(
-            "The notification relay is rate-limiting requests from this "
-            "address. Wait a minute and try again."
-        )
+        raise EnrollmentError(text("py_notify.relay_rate_limited.text"))
 
     if response.status_code not in (200, 201):
-        detail = _detail_of(response) or f"it answered {response.status_code}"
-        raise EnrollmentError(f"The notification relay refused to enrol us: {detail}")
+        detail = _detail_of(response) or text(
+            "py_notify.relay_it_answered.text", status=response.status_code
+        )
+        raise EnrollmentError(text("py_notify.relay_refused_enrol.text", detail=detail))
 
     body = _json_of(response)
     instance_id = _str_or_none(body.get("instance_id"))
@@ -309,10 +307,7 @@ async def enrol(*, client: httpx.AsyncClient) -> Enrollment:
     if not instance_id or not api_key:
         # A 2xx we cannot use is worse than an error, because everything
         # downstream would behave as though setup had succeeded.
-        raise EnrollmentError(
-            "The notification relay returned a response we did not understand. "
-            "It may be running a newer version than this server expects."
-        )
+        raise EnrollmentError(text("py_notify.relay_bad_response.text"))
 
     return Enrollment(
         instance_id=instance_id,
@@ -358,7 +353,7 @@ def _result_of(response: httpx.Response) -> SendResult:
         return SendResult(
             outcome=SendOutcome.FAILED,
             status_code=200,
-            reason=f"the relay reported an unrecognised result: {raw!r}",
+            reason=text("py_notify.relay_unrecognised_result.text", result=repr(raw)),
         )
 
     return SendResult(

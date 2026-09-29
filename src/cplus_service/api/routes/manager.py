@@ -29,6 +29,7 @@ from ...db.models import ActivityLog, EventType
 from ...search.categorize import categorize_releases
 from ...search.stream import stream_search
 from ...seerr.client import SeerrAuthError, SeerrError
+from ...web.copy_strings import text
 from ..deps import (
     ConfigDep,
     DbDep,
@@ -64,11 +65,11 @@ async def grab(
     except SeerrAuthError as exc:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            exc.detail or "Seerr rejected this Plex token",
+            exc.detail or text("py_errors.seerr_rejected_token.text"),
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     require_request_manager(auth)
@@ -119,18 +120,18 @@ async def search(
     if (imdb_id is None) == (query is None):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Provide exactly one of imdb_id or query.",
+            text("py_errors.search_needs_one_of.text"),
         )
 
     try:
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+            status.HTTP_401_UNAUTHORIZED, exc.detail or text("py_errors.seerr_rejected_token.text")
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     require_request_manager(auth)
@@ -215,11 +216,11 @@ async def tmdb_token(
         _, auth = await authenticate_plex_token(db, seerr, plex_token)
     except SeerrAuthError as exc:
         raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, exc.detail or "Seerr rejected this Plex token"
+            status.HTTP_401_UNAUTHORIZED, exc.detail or text("py_errors.seerr_rejected_token.text")
         ) from exc
     except SeerrError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.seerr_unreachable.text", error=exc)
         ) from exc
 
     require_request_manager(auth)

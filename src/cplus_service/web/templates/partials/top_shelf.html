@@ -11,10 +11,7 @@
    name. #}
 <div id="top-shelf-section">
   <h2>Top Shelf</h2>
-  <p class="hint">
-    What the tvOS Top Shelf widget above the app icon shows. Always on —
-    tvOS itself requires it.
-  </p>
+  <p class="hint">{{ t('partials_top_shelf.intro.hint') }}</p>
   <div class="shelf-fields shelf-box">
     {% with id = top_shelf.row_id, post_url = top_shelf.post_url, swap_target = top_shelf.swap_target,
             current = top_shelf.current, current_source = top_shelf.current_source,

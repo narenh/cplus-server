@@ -1,15 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-{% if client_error %}<p class="err">Download clients unavailable: {{ client_error }}</p>{% endif %}
+{% if client_error %}<p class="err">{{ t('actions.client_error.text') }}</p>{% endif %}
 {% if not profiles %}
-  <p class="err">Create a quality profile first — every Prowlarr-backed action needs one.</p>
+  <p class="err">{{ t('actions.no_profiles.text') }}</p>
 {% endif %}
 
 <p class="hint">
-  <strong>Drag a card</strong> to reorder. Canopy+ draws the first two as
-  buttons on the detail page and folds the rest into a &#8230; menu, so the
-  order here is what decides which two a user sees. The built-in action is
-  ranked like any other — put it wherever it belongs.
+  {{ t('actions.reorder_hint.text') }}
 </p>
 
 {# Outside the swapped section, and referenced by every icon field's `list`:
@@ -22,26 +19,13 @@
 {% include "partials/actions_section.html" %}
 
 <p class="hint">
-  <strong>Icon</strong> is an SF Symbol name. The field suggests the ones we
-  know render, and warns on anything else without refusing it: no server can
-  know what symbols a given tvOS version ships, and Canopy+ falls back to
-  <code>arrow.down.circle</code> when it cannot draw the name. Leave it blank
-  for the app's own default.
+  {{ t('actions.icon_hint.text') }}
 </p>
 <p class="hint">
-  <strong>Name</strong> is yours — it identifies the action here, in the grab
-  history and in notifications. <strong>Button title</strong> is what the
-  Canopy+ app prints on the button; leave it blank and the name is used. Name an
-  action <em>Add to library in HD</em> and title the button <em>Play Now</em>
-  when those are the right words for two different audiences.
+  {{ t('actions.name_hint.text') }}
 </p>
 <p class="hint">
-  The built-in action can be renamed like any other — nothing identifies an
-  action by its name. It cannot be deleted (the next start would seed it again)
-  and it takes no download client or quality profile, because it files a request
-  in Seerr rather than grabbing anything. <strong>Request</strong> is the one
-  word held back for it: on any other button it would promise a user the one
-  thing that button cannot do.
+  {{ t('actions.builtin_hint.text') }}
 </p>
 {% endblock %}
 

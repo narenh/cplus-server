@@ -1,0 +1,112 @@
+# The plain-English read-back of a quality profile ("Never grab ...", "Prefer ...",
+# "1st choice: ...") on the profile builder and profile list pages. Each phrase is
+# a sentence fragment that the page composes into a sentence, so keep them
+# lowercase and without a full stop.
+
+# Words for a resolution the bare token doesn't describe well.
+[resolution_4k]
+text = '''4K'''
+
+[resolution_unknown]
+text = '''no resolution in the name'''
+
+[source_unknown]
+text = '''no source in the name'''
+
+# A choice that matches any release. Also compared against internally to spot a
+# catch-all choice that hides the ones below it, so change it consistently
+# (it is used everywhere it appears).
+[anything]
+text = '''anything'''
+
+# A size, e.g. "15 GB". `amount` is already formatted (15, not 15.0).
+[size_gb]
+text = '''{{ amount }} GB'''
+
+# "Never grab ..." lines.
+[filter_prerelease_off]
+text = '''nothing — pre-releases are allowed'''
+
+[filter_prerelease_on]
+text = '''CAM, telesync, telecine and screener releases'''
+
+[filter_keywords_none]
+text = '''nothing — no keywords listed'''
+
+# `words` is the quoted keywords joined with "or".
+[filter_keywords]
+text = '''titles containing {{ words }}'''
+
+# `size` is e.g. "60 GB".
+[filter_size_cap]
+text = '''anything over {{ size }}'''
+
+# "Prefer ..." lines.
+[prefer_repack_off]
+text = '''no REPACK preference'''
+
+[prefer_repack_on]
+text = '''a REPACK or PROPER over the release it replaces'''
+
+# `label` is the kind of rule (resolution, source, ...), `values` the ordered list.
+[prefer_ordered_empty]
+text = '''{{ label }} — nothing listed, so this rule decides nothing'''
+
+[prefer_ordered]
+text = '''{{ label }}: {{ values }}'''
+
+[label_resolution]
+text = '''resolution'''
+
+[label_source]
+text = '''source'''
+
+[label_hdr]
+text = '''dynamic range'''
+
+[label_audio]
+text = '''audio'''
+
+[direction_largest]
+text = '''the biggest'''
+
+[direction_smallest]
+text = '''the smallest'''
+
+# `direction` is "the biggest"/"the smallest", `size` the cap.
+[prefer_size_capped]
+text = '''{{ direction }} file, with anything over {{ size }} demoted'''
+
+[prefer_size]
+text = '''{{ direction }} file'''
+
+# A choice's "what kind of release" line, joined with " · ".
+[match_between]
+text = '''between {{ low }} and {{ high }}'''
+
+[match_under]
+text = '''under {{ size }}'''
+
+[match_over]
+text = '''over {{ size }}'''
+
+# A choice's "which one wins" line.
+[tie_biggest]
+text = '''biggest file'''
+
+[tie_smallest]
+text = '''smallest file'''
+
+[tie_newest]
+text = '''newest'''
+
+[tie_seeders]
+text = '''most seeders'''
+
+# `size` is e.g. "15 GB".
+[tie_closest]
+text = '''closest to {{ size }}'''
+
+# One choice, whole: `match`, then `tie_break`.
+[choice_with_tie_break]
+text = '''{{ match }}, {{ tie_break }}'''

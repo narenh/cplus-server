@@ -7,17 +7,14 @@
 <section class="card" id="default-libraries">
   <h2>Default Libraries</h2>
   <p class="lede">
-    The libraries a fresh Canopy+ install starts with, in the order it shows
-    them. Renaming here only changes what Canopy+ displays — Plex's own
-    library name is never touched, and stays visible underneath so it is
-    always clear what you renamed.
+    {{ t('partials_library_section.section.lede') }}
   </p>
 
   <div class="row">
     {% if plex_error %}
       <span class="hint warn">{{ plex_error }}</span>
     {% elif plex_server_name %}
-      <span class="hint">Connected to <strong>{{ plex_server_name }}</strong>.</span>
+      <span class="hint">{{ t('partials_library_section.connected.hint') }}</span>
     {% endif %}
     <button type="button" class="secondary"
             hx-post="/admin/libraries/reconnect"
@@ -26,7 +23,7 @@
   </div>
 
   {% if not default_libraries %}
-    <p class="empty">No default libraries yet — add one below.</p>
+    <p class="empty">{{ t('partials_library_section.empty.text') }}</p>
   {% else %}
     <div class="reorder-list" data-reorder-list
          data-reorder-url="/admin/libraries/reorder"
@@ -49,13 +46,13 @@
           <button form="rename-{{ library.id }}" type="submit" class="link hidden"
                   data-save-for="rename-{{ library.id }}">Save</button>
 
-          <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
+          <span class="drag-handle" title="{{ t('partials_library_section.drag_handle.tooltip') }}" aria-hidden="true">&#8942;&#8942;</span>
 
           <form method="post" action="/admin/libraries/{{ library.id }}/remove" class="remove-form"
                 hx-post="/admin/libraries/{{ library.id }}/remove"
                 hx-target="#default-libraries" hx-swap="outerHTML">
-            <button type="submit" class="icon danger" title="Remove {{ library.name }}"
-                    aria-label="Remove {{ library.name }}">
+            <button type="submit" class="icon danger" title="{{ t('partials_library_section.remove_button.tooltip', library=library) }}"
+\1aria-label="{{ t('partials_library_section.remove_button.tooltip', library=library) }}">
               {% include "partials/_trash_icon.html" with context %}
             </button>
           </form>
@@ -74,10 +71,10 @@
       {% endfor %}
     </select>
     <button type="submit" class="secondary" {% if not available_sections %}disabled{% endif %}>
-      Add library
+      {{ t('partials_library_section.add_button.label') }}
     </button>
   </form>
   {% if not plex_error and not available_sections and default_libraries %}
-    <p class="hint">Every supported library on the server is already in this list.</p>
+    <p class="hint">{{ t('partials_library_section.all_added.hint') }}</p>
   {% endif %}
 </section>

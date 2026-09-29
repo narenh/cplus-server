@@ -55,6 +55,7 @@ from ...db.models import (
     User,
 )
 from ...db.session import get_config
+from ...web.copy_strings import text
 from ..deps import CachedUserDep, DbDep, PlexTokenDep, ProfileDep, StateDep
 from ..state import AppState
 
@@ -88,7 +89,7 @@ async def _libraries(state: AppState, config: Config, token: str) -> set[str]:
         return await state.plex_access.libraries(token, config, state.http)
     except AccessUnknown as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Couldn't check your access with Plex: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.plex_access_check_failed.text", error=exc)
         ) from exc
 
 
@@ -104,7 +105,7 @@ async def _visible_alignment(
         )
     ).scalar_one_or_none()
     if alignment is None or alignment.library_id not in await _libraries(state, config, token):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No read-along for this book")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, text("py_errors.no_read_along.text"))
     return alignment
 
 
@@ -170,7 +171,7 @@ async def list_books(
         books = await visible_books(db, state, config, plex_token)
     except AccessUnknown as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Couldn't check your access with Plex: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.plex_access_check_failed.text", error=exc)
         ) from exc
     progress = await _progress_rows(
         db, user, profile, config.plex_server_client_identifier or "", [b.rating_key for b in books]
@@ -234,12 +235,10 @@ async def book_chunk(
     config = await get_config(db)
     alignment = await _visible_alignment(db, state, config, plex_token, rating_key)
     if v != alignment.id:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "This book was re-aligned; fetch its index again."
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, text("py_errors.book_realigned.text"))
     chunk = await db.get(AudiobookChunk, (alignment.id, n))
     if chunk is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such chunk")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, text("py_errors.no_such_chunk.text"))
     headers = {
         "Cache-Control": "private, max-age=31536000, immutable",
         "Vary": "Accept-Encoding",
@@ -285,7 +284,7 @@ async def _check_album(
     """The server id, once the caller is known to be able to see this album."""
     server_id = config.plex_server_client_identifier
     if not server_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No Plex server configured")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, text("py_errors.no_plex_server.text"))
     alignment = (
         await db.execute(
             select(AudiobookAlignment.library_id).where(
@@ -301,10 +300,10 @@ async def _check_album(
             allowed = await state.plex_access.can_see_album(token, config, state.http, rating_key)
     except AccessUnknown as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Couldn't check your access with Plex: {exc}"
+            status.HTTP_502_BAD_GATEWAY, text("py_errors.plex_access_check_failed.text", error=exc)
         ) from exc
     if not allowed:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such audiobook")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, text("py_errors.no_such_audiobook.text"))
     return server_id
 
 
@@ -414,7 +413,7 @@ async def _bookmark(
     row = await db.get(AudiobookBookmark, (user.id, profile, str(bookmark_id)))
     # An id this user already used for another book is not this book's.
     if row is not None and (row.plex_server_id, row.rating_key) != (server_id, rating_key):
-        raise HTTPException(status.HTTP_409_CONFLICT, "That bookmark id belongs to another book")
+        raise HTTPException(status.HTTP_409_CONFLICT, text("py_errors.bookmark_other_book.text"))
     return row
 
 

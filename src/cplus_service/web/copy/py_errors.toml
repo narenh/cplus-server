@@ -1,0 +1,136 @@
+# Error text the iOS/tvOS app and other API clients receive as an HTTP `detail`
+# or `message`. Some are shown to the person using the app; the rest are read by
+# whoever is setting the server up.
+
+# Any app request while Prowlarr has no URL/API key saved (HTTP 503).
+[prowlarr_not_configured]
+text = '''Prowlarr is not configured yet. Set it in the admin settings.'''
+
+# Any Seerr-backed request while the Seerr URL env var is unset (HTTP 503).
+# `env` is the environment variable's name.
+[seerr_not_configured]
+text = '''Seerr is not configured. Set {{ env }} and restart.'''
+
+# A request that arrived without the Plex token header (HTTP 401). `header` is the header name.
+[missing_plex_token]
+text = '''Missing {{ header }} header'''
+
+# A request whose Plex token this server has never seen (HTTP 401).
+[unrecognised_plex_token]
+text = '''Unrecognised Plex token. Call GET /register to authenticate first.'''
+
+# A non-admin app user reaching an admin-only endpoint (HTTP 403).
+[manage_requests_only]
+text = '''This action is limited to users who can manage requests.'''
+
+# Fallback shown when Seerr rejects a Plex token without saying why (HTTP 401).
+[seerr_rejected_token]
+text = '''Seerr rejected this Plex token'''
+
+# Seerr could not be reached (HTTP 502). `error` is the underlying error text.
+[seerr_unreachable]
+text = '''Could not reach Seerr: {{ error }}'''
+
+# Seerr Request button pressed but the built-in Request action is missing (HTTP 503).
+# `name` is the action's name.
+[request_action_unavailable]
+text = '''The built-in {{ name }} action is not available on this server.'''
+
+# A user pressing an action they have not been granted (HTTP 403), on POST /request.
+# `name` is the action's name.
+[action_not_permitted_named]
+text = '''You do not have permission to use '{{ name }}''''
+
+# The same, on POST /grab, where the action is not named (HTTP 403).
+[action_not_permitted]
+text = '''You do not have permission to use that action'''
+
+# Grab pressed on the built-in Request action (HTTP 400). `name` is the action's name.
+[not_a_prowlarr_action]
+text = ''''{{ name }}' is not a Prowlarr action. Use POST /request instead.'''
+
+# Grab pressed on an action with no download client (HTTP 409). `name` is the action's name.
+[no_download_client]
+text = '''Action '{{ name }}' has no download client configured.'''
+
+# Search with neither or both of imdb_id/query (HTTP 400).
+[search_needs_one_of]
+text = '''Provide exactly one of imdb_id or query.'''
+
+# Prowlarr refused a grab; shown in the app under the grab button. `summary` is Prowlarr's short reason.
+[grab_rejected]
+text = '''Prowlarr rejected the grab. {{ summary }}'''
+
+# Seerr webhook called while the webhook secret is not set up (HTTP 503).
+[webhook_off]
+text = '''The Seerr webhook is switched off on this server. Generate a secret on the Configuration tab first.'''
+
+# Seerr webhook called with a wrong or missing Authorization header (HTTP 401).
+# Deliberately says nothing about which half was wrong.
+[webhook_rejected]
+text = '''Rejected'''
+
+# Seerr webhook body that isn't JSON (HTTP 400).
+[webhook_not_json]
+text = '''The webhook body was not valid JSON'''
+
+# Seerr webhook body that is JSON but not an object (HTTP 400).
+[webhook_not_object]
+text = '''The webhook body was not a JSON object'''
+
+# A non-admin device trying to register for push (HTTP 403).
+[push_admins_only]
+text = '''Notifications are limited to Seerr administrators.'''
+
+# Registering a push device while notifications are off (HTTP 409).
+[push_switched_off]
+text = '''Notifications are switched off for this instance. Watch GET /capabilities for when that changes.'''
+
+# Audiobook (read-along) endpoints. `error` is the underlying error text.
+[plex_access_check_failed]
+text = '''Couldn't check your access with Plex: {{ error }}'''
+
+[no_read_along]
+text = '''No read-along for this book'''
+
+[book_realigned]
+text = '''This book was re-aligned; fetch its index again.'''
+
+[no_such_chunk]
+text = '''No such chunk'''
+
+[no_plex_server]
+text = '''No Plex server configured'''
+
+[no_such_audiobook]
+text = '''No such audiobook'''
+
+[bookmark_other_book]
+text = '''That bookmark id belongs to another book'''
+
+# The internal Plex proxy used by the aligner (`code` is Plex's HTTP status).
+[internal_not_connected]
+text = '''Not connected to Plex'''
+
+[internal_plex_silent]
+text = '''Plex didn't answer'''
+
+[internal_plex_answered]
+text = '''Plex answered {{ code }}'''
+
+# Search results and grabs when Prowlarr misbehaves: the short reason the app shows
+# in place of results (`error` field of the last search line, or after "Prowlarr
+# rejected the grab."). Deliberately vague: the app's user should not see where
+# the server keeps Prowlarr.
+[prowlarr_unreachable]
+text = '''Could not reach Prowlarr.'''
+
+# Also the fallback when no reason was given.
+[prowlarr_default]
+text = '''Prowlarr could not be reached.'''
+
+[prowlarr_http_status]
+text = '''Prowlarr returned HTTP {{ status }}.'''
+
+[prowlarr_unreadable]
+text = '''Prowlarr returned a response this service could not read.'''

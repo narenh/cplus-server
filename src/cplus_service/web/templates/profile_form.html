@@ -11,7 +11,7 @@
     {% if profile %}<input type="hidden" name="profile_id" value="{{ profile.id }}">{% endif %}
 
     <label for="name">Profile name</label>
-    <input type="text" id="name" name="name" value="{{ name }}" placeholder="4K, or 1080p if that's all there is" required>
+    <input type="text" id="name" name="name" value="{{ name }}" placeholder="{{ t('profile_form.name_field.placeholder') }}" required>
 
     {# The profile in plain English. Rendered here on load and thereafter
        replaced out of band by every preview response, so it can never disagree
@@ -25,7 +25,7 @@
     </div>
 
     <div class="row">
-      <button type="submit">Save profile</button>
+      <button type="submit">{{ t('profile_form.save_button.label') }}</button>
       <a class="secondary button" href="/admin/quality-profiles">Cancel</a>
     </div>
   </form>
@@ -33,23 +33,20 @@
   {# The preview sits outside the form so its controls are never saved with the
      profile, and pulls the draft in with hx-include instead. #}
   <aside class="card preview-card">
-    <h2>What this would grab</h2>
-    <p class="lede">
-      Re-ranked as you edit, against the unsaved rules — including the releases
-      they throw away.
-    </p>
+    <h2>{{ t('profile_form.preview_heading.title') }}</h2>
+    <p class="lede">{{ t('profile_form.preview_intro.lede') }}</p>
 
     <div id="preview-controls" class="preview-controls">
       <label class="check">
         <input type="radio" name="preview_source" value="" checked>
-        Sample releases
+        {{ t('profile_form.preview_source.sample') }}
       </label>
       <label class="check">
         <input type="radio" name="preview_source" value="prowlarr">
-        A real search
+        {{ t('profile_form.preview_source.real') }}
       </label>
       <div class="row">
-        <input type="text" name="preview_query" placeholder="tt0111161, or a film title">
+        <input type="text" name="preview_query" placeholder="{{ t('profile_form.preview_query.placeholder') }}">
         <button type="button" class="secondary" id="preview-run">Search</button>
       </div>
     </div>
@@ -64,7 +61,7 @@
                      keyup[key=='Enter'] from:#preview-controls,
                      click from:#preview-run,
                      htmx:afterSwap from:#builder">
-      <p class="empty">Loading…</p>
+      <p class="empty">{{ t('profile_form.preview_loading.text') }}</p>
     </div>
   </aside>
 </div>
