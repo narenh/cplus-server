@@ -121,7 +121,7 @@ async def test_the_tab_says_read_along_is_not_set_up_without_an_aligner(
     response = await client.get("/admin/audiobooks")
     assert response.status_code == 200
     assert "isn't set up on this deployment" in response.text
-    assert "Align…" not in response.text
+    assert "Upload epub" not in response.text
 
 
 async def test_the_tab_lists_only_music_libraries_and_their_albums(
@@ -146,7 +146,7 @@ async def test_enabling_is_offered_with_its_download_size_and_licence(
     assert "GB</strong> once" in response.text
     assert "CC BY-NC 4.0" in response.text
     # Nothing can be aligned until it's on.
-    assert "Align…" not in response.text
+    assert "Upload epub" not in response.text
 
 
 def low_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
@@ -325,7 +325,7 @@ async def test_cancelling_marks_the_job_and_tells_the_sidecar(
     await upload(client, make_epub())
     response = await client.post(f"/admin/audiobooks/books/{ALBUM_KEY}/cancel")
     assert response.status_code == 200
-    assert "Align…" in response.text
+    assert "Upload epub" in response.text
     [job] = await jobs(db)
     assert job.status == AudiobookJobStatus.CANCELLED
     assert (paths.job(job.id) / "cancel").exists()
@@ -501,7 +501,7 @@ async def test_deleting_an_alignment_removes_its_chunks(
     write_result(paths.job(job.id))
     await _sync(app, paths)
     response = await client.post(f"/admin/audiobooks/books/{ALBUM_KEY}/delete")
-    assert "Align…" in response.text
+    assert "Upload epub" in response.text
     db.expire_all()
     assert (await db.execute(select(AudiobookAlignment))).first() is None
     assert (await db.execute(select(AudiobookChunk))).first() is None

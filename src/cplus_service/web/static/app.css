@@ -1035,6 +1035,11 @@ table.preview .dropped-by { color: var(--err); }
   border-radius: var(--radius-panel);
 }
 .book-menu-items .hint { margin: 8px 0 0; }
+.book-menu-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line-soft);
+}
+.book-menu-actions form { display: inline-flex; }
 .status-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
 .pager { justify-content: center; }
 
