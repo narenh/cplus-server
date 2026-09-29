@@ -31,7 +31,7 @@ from cplus_align.protocol import (
 
 from ..db.models import AudiobookJob, AudiobookJobStatus
 from ..db.session import session_scope
-from .ingest import InvalidResult, build_alignment, load_result, replace_alignment
+from .ingest import InvalidResult, build_alignment, load_result, replace_alignment, summary
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
         job.stage = None
         job.eta_seconds = None
         job.finished_at = now
-        job.message = _summary(stats, job.message)
+        job.message = summary(stats) or job.message
         logger.info("audiobook %s (%s) aligned", job.title, job.rating_key)
         return
 
@@ -127,17 +127,6 @@ async def sync_job(db: AsyncSession, paths: AlignPaths, job: AudiobookJob) -> No
         job.status = AudiobookJobStatus.QUEUED
         job.progress = 0.0
         job.stage = None
-
-
-def _summary(stats: dict[str, Any], warning: str | None) -> str | None:
-    total, aligned = stats.get("sentences"), stats.get("aligned")
-    if not total:
-        return warning
-    share = aligned / total
-    text = f"{aligned:,} of {total:,} sentences aligned."
-    if share < 0.5:
-        text += " Less than half the book was found in the audio — check this is the right edition."
-    return text
 
 
 #: A directory is only swept once nothing has touched it for this long. An upload

@@ -3,7 +3,14 @@
 
    A cell with a job in flight re-requests itself — every 2 s while verifying,
    every 10 s while processing — and a cell with nothing in flight carries no
-   trigger at all, so a page of finished books makes no requests. #}
+   trigger at all, so a page of finished books makes no requests.
+
+   The "⋯" menu holds what is used rarely: uploading a finished alignment made
+   elsewhere. It is left out while a job is in flight — the cell re-renders on
+   every poll, which would snap an open menu shut — and an upload then would
+   be overwritten by the job anyway. Its panel opens inside the cell rather
+   than floating over the table: the table scrolls sideways on a narrow screen,
+   and that clips anything positioned outside it. #}
 {% set base = "/admin/audiobooks/books/" ~ book.rating_key %}
 {% macro upload(label, style="secondary") %}
   {% if book.can_align %}
@@ -24,6 +31,9 @@
 {% endmacro %}
 <div class="book-status" id="book-{{ book.rating_key }}"
   {% if book.polling %}hx-get="{{ base }}/status" hx-trigger="{{ book.polling }}" hx-swap="outerHTML"{% endif %}>
+
+{% if book.notice %}<p class="hint err">{{ book.notice }}</p>{% endif %}
+
 
 {% if book.kind == "verifying" %}
   {% set pct = book.job.progress or 0 %}
@@ -79,7 +89,7 @@
             hx-confirm="Delete this book's alignment? Read-along stops working for it in the app.">Delete</button>
   </div>
 
-{% elif book.kind in ("failed", "rejected") %}
+{% elif book.kind == "failed" %}
   <p class="hint err">{{ book.message or "That didn't work." }}</p>
   {{ upload("Try another epub…") }}
 
@@ -89,5 +99,24 @@
   {% else %}
     <span class="muted">—</span>
   {% endif %}
+{% endif %}
+{% if not book.polling %}
+  <details class="book-menu">
+    <summary aria-label="More for this book" title="More">⋯</summary>
+    <div class="book-menu-items">
+      <form class="upload-form" hx-post="{{ base }}/import" hx-encoding="multipart/form-data"
+            hx-trigger="change" hx-target="#book-{{ book.rating_key }}" hx-swap="outerHTML">
+        <label class="button secondary file-button">
+          Upload alignment JSON…
+          <input type="file" name="alignment" accept=".json,application/json">
+        </label>
+        <span class="uploading muted">Uploading…</span>
+      </form>
+      <p class="hint">
+        A finished alignment made elsewhere (<code>bookalign.py</code>'s output) from this
+        book's audio. It replaces any alignment the book has; nothing needs to run.
+      </p>
+    </div>
+  </details>
 {% endif %}
 </div>

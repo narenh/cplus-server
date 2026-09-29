@@ -382,8 +382,8 @@ form.card, .card form { max-width: 760px; }
 label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
 label.check { font-weight: 400; display: flex; align-items: center; gap: 8px; }
 
-input[type=text], input[type=url], input[type=password], input[type=number], select,
-textarea {
+input[type=text], input[type=url], input[type=password], input[type=number],
+input[type=search], select, textarea {
   width: 100%; min-height: var(--control-h); padding: 7px 10px;
   border: 1px solid var(--line); border-radius: var(--radius-control);
   background: var(--bg); color: var(--ink); font: inherit;
@@ -394,7 +394,7 @@ textarea {
    :focus-visible ring above) also lifts the fill to the panel colour, which
    reads as the field coming forward out of its own inset. */
 input[type=text]:hover, input[type=url]:hover, input[type=password]:hover,
-input[type=number]:hover, select:hover, textarea:hover {
+input[type=number]:hover, input[type=search]:hover, select:hover, textarea:hover {
   border-color: var(--muted);
 }
 input:focus, select:focus, textarea:focus { background: var(--panel); }
@@ -543,6 +543,7 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 }
 .filter { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
 .filter select { width: auto; }
+.filter input[type=search] { width: auto; flex: 1; max-width: 320px; }
 
 /* A row's controls on one line — a link and an icon button are different
    elements with different default display, and side by side is how they read
@@ -1011,6 +1012,26 @@ table.preview .dropped-by { color: var(--err); }
 .books td.readalong { width: 46%; min-width: 280px; }
 .book-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .book-status .hint { margin: 4px 0; }
+
+/* The per-book "⋯" menu. The button sits in the cell's top-right corner; the
+   panel opens in the cell's own flow, under whatever the cell shows, because a
+   floating popover would be clipped by .table-scroll. */
+.book-status { position: relative; padding-right: 34px; min-height: 28px; }
+.book-menu > summary {
+  position: absolute; top: 0; right: 0;
+  list-style: none; cursor: pointer; user-select: none;
+  width: 28px; height: 28px; border-radius: var(--radius-control);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 18px; line-height: 1;
+}
+.book-menu > summary::-webkit-details-marker { display: none; }
+.book-menu > summary:hover, .book-menu[open] > summary { color: var(--ink); background: var(--bg); }
+.book-menu-items {
+  margin: 8px 0 4px; padding: 10px 12px;
+  background: var(--panel-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+}
+.book-menu-items .hint { margin: 8px 0 0; }
 .status-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
 .pager { justify-content: center; }
 

@@ -576,3 +576,171 @@ def test_chunk_bytes_are_reproducible() -> None:
 
 def test_result_fixture_is_valid() -> None:
     assert result_payload()["version"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Uploading a finished alignment
+# --------------------------------------------------------------------------- #
+
+
+def bookalign_output(*, duration: float = 37500.0, sentences: int = 6) -> bytes:
+    """What ``bookalign.py`` writes: no per-file offsets, no authors, extra fields."""
+    payload = result_payload(sentences=sentences)
+    payload["book"] = {"title": "The Hobbit", "epub": "The Hobbit - J. R. R. Tolkien.epub"}
+    payload["audio"] = {"file": "The Hobbit.mp3", "duration": duration}
+    for sentence in payload["sentences"]:
+        if sentence["start"] is not None:
+            sentence.update(min_score=-2.1, worst="hobbit")
+    payload["stats"].update(device="mps", model="MahmoudAshraf/mms-300m-1130-forced-aligner")
+    return json.dumps(payload).encode()
+
+
+async def import_json(
+    client: httpx.AsyncClient, data: bytes, name: str = "hobbit.alignment.json"
+) -> httpx.Response:
+    return await client.post(
+        f"/admin/audiobooks/books/{ALBUM_KEY}/import",
+        files={"alignment": (name, data, "application/json")},
+    )
+
+
+async def test_a_bookalign_json_is_imported_without_the_aligner_at_all(
+    client, db, connected, plex, monkeypatch
+) -> None:
+    monkeypatch.delenv(ALIGN_DIR_ENV, raising=False)  # read-along not even set up
+    await signed_in(client, db)
+    response = await import_json(client, bookalign_output())
+    assert response.status_code == 200
+    assert "✓ Ready" in response.text and "5 of 6 sentences" in response.text
+
+    db.expire_all()
+    alignment = (await db.execute(select(AudiobookAlignment))).scalar_one()
+    assert alignment.tracks == [
+        {"n": 0, "rating_key": "502", "part_id": "9001", "offset": 0.0, "duration": 37500.0}
+    ]
+    assert alignment.epub_title == "The Hobbit"
+    [job] = await jobs(db)
+    assert job.status == AudiobookJobStatus.DONE
+    assert job.message == "Imported from hobbit.alignment.json. 5 of 6 sentences aligned."
+    chunk = (await db.execute(select(AudiobookChunk))).scalars().first()
+    assert decode_chunk(chunk.data)[0]["text"] == "Sentence 0."
+
+
+async def test_an_import_replaces_the_existing_alignment_under_a_new_version(
+    client, db, connected, plex
+) -> None:
+    await signed_in(client, db)
+    await import_json(client, bookalign_output())
+    db.expire_all()
+    first = (await db.execute(select(AudiobookAlignment))).scalar_one().id
+    await import_json(client, bookalign_output(sentences=8))
+    db.expire_all()
+    second = (await db.execute(select(AudiobookAlignment))).scalar_one()
+    assert second.id != first
+    assert second.stats["sentences"] == 8
+
+
+async def test_an_alignment_of_different_audio_is_refused(client, db, connected, plex) -> None:
+    await signed_in(client, db)
+    response = await import_json(client, bookalign_output(duration=3346.0))
+    assert "56 min of audio, but Plex has 10 h 25 min" in response.text
+    assert await jobs(db) == []
+
+
+async def test_a_many_file_album_needs_the_alignments_own_offsets(
+    client, db, connected, plex
+) -> None:
+    two_files = children_payload()
+    first = two_files["MediaContainer"]["Metadata"][0]
+    second = json.loads(json.dumps(first))
+    first["duration"] = first["Media"][0]["Part"][0]["duration"] = 20_000_000
+    second.update(ratingKey="503", index=2)
+    second["duration"] = second["Media"][0]["Part"][0]["duration"] = 17_500_000
+    second["Media"][0]["Part"][0].update(id=9002, key="/library/parts/9002/1/file.mp3")
+    two_files["MediaContainer"]["Metadata"].append(second)
+    plex.get(f"{PLEX_SERVER_URL}/library/metadata/{ALBUM_KEY}/children").mock(
+        return_value=httpx.Response(200, json=two_files)
+    )
+    await signed_in(client, db)
+
+    refused = await import_json(client, bookalign_output())
+    assert "Plex has 2 files for this book" in refused.text
+
+    with_offsets = json.loads(bookalign_output())
+    with_offsets["audio"]["tracks"] = [
+        {"n": 0, "offset": 0.0, "duration": 19999.95},
+        {"n": 1, "offset": 19999.95, "duration": 17500.05},
+    ]
+    accepted = await import_json(client, json.dumps(with_offsets).encode())
+    assert "✓ Ready" in accepted.text
+    db.expire_all()
+    alignment = (await db.execute(select(AudiobookAlignment))).scalar_one()
+    assert [t["offset"] for t in alignment.tracks] == [0.0, 19999.95]
+    assert [t["rating_key"] for t in alignment.tracks] == ["502", "503"]
+
+
+@pytest.mark.parametrize(
+    ("data", "complaint"),
+    [
+        (b"{not json", "not JSON"),
+        (json.dumps({"version": 2, "sentences": []}).encode(), "not a version 1 alignment"),
+        (
+            json.dumps({"version": 1, "sentences": [{"i": 1, "text": "x"}]}).encode(),
+            "sentence 0 is missing or out of order",
+        ),
+        (
+            json.dumps(
+                {
+                    "version": 1,
+                    "audio": {"duration": 37500.0},
+                    "sentences": [
+                        {"i": 0, "sec": 0, "para": 0, "text": "x", "start": 9.0, "end": 3.0}
+                    ],
+                }  # fmt: skip
+            ).encode(),
+            "impossible times",
+        ),
+    ],
+)
+async def test_something_that_is_not_an_alignment_is_refused(
+    client, db, connected, plex, data: bytes, complaint: str
+) -> None:
+    await signed_in(client, db)
+    response = await import_json(client, data)
+    assert complaint in response.text
+    assert await jobs(db) == []
+
+
+async def test_importing_waits_for_a_job_in_flight(
+    client, db, connected, plex, paths: AlignPaths
+) -> None:
+    sidecar_up(paths)
+    await signed_in(client, db)
+    await upload(client, make_epub())
+    response = await import_json(client, bookalign_output())
+    assert "Cancel that first" in response.text
+    assert len(await jobs(db)) == 1
+
+
+async def test_the_menu_is_offered_except_while_a_job_is_in_flight(
+    client, db, connected, plex, paths: AlignPaths
+) -> None:
+    sidecar_up(paths)
+    await signed_in(client, db)
+    page = await client.get("/admin/audiobooks")
+    assert 'class="book-menu"' in page.text and "Upload alignment JSON…" in page.text
+    verifying = await upload(client, make_epub())
+    assert "book-menu" not in verifying.text
+
+
+async def test_a_refused_upload_on_a_finished_book_still_shows_it_finished(
+    client, db, connected, plex, paths: AlignPaths
+) -> None:
+    sidecar_up(paths)
+    await signed_in(client, db)
+    await import_json(client, bookalign_output())
+    refused_json = await import_json(client, b"{not json")
+    assert "not JSON" in refused_json.text and "✓ Ready" in refused_json.text
+    refused_epub = await upload(client, make_epub(language="fr"))
+    assert "Only English" in refused_epub.text and "✓ Ready" in refused_epub.text
+    assert "Try another epub" not in refused_epub.text

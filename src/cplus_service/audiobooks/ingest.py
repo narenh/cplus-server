@@ -3,6 +3,12 @@
 Clients read a book a chunk at a time (about ten minutes of audio each) rather
 than as one document, so opening a 40-hour book costs the same as opening a
 short one and seeking is one small request.
+
+Alignments arrive two ways: from the sidecar when a job finishes, and uploaded
+by an admin (an alignment already made elsewhere, e.g. with ``bookalign.py`` on
+a faster machine). Both are the same ``version: 1`` document and go through the
+same checks; an upload is additionally matched against the album's audio in
+Plex, since nothing else ties it to that book.
 """
 
 from __future__ import annotations
@@ -24,9 +30,8 @@ CHUNK_SECONDS = 600.0
 #: narrator skipped has no times to measure by.
 CHUNK_MAX_SENTENCES = 800
 
-#: What each sentence keeps for clients. The scoring fields (``score``,
-#: ``min_score``, ``worst``, ``wps``) stay too: they are small and they are what
-#: an admin-facing quality view would read.
+#: What each sentence keeps for clients. ``wps`` and ``score`` stay too: they are
+#: small, and they are what an admin-facing quality view would read.
 SENTENCE_FIELDS = ("i", "sec", "para", "text", "start", "end", "flags", "wps", "score")
 
 
@@ -34,16 +39,109 @@ class InvalidResult(ValueError):
     pass
 
 
-def load_result(path: Path) -> dict[str, Any]:
+#: The largest alignment an admin may upload. The Hobbit's is ~1.5 MB; a
+#: 40-hour book's perhaps 8.
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def parse_result(data: bytes) -> dict[str, Any]:
+    """A ``version: 1`` alignment document, checked well enough to store and serve."""
     try:
-        result = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise InvalidResult(f"unreadable result: {exc}") from exc
+        result = json.loads(data)
+    except ValueError as exc:
+        raise InvalidResult(f"not JSON ({exc})") from exc
     if not isinstance(result, dict) or result.get("version") != 1:
         raise InvalidResult("not a version 1 alignment")
-    if not isinstance(result.get("sentences"), list) or not result["sentences"]:
+    sentences = result.get("sentences")
+    if not isinstance(sentences, list) or not sentences:
         raise InvalidResult("the alignment has no sentences")
+    for index, sentence in enumerate(sentences):
+        if not isinstance(sentence, dict) or sentence.get("i") != index:
+            raise InvalidResult(f"sentence {index} is missing or out of order")
+        if not isinstance(sentence.get("text"), str):
+            raise InvalidResult(f"sentence {index} has no text")
+        if not isinstance(sentence.get("para"), int) or not isinstance(sentence.get("sec"), int):
+            raise InvalidResult(f"sentence {index} has no paragraph or section")
+        start, end = sentence.get("start"), sentence.get("end")
+        if (start is None) != (end is None):
+            raise InvalidResult(f"sentence {index} has a start or an end, not both")
+        if start is not None and (not _number(start) or not _number(end) or end < start):
+            raise InvalidResult(f"sentence {index} has impossible times")
+    if not isinstance(result.get("sections", []), list):
+        raise InvalidResult("sections is not a list")
     return result
+
+
+def load_result(path: Path) -> dict[str, Any]:
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise InvalidResult(f"unreadable result: {exc}") from exc
+    return parse_result(data)
+
+
+def _span(seconds: float) -> str:
+    minutes = round(seconds / 60)
+    return f"{minutes // 60} h {minutes % 60} min" if minutes >= 60 else f"{minutes} min"
+
+
+def import_tracks(result: dict[str, Any], tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Where each of the album's files starts on the uploaded alignment's timeline.
+
+    Refuses an alignment made from different audio: its duration has to match
+    what Plex has for the album (to within half a percent, or five seconds for a
+    short book). A many-file album also needs the per-file offsets the aligner
+    records; without them there is no telling where one file ends and the next
+    begins, and a guess from Plex's durations would drift.
+    """
+    audio = result.get("audio") or {}
+    duration = audio.get("duration")
+    if not _number(duration) or duration <= 0:
+        raise InvalidResult("the alignment doesn't say how long its audio is")
+    plex_total = sum(float(t.get("duration") or 0) for t in tracks)
+    if abs(duration - plex_total) > max(5.0, 0.005 * plex_total):
+        raise InvalidResult(
+            f"it was made from {_span(duration)} of audio, but Plex has {_span(plex_total)}"
+            " for this book — is it for a different book or recording?"
+        )
+    last_end = max((s["end"] for s in result["sentences"] if s.get("end") is not None), default=0)
+    if last_end > duration + 2:
+        raise InvalidResult("its sentences run past the end of its own audio")
+
+    given = audio.get("tracks")
+    if isinstance(given, list) and len(given) == len(tracks):
+        out = []
+        for n, track in enumerate(given):
+            if not isinstance(track, dict) or not _number(track.get("offset")):
+                raise InvalidResult(f"file {n + 1} has no offset")
+            out.append(
+                {"n": n, "offset": float(track["offset"]), "duration": track.get("duration")}
+            )
+        return out
+    if len(tracks) == 1:
+        return [{"n": 0, "offset": 0.0, "duration": float(duration)}]
+    raise InvalidResult(
+        f"Plex has {len(tracks)} files for this book, and the alignment doesn't say where each"
+        " one starts. Only an alignment made from all of them, in order, can be used."
+    )
+
+
+def summary(stats: dict[str, Any]) -> str | None:
+    """"6,320 of 6,411 sentences aligned.", plus a warning when that is under half."""
+    total, aligned = stats.get("sentences"), stats.get("aligned")
+    if not total or aligned is None:
+        return None
+    text = f"{aligned:,} of {total:,} sentences aligned."
+    if aligned / total < 0.5:
+        text += (
+            " Less than half the book was found in the audio — check this is the right"
+            " edition."
+        )
+    return text
 
 
 def chunk_sentences(sentences: list[dict[str, Any]]) -> list[dict[str, Any]]:

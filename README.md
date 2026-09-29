@@ -172,7 +172,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 1035 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 1046 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -737,6 +737,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
 | `GET /admin/audiobooks`, `/runtime`, `POST .../runtime/enable`, `.../runtime/disable` | The Audiobooks tab and its read-along card |
 | `POST /admin/audiobooks/books/{ratingKey}/align`, `/cancel`, `/delete`, `GET .../status` | One book: upload an epub, cancel, forget the alignment, poll |
+| `POST /admin/audiobooks/books/{ratingKey}/import` | Upload a finished alignment made elsewhere (the book's "⋯" menu) |
 | `GET /admin/audiobooks/cover/{ratingKey}` | Cover art, fetched with the admin token so the page never holds it |
 
 The three proxy/verify endpoints answer **JSON by default** and HTML with
@@ -1390,6 +1391,21 @@ The progress bar is sized before the job starts from the book's duration and
 this host's measured speed per stage, and switches to the live rate as each
 stage runs. It never moves backwards, and a job resumed after a restart picks up
 at the percent it had reached.
+
+### Uploading a finished alignment
+
+A book's "⋯" menu takes an alignment made elsewhere — the output of
+`bookalign.py` on a faster machine, say — and stores it as if the aligner had
+just finished it. Nothing runs, so it works with read-along switched off. It
+has to be the same `version: 1` document, and it has to be of this book's
+audio: its duration must match what Plex has for the album to within half a
+percent (five seconds for a short book), which is what catches an alignment
+dropped on the wrong book. `bookalign.py` aligns one audio file, so its output
+can go on a single-file album as-is; an album with several files needs the
+per-file offsets (`audio.tracks`) the sidecar records, since nothing else says
+where one file ends and the next begins. It replaces any alignment the book
+already has, under a new version. A refused upload leaves the book as it was,
+and the cell says why above the book's current state.
 
 ### Restarts and failures
 

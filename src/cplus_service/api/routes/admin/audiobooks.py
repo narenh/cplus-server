@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -32,6 +33,15 @@ from cplus_align.epub import inspect_epub
 from cplus_align.protocol import STATUS_STALE
 
 from ....audiobooks import runtime as aligner
+from ....audiobooks.ingest import (
+    MAX_IMPORT_BYTES,
+    InvalidResult,
+    build_alignment,
+    import_tracks,
+    parse_result,
+    replace_alignment,
+    summary,
+)
 from ....audiobooks.jobs import (
     MAX_EPUB_BYTES,
     alignments_for,
@@ -83,10 +93,14 @@ class BookState:
     """Everything one status cell renders from."""
 
     rating_key: str
-    kind: str  # none | rejected | verifying | queued | running | ready | failed
+    kind: str  # none | verifying | queued | running | ready | failed
     job: AudiobookJob | None = None
     alignment: AudiobookAlignment | None = None
     message: str | None = None
+    #: Why an upload was just refused. Shown above the book's actual state,
+    #: never instead of it: a bad file dropped on a finished book leaves the
+    #: book finished, and the cell has to keep saying so.
+    notice: str | None = None
     position: int | None = None
     stale: bool = False
     stalled_minutes: int | None = None
@@ -112,18 +126,20 @@ async def _book_state(
     alignment: AudiobookAlignment | None = None,
     lookup: bool = True,
     stale: bool = False,
-    message: str | None = None,
-    rejected: bool = False,
+    notice: str | None = None,
 ) -> BookState:
     if lookup:
         job = (await latest_jobs(db, server_id, [rating_key])).get(rating_key)
         alignment = (await alignments_for(db, server_id, [rating_key])).get(rating_key)
     state = BookState(
-        rating_key, "none", job=job, alignment=alignment, stale=stale, can_align=runtime_ready
+        rating_key,
+        "none",
+        job=job,
+        alignment=alignment,
+        stale=stale,
+        can_align=runtime_ready,
+        notice=notice,
     )
-    if rejected:
-        state.kind, state.message = "rejected", message
-        return state
     if job is not None and job.is_active:
         state.kind = AudiobookJobStatus(job.status).value
         if job.status in (AudiobookJobStatus.QUEUED, AudiobookJobStatus.RUNNING):
@@ -334,13 +350,13 @@ async def book_status(
     return await _cell(request, db, rating_key)
 
 
-async def _read_upload(upload: UploadFile) -> bytes | None:
-    """The upload's bytes, or ``None`` if it is over the size cap."""
+async def _read_upload(upload: UploadFile, limit: int = MAX_EPUB_BYTES) -> bytes | None:
+    """The upload's bytes, or ``None`` if it is over ``limit``."""
     chunks: list[bytes] = []
     size = 0
     while chunk := await upload.read(1 << 20):
         size += len(chunk)
-        if size > MAX_EPUB_BYTES:
+        if size > limit:
             return None
         chunks.append(chunk)
     return b"".join(chunks)
@@ -358,7 +374,7 @@ async def align_book(
     """Take an epub for this book: check it, then hand it to the aligner."""
 
     async def reject(message: str) -> Response:
-        return await _cell(request, db, rating_key, message=message, rejected=True)
+        return await _cell(request, db, rating_key, notice=message)
 
     config = await get_config(db)
     paths = aligner.paths()
@@ -397,6 +413,90 @@ async def align_book(
     logger.info(
         "audiobook %s (%s): queued job %s for verification", album.title, rating_key, job.id
     )
+    return await _cell(request, db, rating_key)
+
+
+@router.post("/books/{rating_key}/import", response_class=HTMLResponse)
+async def import_alignment(
+    request: Request,
+    db: DbDep,
+    state: StateDep,
+    admin: AdminPageDep,
+    rating_key: str,
+    alignment: UploadFile,
+) -> Response:
+    """Store an alignment made elsewhere — ``bookalign.py`` on a faster machine, say.
+
+    Needs nothing from the aligner: nothing is computed, so it works with
+    read-along switched off. The upload is checked against the album's audio in
+    Plex (see :func:`~cplus_service.audiobooks.ingest.import_tracks`), and
+    recorded as a job that finished the moment it started, so the book's
+    history says where its alignment came from.
+    """
+
+    async def reject(message: str) -> Response:
+        return await _cell(request, db, rating_key, notice=message)
+
+    config = await get_config(db)
+    plex = _plex(config, state)
+    server_id = config.plex_server_client_identifier
+    if plex is None or not server_id:
+        return await reject("Not connected to a Plex server.")
+    active = (await latest_jobs(db, server_id, [rating_key])).get(rating_key)
+    if active is not None and active.is_active:
+        return await reject("This book is being aligned. Cancel that first.")
+
+    data = await _read_upload(alignment, MAX_IMPORT_BYTES)
+    if data is None:
+        return await reject(f"That file is over {MAX_IMPORT_BYTES // (1024 * 1024)} MB.")
+    try:
+        result = await asyncio.to_thread(parse_result, data)
+    except InvalidResult as exc:
+        return await reject(f"That isn't an alignment this can use: {exc}.")
+
+    try:
+        album = await plex.album(rating_key)
+        parts = await plex.album_parts(rating_key) if album else []
+    except PlexServerError as exc:
+        return await reject(f"Could not reach the Plex server: {exc}")
+    if album is None:
+        return await reject("Plex no longer has this album.")
+    if not parts:
+        return await reject("Plex lists no audio files for this album.")
+    tracks = track_payload(parts)
+    try:
+        offsets = import_tracks(result, tracks)
+    except InvalidResult as exc:
+        return await reject(f"That alignment doesn't fit this book: {exc}")
+
+    result["audio"] = {**(result.get("audio") or {}), "tracks": offsets}
+    book = result.get("book") or {}
+    now = datetime.now(UTC)
+    name = (alignment.filename or "an upload").rsplit("/", 1)[-1][:120]
+    job = AudiobookJob(
+        plex_server_id=server_id,
+        rating_key=album.rating_key,
+        library_id=album.library_id,
+        title=album.title,
+        author=album.author,
+        status=AudiobookJobStatus.DONE,
+        progress=100.0,
+        secret=secrets.token_urlsafe(32),
+        tracks=tracks,
+        epub_title=book.get("title"),
+        epub_author=", ".join(book.get("authors") or []) or None,
+        created_by=admin.id,
+        started_at=now,
+        finished_at=now,
+    )
+    db.add(job)
+    await db.flush()
+    stored = await asyncio.to_thread(build_alignment, job, result)
+    await replace_alignment(db, stored)
+    job.message = " ".join(
+        part for part in (f"Imported from {name}.", summary(stored.stats or {})) if part
+    )
+    logger.info("audiobook %s (%s): imported alignment %s", album.title, rating_key, name)
     return await _cell(request, db, rating_key)
 
 
