@@ -66,6 +66,7 @@ def _progress_json(row: AudiobookProgress | None) -> dict[str, Any] | None:
         "finished": row.finished,
         "listened_at": _aware(row.listened_at).isoformat(),
         "device": row.device,
+        "speed": row.speed,
     }
 
 
@@ -260,6 +261,7 @@ class ProgressIn(BaseModel):
     track_offset: float | None = Field(default=None, ge=0)
     finished: bool = False
     device: str | None = Field(default=None, max_length=128)
+    speed: float | None = Field(default=None, ge=0.5, le=3.0, description="Playback rate")
 
 
 async def _check_album(
@@ -342,6 +344,7 @@ async def put_progress(
     row.track_offset = body.track_offset
     row.finished = body.finished
     row.device = body.device
+    row.speed = body.speed
     row.listened_at = listened
     row.updated_at = now
     await db.flush()

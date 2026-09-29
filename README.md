@@ -1513,7 +1513,8 @@ the index.
 **Progress** is per user and book, stored whether or not the book is aligned
 (Plex's own progress for audiobooks is unreliable). `PUT` takes
 `{"position", "listened_at", "track_rating_key"?, "track_offset"?, "finished"?,
-"device"?}`. `listened_at` is when the listener was at that position, by the
+"device"?, "speed"?}`, where `speed` is the playback rate (0.5–3) the listener
+chose for this book and is replaced along with everything else. `listened_at` is when the listener was at that position, by the
 device's clock, and the newest listen wins. A write older than what is stored
 answers `{"applied": false, "progress": <what is stored>}`, so a device that
 was behind can jump to where the listener got to elsewhere. Last-to-arrive

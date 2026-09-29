@@ -289,6 +289,16 @@ async def test_progress_is_stored_and_listed(
     assert got["progress"]["track_rating_key"] == "502"
     listed = (await client.get("/audiobooks", headers=plex_headers)).json()["books"][0]
     assert listed["progress"]["device"] == "Living room"
+    assert listed["progress"]["speed"] is None
+
+
+async def test_speed_rides_on_progress(client, db, connected, listener, plex, plex_headers) -> None:
+    await aligned(db)
+    await put(client, plex_headers, position=10, minutes=0, speed=1.25)
+    got = (await client.get("/audiobooks/501/progress", headers=plex_headers)).json()
+    assert got["progress"]["speed"] == 1.25
+    too_fast = await put(client, plex_headers, position=20, minutes=1, speed=9)
+    assert too_fast.status_code == 422
 
 
 async def test_the_newest_listen_wins_not_the_last_write(

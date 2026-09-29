@@ -826,3 +826,6 @@ class AudiobookProgress(Base):
     listened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     device: Mapped[str | None] = mapped_column(String(128))
+    #: Playback rate the listener chose for this book; rides on the newest
+    #: listen like everything else here. ``None`` until a client sends one.
+    speed: Mapped[float | None] = mapped_column(Float)
