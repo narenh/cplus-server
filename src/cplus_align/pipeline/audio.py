@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -46,8 +48,32 @@ def _header_arg(headers: dict[str, str]) -> list[str]:
     return ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())]
 
 
+def _resolve(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """Swap the URL's hostname for its IP, keeping the original in a Host header.
+
+    The static ffmpeg in the runtime can segfault (exit -11) inside its own
+    hostname lookup, so name resolution happens here, in Python, instead.
+    """
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname
+    if not host:
+        return url, headers
+    try:
+        ip = socket.getaddrinfo(host, parts.port or 80, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+    except OSError:
+        return url, headers
+    if ip == host:
+        return url, headers
+    netloc = f"{ip}:{parts.port}" if parts.port else ip
+    return (
+        urllib.parse.urlunsplit(parts._replace(netloc=netloc)),
+        {**headers, "Host": parts.netloc.rpartition("@")[2]},
+    )
+
+
 def read_sample(url: str, headers: dict[str, str], offset: float, seconds: float) -> np.ndarray:
     """``seconds`` of 16 kHz mono int16 audio starting near ``offset`` in one track."""
+    url, headers = _resolve(url, headers)
     cmd = [
         ffmpeg_exe(), "-nostdin", "-loglevel", "error",
         *_header_arg(headers),
