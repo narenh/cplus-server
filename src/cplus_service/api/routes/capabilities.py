@@ -44,6 +44,15 @@ async def capabilities(db: DbDep) -> dict[str, bool]:
     A dict rather than a model with fixed fields, so a later version can add a
     capability without a client that has never heard of it seeing a shape it
     does not recognise.
+
+    ``playback_events`` is the Playback tab's master switch, read the same way:
+    the app sends ``POST /playback/events`` only while it is true. It does not
+    also require a webhook to be configured — events are accepted and shown on
+    the Playback tab with nowhere to go, which is how an admin watches them
+    arrive before writing the automation that will receive them.
     """
     config = await get_config(db)
-    return {"notifications": bool(config.notifications_enabled)}
+    return {
+        "notifications": bool(config.notifications_enabled),
+        "playback_events": bool(config.playback_events_enabled),
+    }

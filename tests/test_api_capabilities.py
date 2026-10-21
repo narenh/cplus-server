@@ -23,7 +23,7 @@ async def test_a_fresh_install_reports_notifications_off(
     response = await client.get("/capabilities")
 
     assert response.status_code == 200
-    assert response.json() == {"notifications": False}
+    assert response.json() == {"notifications": False, "playback_events": False}
 
 
 async def test_it_reports_notifications_on_once_the_admin_enables_them(
@@ -33,7 +33,7 @@ async def test_it_reports_notifications_on_once_the_admin_enables_them(
 
     response = await client.get("/capabilities")
 
-    assert response.json() == {"notifications": True}
+    assert response.json()["notifications"] is True
 
 
 async def test_it_needs_no_plex_token(
@@ -72,4 +72,29 @@ async def test_it_tracks_the_master_switch_and_not_the_relay_key(
     """
     await enable_notifications(db, configured, api_key=None)
 
-    assert (await client.get("/capabilities")).json() == {"notifications": True}
+    assert (await client.get("/capabilities")).json()["notifications"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Playback events
+# --------------------------------------------------------------------------- #
+
+
+async def test_playback_events_are_off_on_a_fresh_install(
+    client: httpx.AsyncClient,
+) -> None:
+    """The app reads this before sending a single event, so off must be the default."""
+    assert (await client.get("/capabilities")).json()["playback_events"] is False
+
+
+async def test_it_reports_playback_events_once_the_admin_switches_them_on(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config
+) -> None:
+    configured.playback_events_enabled = True
+    await db.commit()
+
+    body = (await client.get("/capabilities")).json()
+
+    assert body["playback_events"] is True
+    # Independent switches: one does not drag the other along.
+    assert body["notifications"] is False

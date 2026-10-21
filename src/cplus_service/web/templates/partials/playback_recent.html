@@ -1,0 +1,47 @@
+{# The recent-events list, from memory. Polls itself every few seconds, and is
+   marked ``polling`` so each refresh swaps in without the just-saved tint.
+
+   Also carried out of band by the test button's response (``oob``), so a test
+   event shows up here the moment its results do rather than at the next poll.
+
+   One block per event, never a table (see CLAUDE.md): time and event on the
+   first line, then the title, then who and where, wrapping as narrow as a
+   phone needs. #}
+<div id="playback-recent" class="polling"
+     hx-get="/admin/playback/recent" hx-trigger="every 5s" hx-swap="outerHTML"
+     {% if oob %}hx-swap-oob="true"{% endif %}>
+  {% if not recent %}
+    <p class="empty">Nothing received since the server started.</p>
+  {% else %}
+    <ul class="playback-recent">
+      {% for entry in recent %}
+        <li>
+          <div class="playback-recent-head">
+            <span class="badge">{{ entry.event|replace("_", " ") }}</span>
+            {% if entry.test %}<span class="badge test">test</span>{% endif %}
+            <span class="muted">{{ entry.received_at|when }}</span>
+          </div>
+          <div class="playback-recent-title">
+            {{ entry.title }}
+            {% if entry.chapter_title %}
+              <span class="muted">· {{ entry.chapter_title }}</span>
+            {% endif %}
+            {% if entry.watched is true %}
+              <span class="muted">· watched</span>
+            {% elif entry.watched is false %}
+              <span class="muted">· not finished</span>
+            {% endif %}
+          </div>
+          <div class="playback-recent-meta muted">
+            {{ entry.room or "No room set" }} · {{ entry.user or "unknown user" }}
+            {% if entry.deliveries is none %}
+              · sending…
+            {% elif entry.deliveries %}
+              · delivered to {{ entry.delivered }} of {{ entry.deliveries|length }}
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>

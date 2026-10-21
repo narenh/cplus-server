@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# Four cards, in the order an admin setting this up meets them: switch it on,
+   say where events go, read what they look like, watch them arrive. The last
+   two are what stays useful afterwards — this is the page kept open beside
+   Home Assistant while an automation is being written. #}
+
+<section class="card">
+  <h2>Playback events</h2>
+  {% include "partials/playback_switch.html" %}
+  <p class="hint">
+    Canopy+'s player reports what it is doing — start, pause, resume, stop, and
+    the moments Plex's own webhooks never mention: each chapter change, the
+    intro starting and ending, the credits beginning. Each Apple TV names
+    itself by the room set in Canopy+'s settings. This server forwards every
+    event to every webhook below, for home automations: lights down on
+    <code>started</code>, back up on <code>credits_started</code>.
+  </p>
+  <p class="hint">
+    The app checks <code>GET /capabilities</code> and only sends while this is
+    on. Nothing is stored: the list at the bottom of this page is kept in
+    memory and is gone after a restart.
+  </p>
+</section>
+
+{% include "partials/playback_webhooks.html" %}
+
+<section class="card">
+  <h2>What a webhook receives</h2>
+  <p class="hint">
+    One <code>POST</code> per event, with a JSON body. Every key is always
+    present; the ones that do not apply to an event are <code>null</code>.
+    Delivery is attempted once, with a {{ timeout }}-second limit, and never
+    retried — an automation that fires late is worse than one that does not.
+  </p>
+
+  <ul class="playback-fields">
+    <li><code>event</code> — one of:
+      <ul class="playback-event-kinds">
+        {% for kind, description in events.items() %}
+          <li><code>{{ kind.value }}</code> <span class="muted">{{ description }}</span></li>
+        {% endfor %}
+      </ul>
+    </li>
+    <li><code>room</code> — the room set in Canopy+ on that Apple TV, or
+      <code>null</code> if it was never set.</li>
+    <li><code>client_id</code> — the Apple TV's Plex client identifier. Stable
+      per device; key on it if rooms are unset or two share a name.</li>
+    <li><code>position</code>, <code>duration</code> — seconds.</li>
+    <li><code>watched</code> — <code>stopped</code> only: whether the title was
+      played to the end or left past 90%.</li>
+    <li><code>chapter</code> — <code>chapter</code> only: <code>index</code>
+      (from 0), <code>title</code> (may be <code>null</code>) and
+      <code>start</code> in seconds.</li>
+    <li><code>item</code> — what is playing: <code>rating_key</code> (Plex's
+      id), <code>type</code> (<code>movie</code> or <code>episode</code>),
+      <code>title</code>, and for an episode <code>show_title</code>,
+      <code>season</code> and <code>episode</code>; <code>year</code> when
+      known.</li>
+    <li><code>user</code> — <code>name</code>, the Plex user whose app sent
+      it, and <code>profile</code> (usually empty).</li>
+    <li><code>received_at</code> — when this server received it, ISO 8601 in
+      UTC.</li>
+    <li><code>source</code> — always <code>canopy-plus</code>.</li>
+    <li><code>test</code> — <code>true</code> only for the “Send test event”
+      button above.</li>
+  </ul>
+
+  <p class="field-label">Example</p>
+  <pre class="payload-example">{{ example_json }}</pre>
+
+  <p class="hint">
+    In Home Assistant, add an automation with a <strong>Webhook</strong>
+    trigger, copy its URL into the list above, and read the body as
+    <code>trigger.json</code> — for example, a condition of
+    <code>{{ "{{ trigger.json.event == 'credits_started' and trigger.json.room == 'Living Room' }}" }}</code>.
+    Home Assistant webhooks accept only local-network requests by default,
+    which suits this server if it runs on the same network.
+  </p>
+</section>
+
+<section class="card">
+  <h2>Recent events</h2>
+  <p class="hint">
+    The last {{ recent_limit }} events this server received, newest first,
+    refreshed every few seconds. Kept in memory only.
+  </p>
+  {% include "partials/playback_recent.html" %}
+</section>
+
+{% endblock %}

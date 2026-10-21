@@ -621,6 +621,52 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .preview-title { font-size: 13px; font-weight: 600; }
 .preview-subtitle { font-size: 13px; color: var(--muted); }
 
+/* Playback --------------------------------------------------------------- */
+
+/* The webhook list and the recent-events list are both lists of blocks, not
+   tables: a webhook URL is long, and both have to read on a phone. Each item
+   is a row that wraps, with a hairline between items as .notify-types has. */
+.webhook-list, .playback-recent, .playback-fields {
+  list-style: none; padding: 0; margin: 0;
+}
+.webhook-list > li, .playback-recent > li {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.webhook-list > li:first-child, .playback-recent > li:first-child { padding-top: 0; }
+.webhook-list > li:last-child { border-bottom: none; }
+.webhook-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* The full URL, wrapped anywhere: a Home Assistant webhook id is one long
+   unbroken token and would otherwise push the card sideways. */
+.webhook-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px; overflow-wrap: anywhere;
+}
+.webhook-result { font-size: 13px; }
+.webhook-add { margin-top: 16px; }
+.webhook-add .row { margin-top: 4px; flex-wrap: nowrap; }
+.webhook-add input { flex: 1; min-width: 0; }
+
+.playback-recent > li { flex-direction: column; gap: 3px; }
+.playback-recent > li:last-child { border-bottom: none; }
+.playback-recent-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.playback-recent-title { font-weight: 600; overflow-wrap: anywhere; }
+.playback-recent-meta { font-size: 13px; }
+.badge.test { background: color-mix(in srgb, var(--filter) 20%, transparent); color: var(--filter); }
+
+.playback-fields > li { margin: 0 0 8px; font-size: 14px; max-width: 78ch; }
+.playback-event-kinds { list-style: none; padding: 0 0 0 14px; margin: 6px 0 0; }
+.playback-event-kinds li { margin: 0 0 4px; }
+/* The example body. Scrolls inside itself rather than widening the page, and
+   wraps nothing: it is meant to be copied, and JSON reads by its indentation. */
+.payload-example {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; line-height: 1.45;
+  background: var(--panel-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 12px 14px; margin: 0 0 14px; overflow-x: auto; max-width: 760px;
+}
+
 /* Rule builder ------------------------------------------------------------ */
 
 .rule {

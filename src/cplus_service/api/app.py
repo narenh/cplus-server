@@ -1,7 +1,8 @@
 """FastAPI application factory.
 
-Long-lived resources (the database engine and the three outbound HTTP clients —
-one for Prowlarr, one kept separate for Seerr, one for the notification relay)
+Long-lived resources (the database engine and the four outbound HTTP clients —
+one for Prowlarr, one kept separate for Seerr, one for the notification relay,
+one for playback-event webhooks)
 are created once per process in the lifespan and hung off ``app.state``.
 Nothing per-request owns them.
 """
@@ -40,6 +41,7 @@ from ..db.session import (
     get_config,
     session_scope,
 )
+from ..playback.forward import DELIVERY_TIMEOUT_SECONDS
 from ..settings import SEERR_URL_ENV, seerr_url
 from ..web import STATIC_DIR
 from .routes import (
@@ -50,6 +52,7 @@ from .routes import (
     home,
     internal,
     manager,
+    playback,
     push_devices,
     register,
     request,
@@ -109,6 +112,11 @@ def create_app(
         # but a hung connection would still pin a background task. Ordinary
         # HTTP/1.1 — the relay is the one that has to speak HTTP/2, to Apple.
         relay_http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+        # Playback-event webhooks: admin-typed URLs, usually a home automation
+        # hub on the LAN. Delivery also runs under an overall deadline of the
+        # same length (see cplus_service.playback.forward); this one bounds
+        # each phase so a dead host is given up on promptly.
+        playback_http = httpx.AsyncClient(timeout=httpx.Timeout(DELIVERY_TIMEOUT_SECONDS))
 
         if create_schema:
             await create_all(active_engine)
@@ -119,6 +127,7 @@ def create_app(
             http=http,
             seerr_http=seerr_http,
             relay_http=relay_http,
+            playback_http=playback_http,
         )
 
         async with session_scope(sessionmaker) as session:
@@ -161,6 +170,7 @@ def create_app(
             await http.aclose()
             await seerr_http.aclose()
             await relay_http.aclose()
+            await playback_http.aclose()
             if owns_engine:
                 await active_engine.dispose()
 
@@ -182,6 +192,7 @@ def create_app(
     app.include_router(grab.router)
     app.include_router(manager.router)
     app.include_router(push_devices.router)
+    app.include_router(playback.router)
     app.include_router(request.router)
     app.include_router(seerr.router)
     app.include_router(webhooks.router)

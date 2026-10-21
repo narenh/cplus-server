@@ -1185,7 +1185,7 @@ async def test_the_tabs_are_ordered_by_how_often_they_are_opened(
     page = await client.get("/admin/grabs")
 
     order = re.findall(r'<a href="(/admin/[a-z-]+)" class="[^"]*">', page.text)
-    assert order[:8] == [
+    assert order[:9] == [
         "/admin/grabs",
         "/admin/users",
         "/admin/quality-profiles",
@@ -1193,6 +1193,7 @@ async def test_the_tabs_are_ordered_by_how_often_they_are_opened(
         "/admin/libraries",
         "/admin/audiobooks",
         "/admin/notifications",
+        "/admin/playback",
         "/admin/config",
     ]
 

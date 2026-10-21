@@ -162,6 +162,19 @@ class Config(Base):
     #: and is replaced by pressing the button again.
     seerr_webhook_secret: Mapped[str | None] = mapped_column(String(128))
 
+    #: The master switch for playback events: whether ``POST /playback/events``
+    #: accepts anything, and what ``GET /capabilities`` tells the app.
+    #:
+    #: Off by default, like notifications, though for a smaller reason: nothing
+    #: leaves the admin's network unless they point a webhook outside it, but an
+    #: Apple TV posting on every pause to a server that forwards it nowhere is
+    #: traffic for nobody. The app reads the capability and stays quiet until
+    #: this is on. The URLs it forwards to are rows of
+    #: :class:`PlaybackWebhook`, not a column here, so adding one is an insert.
+    playback_events_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+
     #: The admin's own Plex auth token, kept from their most recent sign-in.
     #:
     #: Every other admin-facing use of Plex in this service resolves through
@@ -601,6 +614,28 @@ class ApnsDevice(Base):
     device_name: Mapped[str | None] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PlaybackWebhook(Base):
+    """One URL every playback event is forwarded to.
+
+    Typically a Home Assistant webhook trigger, which is why the URL is the
+    whole of the configuration: Home Assistant's webhook id *is* its
+    credential, carried in the path, so there is no header or secret to store
+    beside it. That also means the URL is treated like one — shown on the
+    Playback tab, because the admin has to be able to tell their webhooks
+    apart, but never written to the log in full. See
+    :func:`cplus_service.playback.forward.redact_url`.
+
+    Unique, because two rows with the same URL would fire the same automation
+    twice for every event, which nobody has ever wanted.
+    """
+
+    __tablename__ = "playback_webhooks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(String(2048), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class SeerrRequestNotice(Base):

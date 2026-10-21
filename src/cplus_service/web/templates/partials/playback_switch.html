@@ -1,0 +1,17 @@
+{# The Playback tab's master switch. Returned by POST /admin/playback/enabled,
+   so the checkbox always shows what the server saved rather than what was
+   clicked. Nothing else on the page depends on it — webhooks can be added and
+   tested with it off — so it swaps alone. #}
+<div id="playback-switch">
+  <label class="notify-master">
+    <input type="checkbox" name="enabled"
+           {% if config.playback_events_enabled %}checked{% endif %}
+           hx-post="/admin/playback/enabled"
+           hx-target="#playback-switch"
+           hx-swap="outerHTML">
+    <span>Accept playback events from Canopy+</span>
+  </label>
+  {% if not config.playback_events_enabled %}
+    <p class="readonly-value unset">Off — the app sends nothing, and anything posted is refused.</p>
+  {% endif %}
+</div>

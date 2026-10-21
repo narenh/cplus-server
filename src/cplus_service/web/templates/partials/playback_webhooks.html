@@ -1,0 +1,82 @@
+{# The webhook card, whole.
+
+   Returned by adding, removing and testing a webhook, so the list, each URL's
+   last result and the test summary always come back together. A list rather
+   than a table (see CLAUDE.md): a URL is long and a phone is narrow, so each
+   webhook is a block whose URL wraps and whose result sits underneath it.
+
+   The URL is shown in full — the admin has to be able to tell their webhooks
+   apart — but this is the only place it appears; the server log names a
+   webhook by host alone, because a Home Assistant webhook URL is its own
+   credential. #}
+<section class="card" id="playback-webhooks">
+  <h2>Webhooks</h2>
+
+  {% if not webhooks %}
+    <p class="empty">
+      No webhooks yet. Events are still accepted while the switch is on, and
+      appear under Recent events, but go nowhere.
+    </p>
+  {% else %}
+    <ul class="webhook-list">
+      {% for webhook in webhooks %}
+        {% set result = results.get(webhook.id) %}
+        <li>
+          <div class="webhook-copy">
+            <span class="webhook-url">{{ webhook.url }}</span>
+            <span class="webhook-result">
+              {% if not result %}
+                <span class="muted">Nothing sent yet.</span>
+              {% elif result.ok %}
+                <span class="ok">Delivered ({{ result.summary }})</span>
+                <span class="muted">· {{ result.event }} · {{ result.at|when }}</span>
+              {% else %}
+                <span class="err">Failed: {{ result.summary }}</span>
+                <span class="muted">· {{ result.event }} · {{ result.at|when }}</span>
+              {% endif %}
+            </span>
+          </div>
+          <form method="post" action="/admin/playback/webhooks/{{ webhook.id }}/delete"
+                hx-post="/admin/playback/webhooks/{{ webhook.id }}/delete"
+                hx-target="#playback-webhooks" hx-swap="outerHTML"
+                hx-confirm="Stop sending playback events to this webhook?">
+            <button type="submit" class="icon danger" title="Remove this webhook"
+                    aria-label="Remove this webhook">
+              {% include "partials/_trash_icon.html" with context %}
+            </button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <form class="webhook-add"
+        hx-post="/admin/playback/webhooks"
+        hx-target="#playback-webhooks" hx-swap="outerHTML">
+    <label for="playback-webhook-url">Add a webhook URL</label>
+    <div class="row">
+      <input type="url" id="playback-webhook-url" name="url" required
+             autocomplete="off"
+             placeholder="http://homeassistant.local:8123/api/webhook/…">
+      <button type="submit">Add</button>
+    </div>
+  </form>
+
+  <div class="row">
+    <button type="button" class="secondary"
+            hx-post="/admin/playback/test"
+            hx-target="#playback-webhooks"
+            hx-swap="outerHTML">Send test event</button>
+    {% if test_message %}
+      <span class="inline-result {{ 'ok' if test_ok else 'err' }}">{{ test_message }}</span>
+    {% else %}
+      <span class="inline-result muted">Sends the example below to every webhook, marked <code>"test": true</code>.</span>
+    {% endif %}
+  </div>
+</section>
+
+{% if include_recent %}
+  {% with oob = true %}
+    {% include "partials/playback_recent.html" %}
+  {% endwith %}
+{% endif %}

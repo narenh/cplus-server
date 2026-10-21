@@ -19,6 +19,7 @@ from . import (
     login,
     notifications,
     permissions,
+    playback,
     profiles,
     user_home,
 )
@@ -33,6 +34,7 @@ router.include_router(permissions.router)
 router.include_router(user_home.router)
 router.include_router(activity.router)
 router.include_router(notifications.router)
+router.include_router(playback.router)
 router.include_router(libraries.router)
 router.include_router(audiobooks.router)
 

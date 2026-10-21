@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ..audiobooks.access import PlexAccess
+from ..playback.forward import PlaybackLog
 
 
 @dataclass
@@ -56,6 +57,14 @@ class AppState:
     nothing is waiting on it, but a hung connection would still pin a
     background task."""
 
+    playback_http: httpx.AsyncClient
+    """Fourth client, for forwarding playback events to the admin's webhooks.
+
+    Separate because it posts to arbitrary URLs an admin typed in — a home
+    automation hub, usually — and should share no cookie jar with the clients
+    that hold a Prowlarr key or a Seerr session. Its own short timeout, too: see
+    :data:`~cplus_service.playback.forward.DELIVERY_TIMEOUT_SECONDS`."""
+
     pending_plex_logins: dict[int, PendingPlexLogin] = field(default_factory=dict)
     """In-flight webui sign-ins, keyed by plex.tv PIN id.
 
@@ -68,3 +77,7 @@ class AppState:
     plex_access: PlexAccess = field(default_factory=PlexAccess)
     """Which libraries each Plex user may see, asked of Plex as them and cached
     briefly. See :mod:`cplus_service.audiobooks.access`."""
+
+    playback: PlaybackLog = field(default_factory=PlaybackLog)
+    """The Playback tab's recent events and each webhook's last delivery
+    result. In memory only, by design: see :mod:`cplus_service.playback`."""

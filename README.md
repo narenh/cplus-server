@@ -172,7 +172,7 @@ the admin UI itself from being the softer target.
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 
-pytest                      # 1046 tests; no network, Prowlarr, Seerr or Plex needed
+pytest                      # 1128 tests; no network, Prowlarr, Seerr or Plex needed
 ruff check .
 
 export CPLUS_DB_PATH=./cplus.db
@@ -213,9 +213,11 @@ src/cplus_service/
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
   api/routes/           register, home, titles, tmdb_actions, grab, manager,
-                        request, seerr, webhooks
+                        request, seerr, webhooks, playback
   api/routes/admin/     the admin webui: config, profiles, actions,
-                        permissions, activity, login (Plex PIN flow)
+                        permissions, activity, playback, login (Plex PIN flow)
+  playback/             playback events: the body Canopy+ posts, forwarding it
+                        to the admin's webhooks, the in-memory recent list
   plex/client.py        plex.tv PIN flow, and the admin's own server (libraries,
                         collections, audiobook albums and their files)
   audiobooks/           read-along, cplus side: runtime state, jobs, the monitor
@@ -592,7 +594,7 @@ migration deletes, so nothing can prove what they were resolved against.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /capabilities` | none | What this instance has switched on, before anyone signs in. Today just `{"notifications": bool}` |
+| `GET /capabilities` | none | What this instance has switched on, before anyone signs in: `{"notifications": bool, "playback_events": bool}` |
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server` and `audiobooks` (whether there is a finished read-along book the caller can see); with `first_run=true`, bundles the Libraries seed and the caller's Home |
 | `GET /audiobooks` | cache + Plex | Finished read-along books in libraries the caller can see, with their progress. See [Audiobooks for clients](#audiobooks-for-clients) |
 | `GET /audiobooks/{ratingKey}` | cache + Plex | One book's index: files and their offsets, chapters, chunk time ranges, `version` |
@@ -605,6 +607,7 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /movies/tmdb/{tmdb_id}/actions` | cache | A movie with no IMDB id: nothing to search with, so Request only. Plain JSON, one line's shape |
 | `GET /tv/tmdb/{tmdb_id}/actions` | cache | A TV title: grab actions undecided, so Request only. Plain JSON, one line's shape |
 | `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /playback/events` | cache | One moment in an Apple TV's playback, forwarded to the admin's webhooks. 202 at once; 403 while the Playback tab's switch is off; 422 for an unknown event. See [Playback events](#playback-events) |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
 | `POST /manager/grab` | live Seerr | **admin only.** `{release_guid, indexer_id, release_title, size_bytes?}` — no action, and no client to name: Prowlarr picks its own default |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
@@ -736,6 +739,9 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `GET /admin/users`, `POST /admin/users/{id}/permissions`, `/{id}/delete` | Permissions |
 | `GET /admin/users/{id}/home`, `POST .../shelves`, `.../carousel`, `.../top-shelf` (and their move/remove/reorder/enabled variants) | One user's own Home — same Carousel/Top Shelf/Shelves editor as the Libraries & Home tab, but scoped to a single user's own copy rather than the install-wide default |
 | `GET /admin/grabs`, `GET /admin/activity-log` | Read-only, filterable by user |
+| `GET /admin/playback`, `POST .../enabled` | The Playback tab and its master switch |
+| `POST /admin/playback/webhooks`, `.../webhooks/{id}/delete` | Add and remove the URLs playback events are forwarded to. A URL that is not http(s) with a host is a 400; a duplicate is a 409 |
+| `POST /admin/playback/test`, `GET /admin/playback/recent` | Forward a sample `chapter` event to every webhook and show each result; the in-memory recent list the page polls |
 | `GET /admin/audiobooks`, `/runtime`, `POST .../runtime/enable`, `.../runtime/disable` | The Audiobooks tab and its read-along card |
 | `POST /admin/audiobooks/books/{ratingKey}/align`, `/cancel`, `/delete`, `GET .../status` | One book: upload an epub, cancel, forget the alignment, poll |
 | `POST /admin/audiobooks/books/{ratingKey}/import` | Upload a finished alignment made elsewhere (the book's "⋯" menu) |
@@ -1308,6 +1314,88 @@ rather than the Notifications one: that page hides everything below its master
 switch, and this works whether or not that switch is on.
 
 ---
+
+## Playback events
+
+Canopy+'s built-in video player reports what it is doing, and this service
+forwards each report to webhook URLs the admin lists on the **Playback** tab —
+for home automations: lights down when a film starts, back up when the credits
+roll. What Plex's own webhooks cannot offer is the detail: a `chapter` event on
+every chapter change, `intro_started`/`intro_ended`, and `credits_started`, as
+well as `started`, `paused`, `resumed` and `stopped`.
+
+Each Apple TV names itself with a **room** the user types into Canopy+'s
+settings. There is no per-room routing here: every event goes to every webhook,
+and the automation at the other end decides what a room means. No MQTT, no
+Home Assistant integration — one documented JSON body, to as many URLs as the
+admin likes.
+
+### Turning it on
+
+Off by default. On the Playback tab: tick the switch, add a webhook URL (in
+Home Assistant, an automation with a **Webhook** trigger gives you one), and
+press **Send test event**, which forwards a sample `chapter` event marked
+`"test": true` to every URL and shows each one's result. The app checks
+`GET /capabilities` and sends only while `playback_events` is true. The test
+button works with the switch off, so the receiving end can be set up first.
+
+### What the app sends
+
+`POST /playback/events`, authenticated with the stored Plex-token mapping like
+every other frequent call (no outbound request per event):
+
+```json
+{
+  "event": "chapter",
+  "room": "Living Room",
+  "client_id": "…",
+  "position": 1234.5,
+  "duration": 8040.2,
+  "watched": null,
+  "chapter": {"index": 3, "title": "The Battle", "start": 1200.0},
+  "item": {"rating_key": "10488", "type": "movie", "title": "The Two Towers",
+           "show_title": null, "season": null, "episode": null, "year": 2002}
+}
+```
+
+`event` must be one of the eight names above — anything else is a 422, because
+it is the field every automation dispatches on. Everything optional accepts an
+explicit `null`, and unknown extra fields are ignored. A `chapter` event must
+carry `chapter`; `chapter` on any other event, and `watched` on anything but
+`stopped`, are cleared to `null` rather than refused. `watched` is true when the
+title was played to the end or left past 90%.
+
+The reply is **202 `{"accepted": true}`, immediately**. Forwarding happens after
+the response has gone out, so a slow or broken webhook never makes the Apple TV
+wait or fail. While the switch is off the reply is 403 with a detail saying so;
+an unregistered token is still a 401 and a malformed body still a 422, since
+those are checked first.
+
+### What a webhook receives
+
+One `POST` per event: the body above, every key present, plus
+
+* `user` — `{"name": <the cplus user's Plex username>, "profile": <the
+  X-Canopy-Profile header, or "">}`. Canopy+ does not send the header today.
+* `received_at` — when this service received it, ISO 8601 UTC with a `Z`.
+* `source` — always `"canopy-plus"`.
+* `test` — `true` only for the test button.
+
+Every webhook is posted to at once, each with a 5-second limit and no retries:
+a playback automation that fires late is a bug of its own. A failure is logged
+and shown beside that webhook on the Playback tab; it never affects the other
+webhooks or the app. Events from one Apple TV are forwarded independently, so
+two in quick succession (a pause and an immediate resume) can arrive out of
+order — `received_at` is there to sort them by.
+
+### What is kept
+
+Nothing on disk. The last 50 events, and each webhook's last delivery result,
+live in memory for the Playback tab and are gone on restart. The webhook URLs
+themselves are in the database (`playback_webhooks`). A Home Assistant webhook
+URL is its own credential — anyone holding it can fire the automation — so the
+log names a webhook by scheme and host only; the full URL appears only on the
+Playback tab.
 
 ## Canopy+ Audiobooks
 
