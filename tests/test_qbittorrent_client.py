@@ -98,6 +98,25 @@ async def test_a_wrong_password_is_an_auth_error_that_does_not_name_it() -> None
 
 
 @respx.mock
+async def test_a_page_that_is_not_qbittorrent_says_what_came_back() -> None:
+    page = "<!DOCTYPE html><html><head><title>Sign in</title></head></html>"
+    respx.post(f"{QBT}/api/v2/auth/login").mock(
+        return_value=httpx.Response(
+            200, text=page, headers={"content-type": "text/html; charset=utf-8"}
+        )
+    )
+
+    async with QBittorrentClient(QBT, "admin", PASSWORD) as qbt:
+        with pytest.raises(QBittorrentAuthError) as caught:
+            await qbt.app_version()
+
+    message = str(caught.value)
+    assert "HTTP 200, text/html" in message and "<!DOCTYPE html>" in message
+    assert "username or password" not in message
+    assert PASSWORD not in message
+
+
+@respx.mock
 async def test_a_banned_address_says_so() -> None:
     respx.post(f"{QBT}/api/v2/auth/login").mock(return_value=httpx.Response(403))
 

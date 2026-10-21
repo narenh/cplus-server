@@ -290,8 +290,19 @@ class QBittorrentClient:
                 f"POST {url} returned {response.status_code}",
                 status_code=response.status_code,
             )
-        if response.text.strip() != "Ok.":
+        answer = response.text.strip()
+        if answer == "Fails.":
             raise QBittorrentAuthError("qBittorrent rejected the username or password.")
+        if answer != "Ok.":
+            # Not qBittorrent's own answer at all: usually a proxy's sign-in page or
+            # the wrong address. Say what came back, which no password is part of.
+            kind = response.headers.get("content-type", "unknown type").split(";")[0]
+            snippet = " ".join(answer[:80].split())
+            raise QBittorrentAuthError(
+                f"qBittorrent's sign-in gave an unexpected answer (HTTP {response.status_code},"
+                f" {kind}: {snippet!r}). Check the URL is qBittorrent's Web UI itself,"
+                " not a proxy or another page."
+            )
         sid = _session_cookie(response)
         if sid is None:
             raise QBittorrentError(f"POST {url} signed in but set no session cookie")
