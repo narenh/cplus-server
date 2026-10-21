@@ -78,8 +78,9 @@ class Torrent:
     dlspeed: int
     eta: int
     state: str
-    seq_dl: bool
-    f_l_piece_prio: bool
+    seq_dl: bool | None
+    """None when qBittorrent's answer leaves the field out: unknown, not off."""
+    f_l_piece_prio: bool | None
     save_path: str
     infohash_v1: str
     infohash_v2: str
@@ -94,8 +95,8 @@ class Torrent:
             dlspeed=int(raw.get("dlspeed") or 0),
             eta=int(raw.get("eta") or ETA_UNKNOWN),
             state=str(raw.get("state") or ""),
-            seq_dl=bool(raw.get("seq_dl", False)),
-            f_l_piece_prio=bool(raw.get("f_l_piece_prio", False)),
+            seq_dl=_flag(raw.get("seq_dl")),
+            f_l_piece_prio=_flag(raw.get("f_l_piece_prio")),
             save_path=str(raw.get("save_path") or ""),
             infohash_v1=str(raw.get("infohash_v1") or "").lower(),
             infohash_v2=str(raw.get("infohash_v2") or "").lower(),
@@ -166,6 +167,11 @@ class TorrentFile:
 def _describe(exc: httpx.HTTPError) -> str:
     """A transport failure in words. Request bodies — the login form — never appear."""
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
+def _flag(value: Any) -> bool | None:
+    """A torrent's on/off setting, or None when the answer doesn't carry it."""
+    return None if value is None else bool(value)
 
 
 def _session_cookie(response: httpx.Response) -> str | None:
@@ -441,13 +447,15 @@ class QBittorrentClient:
         Both endpoints *toggle*, so calling them blindly would switch off a
         setting the user (or a category default) had already turned on. Each
         is flipped only when ``torrent`` — read fresh from ``torrents/info`` —
-        says it is off. Returns the names of the settings actually switched.
+        says it is off; a setting the answer leaves out is left alone, since
+        flipping an unknown could just as well switch it off. Returns the names
+        of the settings actually switched.
         """
         switched: list[str] = []
-        if not torrent.seq_dl:
+        if torrent.seq_dl is False:
             await self.toggle_sequential_download(torrent.hash)
             switched.append("sequential download")
-        if not torrent.f_l_piece_prio:
+        if torrent.f_l_piece_prio is False:
             await self.toggle_first_last_piece_prio(torrent.hash)
             switched.append("first/last piece priority")
         return switched

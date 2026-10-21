@@ -78,6 +78,14 @@ _TV_RELEASE = re.compile(
 )
 
 
+
+#: How often a header wait that hasn't finished logs where it stands.
+HEADER_REPORT_INTERVAL = 15.0
+
+
+def _on_off(flag: bool | None) -> str:
+    return "unknown" if flag is None else ("on" if flag else "off")
+
 class TrackingError(Exception):
     """Tracking cannot go on; ``str(exc)`` is the sentence the app shows."""
 
@@ -93,7 +101,14 @@ class TrackingTimings:
     #: server's, on two different machines.
     added_slack_seconds: int = 300
     header_interval: float = 1.0
-    header_timeout: float = 30 * 60.0
+    #: How long to wait for the start of the file before scanning anyway. A piece
+    #: can sit half-done on a slow peer while the rest of the torrent races on
+    #: (one start took four minutes with a quarter of the torrent down), and Plex
+    #: often finds the file by itself meanwhile, so this stays short.
+    header_timeout: float = 45.0
+    #: While waiting for the start, how often to ask Plex whether it already has
+    #: the file (its own folder watching often gets there first).
+    early_check_interval: float = 3.0
     match_interval: float = 1.0
     match_timeout: float = 60.0
     rescan_after: float = 20.0
@@ -242,9 +257,10 @@ class TrackingJob:
         self._log(logging.INFO, "%s (%s)", GrabPhase.FINDING_TORRENT.value, how)
         try:
             torrent = await self.find_torrent()
-            plan = await self.wait_for_header(torrent)
-            sections = await self.scan(plan)
-            rating_key = await self.match(plan, sections)
+            plan, rating_key = await self.wait_for_header(torrent)
+            if rating_key is None:
+                sections = await self.scan(plan)
+                rating_key = await self.match(plan, sections)
         except asyncio.CancelledError:
             raise
         except TrackingError as exc:
@@ -420,7 +436,13 @@ class TrackingJob:
             piece_size=props.piece_size,
         )
 
-    async def wait_for_header(self, torrent: Torrent) -> HeaderPlan:
+    async def wait_for_header(self, torrent: Torrent) -> tuple[HeaderPlan, str | None]:
+        """Wait for the start of the main file; returns the plan, and the item's
+        rating key when Plex turned out to have the file already.
+
+        Never waits past ``header_timeout`` once the file is known: then the scan
+        goes ahead anyway, since a stuck piece mustn't hold the viewer up.
+        """
         await self._enter(GrabPhase.DOWNLOADING_HEADER)
         try:
             switched = await self.qbt.prioritise_start(torrent)
@@ -433,23 +455,71 @@ class TrackingJob:
             self._log(
                 logging.INFO,
                 "switched on %s",
-                " and ".join(switched) if switched else "nothing (both already on)",
+                " and ".join(switched) if switched else "nothing",
+            )
+        # What qBittorrent says now, after any toggles: the header wait depends on it.
+        try:
+            after = await self.qbt.torrent(torrent.hash) if switched else torrent
+        except QBittorrentError:
+            after = None
+        if after is not None:
+            self._log(
+                logging.INFO,
+                "download order now: sequential %s, first/last pieces first %s",
+                _on_off(after.seq_dl), _on_off(after.f_l_piece_prio),
             )
 
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.timings.header_timeout
+        started = loop.time()
+        deadline = started + self.timings.header_timeout
+        next_report = started + HEADER_REPORT_INTERVAL
+        next_early_check = started + self.timings.early_check_interval
+        early_sections: list[PlexLibrarySection] | None = None
         plan: HeaderPlan | None = None
         while True:
             current = await self._refresh_torrent(torrent.hash)
             try:
                 if plan is None:
                     plan = await self._plan(current)
+                if plan is not None and loop.time() >= next_early_check:
+                    next_early_check = loop.time() + self.timings.early_check_interval
+                    try:
+                        if early_sections is None:
+                            early_sections = await self._sections_for(plan)
+                        rating_key = await self._find_item(early_sections, plan.file_path)
+                    except PlexServerError as exc:
+                        self._log(logging.DEBUG, "early look in Plex failed: %s", exc)
+                    else:
+                        if rating_key is not None:
+                            self._mark("header")
+                            self._mark("scan")
+                            self._mark("item")
+                            self._log(
+                                logging.INFO,
+                                "item found before the header was complete (Plex found the"
+                                " file itself): rating_key %s",
+                                rating_key,
+                            )
+                            return plan, rating_key
                 if plan is not None:
                     states = await self.qbt.piece_states(current.hash)
                     self.progress.update(
                         header_have_bytes=plan.have_bytes(states),
                         header_need_bytes=plan.need_bytes,
                     )
+                    if loop.time() >= next_report and not plan.ready(states):
+                        # A slow or stuck header shows why in the log: the state of
+                        # each piece it waits for (0 missing, 1 downloading, 2 done)
+                        # against how far the whole torrent has got.
+                        next_report = loop.time() + HEADER_REPORT_INTERVAL
+                        self._log(
+                            logging.INFO,
+                            "still waiting for the header: pieces %s, torrent %.1f%% done,"
+                            " sequential %s, first/last pieces first %s",
+                            {p: states[p] if p < len(states) else None for p in plan.pieces},
+                            current.progress * 100,
+                            _on_off(current.seq_dl), _on_off(current.f_l_piece_prio),
+                        )
                     if plan.ready(states):
                         self._mark("header")
                         self._log(
@@ -458,17 +528,23 @@ class TrackingJob:
                             plan.complete(states),
                             len(plan.pieces),
                         )
-                        return plan
+                        return plan, None
             except QBittorrentError as exc:
                 self._transient(exc, "qBittorrent")
             else:
                 self._ok()
             if loop.time() >= deadline:
-                minutes = round(self.timings.header_timeout / 60)
+                if plan is not None:
+                    self._mark("header")
+                    self._log(
+                        logging.WARNING,
+                        "header still incomplete after %.0f s; scanning anyway",
+                        self.timings.header_timeout,
+                    )
+                    return plan, None
                 raise TrackingError(
-                    f"The start of the file had not downloaded after {minutes} minutes."
-                    if plan is not None
-                    else f"qBittorrent had no file list for this download after {minutes} minutes."
+                    "qBittorrent had no file list for this download after"
+                    f" {round(self.timings.header_timeout)} seconds."
                 )
             await asyncio.sleep(self.timings.header_interval)
 
@@ -492,6 +568,15 @@ class TrackingJob:
                 lambda s=section: self.plex.refresh_section(s.id, path=folder),
                 self.timings.match_interval,
             )
+
+    async def _sections_for(self, plan: HeaderPlan) -> list[PlexLibrarySection]:
+        """The library holding the file's folder, or every library of its kind."""
+        sections = await self.plex.list_library_sections()
+        section = paths.section_for_path(sections, plan.folder)
+        if section is not None:
+            return [section]
+        kind = guess_section_type(self.progress.title)
+        return [s for s in sections if s.type == kind]
 
     async def scan(self, plan: HeaderPlan) -> tuple[list[PlexLibrarySection], str | None]:
         """Ask Plex to scan; returns the libraries to watch and the folder scanned."""

@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -546,6 +547,44 @@ async def test_a_torrent_that_never_appears_fails(
     assert body["rating_key"] is None
     assert f"grab {grab_id} tracking failed after " in caplog.text
     assert "during finding_torrent" in caplog.text
+
+
+@respx.mock
+async def test_an_item_plex_found_by_itself_is_ready_before_the_header(
+    app: FastAPI, client: httpx.AsyncClient, db: AsyncSession, tracking: Config,
+    plex_headers: dict
+) -> None:
+    """The start of the file is stuck, but Plex has the file already: ready at once."""
+    app.state.cplus.grab_tracker.timings = replace(FAST, early_check_interval=0.02)
+    FakeQbt(header_after=10_000).install()
+    plex = FakePlex(appear_after=0).install()
+
+    response = await grab(client, db, plex_headers)
+    body, _ = await follow(client, response.json()["grab_id"], plex_headers)
+
+    assert body["phase"] == "ready", body
+    assert body["rating_key"] == "12345"
+    assert plex.refresh.call_count == 0  # no scan needed
+
+
+@respx.mock
+async def test_a_stuck_header_is_scanned_anyway_after_the_timeout(
+    app: FastAPI, client: httpx.AsyncClient, db: AsyncSession, tracking: Config,
+    plex_headers: dict
+) -> None:
+    """A piece that never completes holds nobody up: the scan goes ahead."""
+    app.state.cplus.grab_tracker.timings = replace(
+        FAST, header_timeout=0.2, early_check_interval=60.0
+    )
+    FakeQbt(header_after=10_000).install()
+    plex = FakePlex(appear_after=0).install()
+
+    response = await grab(client, db, plex_headers)
+    body, phases = await follow(client, response.json()["grab_id"], plex_headers)
+
+    assert body["phase"] == "ready", body
+    assert "scanning" in phases or "matching" in phases
+    assert plex.refresh.call_count == 1
 
 
 @respx.mock
