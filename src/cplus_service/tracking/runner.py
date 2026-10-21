@@ -109,6 +109,11 @@ class TrackingTimings:
     #: While waiting for the start, how often to ask Plex whether it already has
     #: the file (its own folder watching often gets there first).
     early_check_interval: float = 3.0
+    #: How long after finding the torrent to leave its download order alone.
+    #: Whatever added it (Prowlarr's "Sequential Order" and "First and Last
+    #: First") may still be applying those settings in the first second or two;
+    #: a toggle in that window could cancel its toggle out and leave it off.
+    priority_grace: float = 5.0
     match_interval: float = 1.0
     #: With the 45 s header limit, a grab ends in ready or failed within two minutes.
     match_timeout: float = 75.0
@@ -447,31 +452,6 @@ class TrackingJob:
         goes ahead anyway, since a stuck piece mustn't hold the viewer up.
         """
         await self._enter(GrabPhase.DOWNLOADING_HEADER)
-        try:
-            switched = await self.qbt.prioritise_start(torrent)
-        except QBittorrentAuthError as exc:
-            raise TrackingError(str(exc)) from exc
-        except QBittorrentError as exc:
-            # Not fatal: the header still arrives, only later.
-            self._log(logging.WARNING, "could not prioritise the start of the file: %s", exc)
-        else:
-            self._log(
-                logging.INFO,
-                "switched on %s",
-                " and ".join(switched) if switched else "nothing",
-            )
-        # What qBittorrent says now, after any toggles: the header wait depends on it.
-        try:
-            after = await self.qbt.torrent(torrent.hash) if switched else torrent
-        except QBittorrentError:
-            after = None
-        if after is not None:
-            self._log(
-                logging.INFO,
-                "download order now: sequential %s, first/last pieces first %s",
-                _on_off(after.seq_dl), _on_off(after.f_l_piece_prio),
-            )
-
         loop = asyncio.get_running_loop()
         started = loop.time()
         deadline = started + self.timings.header_timeout
@@ -479,8 +459,28 @@ class TrackingJob:
         next_early_check = started + self.timings.early_check_interval
         early_sections: list[PlexLibrarySection] | None = None
         plan: HeaderPlan | None = None
+        prioritised = False
+        order_warned = False
         while True:
             current = await self._refresh_torrent(torrent.hash)
+            if (
+                not prioritised
+                and plan is not None
+                and loop.time() - started >= self.timings.priority_grace
+            ):
+                prioritised = True
+                await self._prioritise(current)
+            elif prioritised and not order_warned and (
+                current.seq_dl is False or current.f_l_piece_prio is False
+            ):
+                # Something switched it off again after cplus checked it.
+                order_warned = True
+                self._log(
+                    logging.WARNING,
+                    "download order changed after it was set: sequential %s, first/last"
+                    " pieces first %s",
+                    _on_off(current.seq_dl), _on_off(current.f_l_piece_prio),
+                )
             try:
                 if plan is None:
                     plan = await self._plan(current)
@@ -572,6 +572,26 @@ class TrackingJob:
                 lambda s=section: self.plex.refresh_section(s.id, path=folder),
                 self.timings.match_interval,
             )
+
+    async def _prioritise(self, torrent: Torrent) -> None:
+        """Switch on whichever of sequential download and first/last piece
+        priority ``torrent`` (read just now) still has off, once the grace period
+        is over. Never fatal: the start of the file still arrives, only later."""
+        try:
+            switched = await self.qbt.prioritise_start(torrent)
+            after = await self.qbt.torrent(torrent.hash) if switched else torrent
+        except QBittorrentAuthError as exc:
+            raise TrackingError(str(exc)) from exc
+        except QBittorrentError as exc:
+            self._log(logging.WARNING, "could not set the download order: %s", exc)
+            return
+        self._log(
+            logging.INFO,
+            "download order: %s; now sequential %s, first/last pieces first %s",
+            "switched on " + " and ".join(switched) if switched else "already set when added",
+            _on_off(after.seq_dl if after else None),
+            _on_off(after.f_l_piece_prio if after else None),
+        )
 
     async def _sections_for(self, plan: HeaderPlan) -> list[PlexLibrarySection]:
         """The library holding the file's folder, or every library of its kind."""

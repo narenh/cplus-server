@@ -64,6 +64,7 @@ FAST = TrackingTimings(
     match_timeout=0.5,
     rescan_after=0.15,
     max_consecutive_errors=3,
+    priority_grace=0.0,
 )
 
 
@@ -547,6 +548,34 @@ async def test_a_torrent_that_never_appears_fails(
     assert body["rating_key"] is None
     assert f"grab {grab_id} tracking failed after " in caplog.text
     assert "during finding_torrent" in caplog.text
+
+
+class LateOrderQbt(FakeQbt):
+    """A torrent whose adder (Prowlarr) switches the download order on a moment
+    after the torrent appears, as it does in practice."""
+
+    def info(self, request: httpx.Request) -> httpx.Response:
+        if self.info_calls >= self.appear_after + 3:
+            self.seq_dl = self.f_l_piece_prio = True
+        return super().info(request)
+
+
+@respx.mock
+async def test_the_download_order_is_left_alone_while_the_adder_sets_it(
+    app: FastAPI, client: httpx.AsyncClient, db: AsyncSession, tracking: Config,
+    plex_headers: dict
+) -> None:
+    """No toggle in the grace period: a toggle racing Prowlarr's could switch it off."""
+    app.state.cplus.grab_tracker.timings = replace(FAST, priority_grace=0.15)
+    qbt = LateOrderQbt(header_after=40).install()
+    FakePlex().install()
+
+    response = await grab(client, db, plex_headers)
+    body, _ = await follow(client, response.json()["grab_id"], plex_headers)
+
+    assert body["phase"] == "ready", body
+    assert qbt.sequential.call_count == 0 and qbt.first_last.call_count == 0
+    assert qbt.seq_dl and qbt.f_l_piece_prio
 
 
 @respx.mock
