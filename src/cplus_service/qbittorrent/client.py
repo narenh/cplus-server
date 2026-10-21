@@ -84,6 +84,8 @@ class Torrent:
     save_path: str
     infohash_v1: str
     infohash_v2: str
+    completed: int = 0
+    """Bytes downloaded and checked so far."""
 
     @classmethod
     def from_api(cls, raw: dict[str, Any]) -> Torrent:
@@ -100,6 +102,7 @@ class Torrent:
             save_path=str(raw.get("save_path") or ""),
             infohash_v1=str(raw.get("infohash_v1") or "").lower(),
             infohash_v2=str(raw.get("infohash_v2") or "").lower(),
+            completed=int(raw.get("completed") or 0),
         )
 
     @property

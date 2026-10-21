@@ -65,6 +65,7 @@ FAST = TrackingTimings(
     rescan_after=0.15,
     max_consecutive_errors=3,
     priority_grace=0.0,
+    playable_timeout=0.3,
 )
 
 
@@ -95,6 +96,7 @@ class FakeQbt:
         self.added_on = int(time.time()) if added_on is None else added_on
         self.seq_dl = False
         self.f_l_piece_prio = False
+        self.completed = 0
         self.info_calls = 0
         self.piece_calls = 0
         self.files = files if files is not None else [
@@ -116,6 +118,7 @@ class FakeQbt:
             "seq_dl": self.seq_dl,
             "f_l_piece_prio": self.f_l_piece_prio,
             "save_path": self.save_path,
+            "completed": self.completed,
         }
 
     def info(self, request: httpx.Request) -> httpx.Response:
@@ -596,6 +599,34 @@ async def test_a_first_piece_still_downloading_is_enough_to_scan(
     assert body["phase"] == "ready", body
     assert plex.refresh.call_count >= 1
     assert qbt.piece_calls == 0  # the downloading states came from the override
+
+
+@respx.mock
+async def test_ready_waits_for_enough_of_the_file_to_open(
+    app: FastAPI, client: httpx.AsyncClient, db: AsyncSession, tracking: Config,
+    plex_headers: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Plex has the item from a piece still downloading, but "ready" (which starts
+    the player) waits for 64 MB of the torrent, or the first piece complete."""
+    app.state.cplus.grab_tracker.timings = replace(FAST, playable_timeout=5.0)
+    qbt = FakeQbt(header_after=10_000).install()
+    respx.get(f"{QBT}/api/v2/torrents/pieceStates").mock(
+        return_value=httpx.Response(200, json=[1] * (MAIN_LAST_PIECE + 1))
+    )
+    FakePlex(appear_after=0).install()
+
+    async def arrive() -> None:
+        await asyncio.sleep(0.4)
+        qbt.completed = 64 * MIB
+
+    caplog.set_level(logging.INFO, logger="cplus_service.tracking")
+    arriving = asyncio.create_task(arrive())
+    response = await grab(client, db, plex_headers)
+    body, _ = await follow(client, response.json()["grab_id"], plex_headers)
+    await arriving
+
+    assert body["phase"] == "ready", body
+    assert "playable: 64 MB down" in caplog.text
 
 
 @respx.mock

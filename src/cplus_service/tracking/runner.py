@@ -79,6 +79,10 @@ _TV_RELEASE = re.compile(
 
 
 
+#: How much of the torrent must be down, with its first piece still incomplete,
+#: before the player is told it can open the file.
+PLAYABLE_BYTES = 64 * MIB
+
 #: How often a header wait that hasn't finished logs where it stands.
 HEADER_REPORT_INTERVAL = 15.0
 
@@ -114,6 +118,10 @@ class TrackingTimings:
     #: First") may still be applying those settings in the first second or two;
     #: a toggle in that window could cancel its toggle out and leave it off.
     priority_grace: float = 5.0
+    #: Once Plex has the item, how long to wait at most for enough of the file
+    #: for the player to open it (see :data:`PLAYABLE_BYTES`). After that the
+    #: grab is ready anyway; the app retries a failed open while the file arrives.
+    playable_timeout: float = 45.0
     match_interval: float = 1.0
     #: With the 45 s header limit, a grab ends in ready or failed within two minutes.
     match_timeout: float = 75.0
@@ -269,6 +277,7 @@ class TrackingJob:
             if rating_key is None:
                 sections = await self.scan(plan)
                 rating_key = await self.match(plan, sections)
+            await self.wait_until_playable(torrent.hash, plan)
         except asyncio.CancelledError:
             raise
         except TrackingError as exc:
@@ -283,12 +292,13 @@ class TrackingJob:
             self._log(logging.INFO, "ready, rating_key %s", rating_key)
             logger.info(
                 "grab %s tracking done in %.1f s: torrent %s, header %s, scan→item %s,"
-                " rating_key %s",
+                " item→playable %s, rating_key %s",
                 self.progress.grab_id,
                 self._elapsed(),
                 self._span(None, "torrent"),
                 self._span("torrent", "header"),
                 self._span("scan", "item"),
+                self._span("item", "playable"),
                 rating_key,
             )
 
@@ -572,6 +582,48 @@ class TrackingJob:
                 lambda s=section: self.plex.refresh_section(s.id, path=folder),
                 self.timings.match_interval,
             )
+
+    async def wait_until_playable(self, torrent_hash: str, plan: HeaderPlan) -> None:
+        """Hold "ready" until the player can open the file: its first piece is
+        complete, or :data:`PLAYABLE_BYTES` of the torrent are down (with
+        sequential download, mostly the start of the file).
+
+        Plex makes its item from a few MB, but the player reads further: one
+        grab reached ready with a few blocks of a 16 MB first piece on disk, and
+        the open failed. Never longer than ``playable_timeout``; never fatal.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.timings.playable_timeout
+        while True:
+            try:
+                current = await self.qbt.torrent(torrent_hash)
+                states = await self.qbt.piece_states(torrent_hash)
+            except QBittorrentError as exc:
+                self._log(logging.DEBUG, "playable check failed: %s", exc)
+            else:
+                if current is not None:
+                    self.progress.set_download(
+                        progress=current.progress, speed_bytes=current.dlspeed, eta=current.eta
+                    )
+                first_done = plan.complete(states) == len(plan.pieces)
+                enough = current is not None and current.completed >= PLAYABLE_BYTES
+                if first_done or enough:
+                    self._mark("playable")
+                    self._log(
+                        logging.INFO,
+                        "playable: %s",
+                        "first piece complete" if first_done
+                        else f"{current.completed / MIB:.0f} MB down" if current else "",
+                    )
+                    return
+            if loop.time() >= deadline:
+                self._log(
+                    logging.WARNING,
+                    "not enough of the file after %.0f s; ready anyway",
+                    self.timings.playable_timeout,
+                )
+                return
+            await asyncio.sleep(self.timings.header_interval)
 
     async def _prioritise(self, torrent: Torrent) -> None:
         """Switch on whichever of sequential download and first/last piece
