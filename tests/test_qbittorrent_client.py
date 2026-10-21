@@ -98,6 +98,34 @@ async def test_a_wrong_password_is_an_auth_error_that_does_not_name_it() -> None
 
 
 @respx.mock
+async def test_a_newer_qbittorrent_signs_in_with_an_empty_204_and_a_per_port_cookie() -> None:
+    respx.post(f"{QBT}/api/v2/auth/login").mock(
+        return_value=httpx.Response(
+            204, headers={"set-cookie": "QBT_SID_8080=sid-new; HttpOnly; path=/; SameSite=Strict"}
+        )
+    )
+    info = respx.get(f"{QBT}/api/v2/torrents/info").mock(
+        return_value=httpx.Response(200, json=[torrent_json()])
+    )
+
+    async with QBittorrentClient(QBT, "admin", PASSWORD) as qbt:
+        await qbt.torrents()
+
+    assert info.calls[0].request.headers["cookie"] == "QBT_SID_8080=sid-new"
+
+
+@respx.mock
+async def test_a_newer_qbittorrent_refuses_a_wrong_password_with_a_401() -> None:
+    respx.post(f"{QBT}/api/v2/auth/login").mock(return_value=httpx.Response(401))
+
+    async with QBittorrentClient(QBT, "admin", PASSWORD) as qbt:
+        with pytest.raises(QBittorrentAuthError) as caught:
+            await qbt.app_version()
+
+    assert "username or password" in str(caught.value)
+
+
+@respx.mock
 async def test_a_page_that_is_not_qbittorrent_says_what_came_back() -> None:
     page = "<!DOCTYPE html><html><head><title>Sign in</title></head></html>"
     respx.post(f"{QBT}/api/v2/auth/login").mock(

@@ -169,12 +169,18 @@ def _describe(exc: httpx.HTTPError) -> str:
 
 
 def _session_cookie(response: httpx.Response) -> str | None:
-    """The ``SID`` value from a login response's ``Set-Cookie`` headers, if any."""
+    """The session cookie from a login response's ``Set-Cookie`` headers, as
+    ``name=value``, if any.
+
+    Older qBittorrent calls it ``SID``; newer releases name it per port, e.g.
+    ``QBT_SID_8080``. Kept whole, so requests send back whichever it was.
+    """
     for header in response.headers.get_list("set-cookie"):
         first = header.split(";", 1)[0].strip()
         name, _, value = first.partition("=")
-        if name.strip() == "SID" and value:
-            return value.strip()
+        name = name.strip()
+        if (name == "SID" or name.startswith("QBT_SID")) and value:
+            return f"{name}={value.strip()}"
     return None
 
 
@@ -285,15 +291,17 @@ class QBittorrentClient:
                 " sign-ins. Wait, then check the username and password.",
                 status_code=403,
             )
+        # Older qBittorrent answers a 200 "Ok." or "Fails."; newer releases answer
+        # an empty 204 when signed in and a 401 when not.
+        answer = response.text.strip()
+        if response.status_code == 401 or answer == "Fails.":
+            raise QBittorrentAuthError("qBittorrent rejected the username or password.")
         if response.status_code >= 400:
             raise QBittorrentError(
                 f"POST {url} returned {response.status_code}",
                 status_code=response.status_code,
             )
-        answer = response.text.strip()
-        if answer == "Fails.":
-            raise QBittorrentAuthError("qBittorrent rejected the username or password.")
-        if answer != "Ok.":
+        if answer not in ("Ok.", ""):
             # Not qBittorrent's own answer at all: usually a proxy's sign-in page or
             # the wrong address. Say what came back, which no password is part of.
             kind = response.headers.get("content-type", "unknown type").split(";")[0]
@@ -314,7 +322,7 @@ class QBittorrentClient:
     ) -> httpx.Response:
         headers = {"Referer": self.base_url}
         if self._sid:
-            headers["Cookie"] = f"SID={self._sid}"
+            headers["Cookie"] = self._sid
         try:
             return await self.client.request(
                 method, url, params=params, data=data, headers=headers, timeout=self._timeout
