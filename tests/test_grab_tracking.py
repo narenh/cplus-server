@@ -511,7 +511,7 @@ async def test_the_timing_log_names_every_step_and_nothing_secret(
         f"torrent found by name: {HASH[:8]}",
         f"main file {TITLE}/{TITLE}.mkv (50.0 MB)",
         "header needs 4 piece(s) of 1.00 MB",
-        "header complete: 4 of 4 piece(s)",
+        "start of the file arriving: 4 of 4 piece(s) done",
         f'scan 1: library "Movies" (section 1), folder {FOLDER}',
         "item found: rating_key 12345",
         f"grab {grab_id} tracking done in ",
@@ -547,6 +547,26 @@ async def test_a_torrent_that_never_appears_fails(
     assert body["rating_key"] is None
     assert f"grab {grab_id} tracking failed after " in caplog.text
     assert "during finding_torrent" in caplog.text
+
+
+@respx.mock
+async def test_a_first_piece_still_downloading_is_enough_to_scan(
+    client: httpx.AsyncClient, db: AsyncSession, tracking: Config, plex_headers: dict
+) -> None:
+    """Blocks reach the disk as they arrive, so a piece in progress already holds
+    the file's first MB: the scan doesn't wait for the piece to finish."""
+    qbt = FakeQbt(header_after=10_000).install()
+    respx.get(f"{QBT}/api/v2/torrents/pieceStates").mock(
+        return_value=httpx.Response(200, json=[1] * (MAIN_LAST_PIECE + 1))
+    )
+    plex = FakePlex().install()
+
+    response = await grab(client, db, plex_headers)
+    body, _ = await follow(client, response.json()["grab_id"], plex_headers)
+
+    assert body["phase"] == "ready", body
+    assert plex.refresh.call_count >= 1
+    assert qbt.piece_calls == 0  # the downloading states came from the override
 
 
 @respx.mock
@@ -588,7 +608,7 @@ async def test_a_stuck_header_is_scanned_anyway_after_the_timeout(
 
 
 @respx.mock
-async def test_plex_never_showing_the_item_fails_after_one_rescan(
+async def test_plex_never_showing_the_item_fails_after_rescanning(
     client: httpx.AsyncClient, db: AsyncSession, tracking: Config, plex_headers: dict
 ) -> None:
     FakeQbt().install()
@@ -599,7 +619,7 @@ async def test_plex_never_showing_the_item_fails_after_one_rescan(
 
     assert body["phase"] == "failed"
     assert "did not add the file" in body["error"]
-    assert plex.refresh.call_count == 2  # the scan, and the one rescan
+    assert plex.refresh.call_count >= 3  # the scan, then a rescan every rescan_after
 
 
 @respx.mock

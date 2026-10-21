@@ -110,8 +110,11 @@ class TrackingTimings:
     #: the file (its own folder watching often gets there first).
     early_check_interval: float = 3.0
     match_interval: float = 1.0
-    match_timeout: float = 60.0
-    rescan_after: float = 20.0
+    #: With the 45 s header limit, a grab ends in ready or failed within two minutes.
+    match_timeout: float = 75.0
+    #: How often the folder is scanned again while Plex hasn't shown the file:
+    #: a scan that came a moment too early simply finds it on a later one.
+    rescan_after: float = 10.0
     #: Consecutive failed calls to qBittorrent or Plex before tracking gives up.
     max_consecutive_errors: int = 5
 
@@ -524,7 +527,8 @@ class TrackingJob:
                         self._mark("header")
                         self._log(
                             logging.INFO,
-                            "header complete: %d of %d piece(s) on disk",
+                            "start of the file arriving: %d of %d piece(s) done, the rest"
+                            " downloading",
                             plan.complete(states),
                             len(plan.pieces),
                         )
@@ -627,7 +631,7 @@ class TrackingJob:
         loop = asyncio.get_running_loop()
         started = loop.time()
         deadline = started + self.timings.match_timeout
-        rescanned = False
+        last_scan = started
         while True:
             try:
                 rating_key = await self._find_item(sections, plan.file_path)
@@ -642,8 +646,8 @@ class TrackingJob:
             # Keep the download numbers moving while Plex catches up.
             await self._refresh_torrent_quietly()
             now = loop.time()
-            if not rescanned and now - started >= self.timings.rescan_after:
-                rescanned = True
+            if now - last_scan >= self.timings.rescan_after:
+                last_scan = now
                 self._log(logging.INFO, "not in Plex yet; scanning again")
                 await self._refresh(sections, folder)
             if now >= deadline:

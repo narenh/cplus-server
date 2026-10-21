@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from ..qbittorrent.client import PIECE_COMPLETE, Torrent, TorrentFile
+from ..qbittorrent.client import PIECE_COMPLETE, PIECE_DOWNLOADING, Torrent, TorrentFile
 
 #: How much of the start of the main file must be on disk before Plex is asked
 #: to scan it. Plex reads the container header to identify a file; a few MB
@@ -194,4 +194,14 @@ class HeaderPlan:
         return sum(1 for p in self.pieces if p < len(states) and states[p] == PIECE_COMPLETE)
 
     def ready(self, states: Sequence[int]) -> bool:
-        return self.complete(states) == len(self.pieces)
+        """Every piece it waits for has data arriving or done.
+
+        Not "complete": qBittorrent writes each block to disk as it arrives, so
+        the first few MB of a 16 MB piece are usually there long before the
+        whole piece is done and checked, and Plex only needs those few MB. One
+        start waited four minutes for a piece Plex could already read.
+        """
+        return all(
+            p < len(states) and states[p] in (PIECE_DOWNLOADING, PIECE_COMPLETE)
+            for p in self.pieces
+        )

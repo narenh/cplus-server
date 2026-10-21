@@ -254,7 +254,8 @@ def test_header_plan_counts_complete_pieces() -> None:
     assert plan.complete(states) == 3
     assert plan.have_bytes(states) == 3 * MIB
     assert plan.need_bytes == 4 * MIB
-    assert not plan.ready(states)
+    assert plan.ready(states)  # piece 2 still downloading counts: its blocks are on disk
+    assert not plan.ready([2, 2, 0] + [0] * 96 + [2])  # piece 2 not started
     assert plan.ready([2] * 100)
     assert not plan.ready([2, 2])  # a short pieceStates answer never reads as done
 
