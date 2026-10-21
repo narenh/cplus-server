@@ -115,6 +115,24 @@ async def test_a_newer_qbittorrent_signs_in_with_an_empty_204_and_a_per_port_coo
 
 
 @respx.mock
+async def test_a_sign_in_without_a_cookie_carries_on_without_one() -> None:
+    login = respx.post(f"{QBT}/api/v2/auth/login").mock(
+        return_value=httpx.Response(200, text="Ok.")
+    )
+    info = respx.get(f"{QBT}/api/v2/torrents/info").mock(
+        return_value=httpx.Response(200, json=[torrent_json()])
+    )
+
+    async with QBittorrentClient(QBT, "admin", PASSWORD) as qbt:
+        await qbt.torrents()
+        await qbt.torrents()
+
+    assert login.call_count == 1
+    assert info.call_count == 2
+    assert "cookie" not in info.calls[0].request.headers
+
+
+@respx.mock
 async def test_a_newer_qbittorrent_refuses_a_wrong_password_with_a_401() -> None:
     respx.post(f"{QBT}/api/v2/auth/login").mock(return_value=httpx.Response(401))
 

@@ -311,10 +311,11 @@ class QBittorrentClient:
                 f" {kind}: {snippet!r}). Check the URL is qBittorrent's Web UI itself,"
                 " not a proxy or another page."
             )
-        sid = _session_cookie(response)
-        if sid is None:
-            raise QBittorrentError(f"POST {url} signed in but set no session cookie")
-        self._sid = sid
+        # No cookie with a successful answer: qBittorrent is letting this address
+        # in without signing in ("Bypass authentication for clients in whitelisted
+        # IP subnets", which a reverse proxy on the LAN often falls under). Carry
+        # on without one; if a request is then refused, that 403 says so.
+        self._sid = _session_cookie(response) or ""
         logger.debug("signed in to qBittorrent at %s", self.base_url)
 
     async def _send(
