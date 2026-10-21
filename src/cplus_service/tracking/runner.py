@@ -63,6 +63,7 @@ from .torrent import (
     main_video_file,
     match_by_hash,
     match_by_name,
+    needs_last_piece,
 )
 
 logger = logging.getLogger(__name__)
@@ -398,7 +399,8 @@ class TrackingJob:
         save_path = props.save_path or torrent.save_path
         if not save_path:
             return None
-        pieces = header_pieces(main, props.piece_size, offset=file_offset(files, main))
+        pieces = header_pieces(main, props.piece_size, offset=file_offset(files, main),
+                               include_last=needs_last_piece(main.name))
         file_path = paths.join(save_path, main.name)
         folder = paths.release_folder(save_path, main.name, multi_file=len(files) > 1)
         self._log(

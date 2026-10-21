@@ -411,7 +411,7 @@ async def test_a_grab_is_followed_into_plex(
     order = [p.value for p in GrabPhase if p is not GrabPhase.FAILED]
     assert [order.index(p) for p in phases] == sorted(order.index(p) for p in phases)
     # Header: pieces 0–3 (the file starts 1000 bytes into piece 0) plus the last.
-    assert body["header"] == {"have_mb": 5.0, "need_mb": 5.0}
+    assert body["header"] == {"have_mb": 4.0, "need_mb": 4.0}  # an MKV: its start, not its end
     assert body["download"] == {"progress": 0.1, "speed_mbps": 20.0, "eta_seconds": 120}
 
     # Each toggle flipped exactly once, from off to on.
@@ -509,8 +509,8 @@ async def test_the_timing_log_names_every_step_and_nothing_secret(
         f'"{TITLE}": finding_torrent',
         f"torrent found by name: {HASH[:8]}",
         f"main file {TITLE}/{TITLE}.mkv (50.0 MB)",
-        "header needs 5 piece(s) of 1.00 MB",
-        "header complete: 5 of 5 piece(s)",
+        "header needs 4 piece(s) of 1.00 MB",
+        "header complete: 4 of 4 piece(s)",
         f'scan 1: library "Movies" (section 1), folder {FOLDER}',
         "item found: rating_key 12345",
         f"grab {grab_id} tracking done in ",

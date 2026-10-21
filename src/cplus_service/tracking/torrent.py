@@ -16,8 +16,14 @@ from ..qbittorrent.client import PIECE_COMPLETE, Torrent, TorrentFile
 #: How much of the start of the main file must be on disk before Plex is asked
 #: to scan it. Plex reads the container header to identify a file; a few MB
 #: covers every MKV and MP4 header seen in practice (an MP4 with its index at
-#: the *end* is the case the last piece covers).
+#: the *end* is the case the last piece covers, see :func:`needs_last_piece`).
 HEADER_BYTES = 3 * 1024 * 1024
+
+#: Containers whose start alone identifies them to Plex: Matroska keeps its
+#: segment info (duration included) and track list at the front, so a scan needs
+#: nothing from the end. Waiting for the last piece too cost the most time in
+#: the first live runs (a 16 MB last piece, fetched alongside the first).
+HEAD_ONLY_EXTENSIONS = frozenset({"mkv", "mk3d", "webm"})
 
 #: What counts as a video file when choosing the main file of a torrent.
 VIDEO_EXTENSIONS = frozenset(
@@ -115,14 +121,25 @@ def file_offset(files: Sequence[TorrentFile], target: TorrentFile) -> int:
     return offset
 
 
+def needs_last_piece(name: str) -> bool:
+    """Whether Plex needs the end of ``name`` too before it can scan it.
+
+    True for anything but Matroska: an MP4 or MOV may keep its index (``moov``)
+    at the end, and for the rarer containers waiting is the safe side.
+    """
+    return name.rsplit(".", 1)[-1].lower() not in HEAD_ONLY_EXTENSIONS
+
+
 def header_pieces(
     target: TorrentFile,
     piece_size: int,
     *,
     offset: int | None = None,
     header_bytes: int = HEADER_BYTES,
+    include_last: bool = True,
 ) -> list[int]:
-    """The pieces holding the first ``header_bytes`` of ``target``, plus its last piece.
+    """The pieces holding the first ``header_bytes`` of ``target``, plus its last
+    piece unless ``include_last`` is false.
 
     A file rarely starts on a piece boundary in a multi-file torrent: its first
     piece is shared with the tail of the file before it, so the first 3 MB of
@@ -149,7 +166,7 @@ def header_pieces(
     wanted = min(header_bytes, size)
     header_last = min(last, (start + wanted - 1) // piece_size)
     pieces = list(range(first, header_last + 1))
-    if last not in pieces:
+    if include_last and last not in pieces:
         pieces.append(last)
     return pieces
 

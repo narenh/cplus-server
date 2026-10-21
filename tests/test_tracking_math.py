@@ -27,6 +27,7 @@ from cplus_service.tracking.torrent import (
     main_video_file,
     match_by_hash,
     match_by_name,
+    needs_last_piece,
     normalise_name,
 )
 
@@ -185,6 +186,19 @@ def test_header_with_large_pieces_is_the_first_and_last() -> None:
     piece = 16 * MIB
     main = tfile(0, "R.mkv", 4_000 * MIB, (0, 249))
     assert header_pieces(main, piece, offset=0) == [0, 249]
+
+
+def test_an_mkv_needs_only_its_start_and_an_mp4_its_end_too() -> None:
+    assert not needs_last_piece("Some.Release.2024.2160p.mkv")
+    assert not needs_last_piece("Folder/Some.Release.MKV")
+    assert needs_last_piece("Some.Release.2024.1080p.mp4")
+    assert needs_last_piece("Some.Release.m2ts")
+
+
+def test_header_without_the_last_piece_is_just_the_start() -> None:
+    piece = 16 * MIB
+    main = tfile(0, "R.mkv", 4_000 * MIB, (0, 249))
+    assert header_pieces(main, piece, offset=0, include_last=False) == [0]
 
 
 def test_header_of_a_file_starting_mid_piece_spills_one_piece_further() -> None:
