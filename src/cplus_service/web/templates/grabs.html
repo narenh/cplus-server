@@ -33,7 +33,13 @@
           <span class="badge by-user">{{ action_names.get(grab.action_id, "deleted action") }}</span>
         {% endif %}
       </td>
-      <td class="release">{{ grab.release_title }}</td>
+      <td class="release">{{ grab.release_title }}
+        {% set t = tracking.get(grab.id) %}
+        {% if t %}
+          <span class="badge tracking {{ t.phase }}"
+                {% if t.error %}title="{{ t.error }}"{% endif %}>{{ t.label }}</span>
+        {% endif %}
+      </td>
       <td class="size">{{ grab.size_bytes|size }}</td>
     </tr>
   {% endfor %}

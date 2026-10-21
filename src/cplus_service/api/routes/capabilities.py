@@ -25,6 +25,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ...db.session import get_config
+from ...tracking.runner import tracking_enabled
 from ..deps import DbDep
 
 router = APIRouter(tags=["client"])
@@ -50,9 +51,16 @@ async def capabilities(db: DbDep) -> dict[str, bool]:
     also require a webhook to be configured — events are accepted and shown on
     the Playback tab with nowhere to go, which is how an admin watches them
     arrive before writing the automation that will receive them.
+
+    ``grab_tracking`` is stricter than the other two, on purpose: switched on
+    *and* qBittorrent configured *and* a Plex server known. The app uses it to
+    decide between following ``GET /grabs/{id}`` and running its own refresh
+    timers, and an instance that is switched on but cannot actually track would
+    leave it waiting on an answer that never comes.
     """
     config = await get_config(db)
     return {
         "notifications": bool(config.notifications_enabled),
         "playback_events": bool(config.playback_events_enabled),
+        "grab_tracking": tracking_enabled(config),
     }

@@ -201,6 +201,25 @@ class PlexLibrarySection:
     name: str
     type: str
     hidden: bool
+    locations: tuple[str, ...] = ()
+    """The library's folders, exactly as the server spells them
+    (``E:\\Movies`` on Windows). Grab tracking uses them to pick which library
+    to scan for a new download; nothing else reads them."""
+
+
+@dataclass(frozen=True)
+class PlexItemFiles:
+    """One movie or episode, and the files behind it — enough to recognise a
+    download by its path. See :meth:`PlexServerClient.recent_items`."""
+
+    rating_key: str
+    title: str
+    files: tuple[str, ...]
+
+
+#: Plex's numeric item types, for the ``type`` filter of a section listing:
+#: a show library is searched for *episodes*, since a file belongs to one.
+PLEX_ITEM_TYPE_BY_SECTION = {"movie": "1", "show": "4"}
 
 
 @dataclass(frozen=True)
@@ -386,15 +405,82 @@ class PlexServerClient:
             key, title, kind = raw.get("key"), raw.get("title"), raw.get("type")
             if not key or not title or not kind:
                 continue
+            locations = tuple(
+                str(loc["path"])
+                for loc in raw.get("Location", []) or []
+                if isinstance(loc, dict) and loc.get("path")
+            )
             sections.append(
                 PlexLibrarySection(
                     id=str(key),
                     name=str(title),
                     type=str(kind),
                     hidden=bool(int(raw.get("hidden", 0) or 0)),
+                    locations=locations,
                 )
             )
         return sections
+
+    async def refresh_section(self, section_id: str, *, path: str | None = None) -> None:
+        """``GET /library/sections/{id}/refresh`` — scan a library, or one folder of it.
+
+        ``path`` is passed exactly as given (``httpx`` URL-encodes it), in the
+        server's own spelling: Plex compares it with the library's folders and
+        scans only what is under it, which on a large library is the difference
+        between a second and several minutes. Without ``path`` the whole
+        library is scanned. Plex answers at once and scans in the background.
+        """
+        url = f"{self.base_url}/library/sections/{section_id}/refresh"
+        headers = {"Accept": "application/json", "X-Plex-Token": self.token}
+        params = {"path": path} if path else None
+        try:
+            response = await self.client.get(
+                url, headers=headers, params=params, timeout=self._timeout
+            )
+        except httpx.HTTPError as exc:
+            raise PlexServerError(f"GET {url} failed: {exc}") from exc
+        if response.status_code >= 400:
+            raise PlexServerError(
+                f"Plex server returned {response.status_code}",
+                status_code=response.status_code,
+            )
+
+    async def recent_items(
+        self, section_id: str, section_type: str, *, size: int = 50
+    ) -> list[PlexItemFiles]:
+        """The ``size`` most recently added movies or episodes in a library, with files.
+
+        Newest first, by ``addedAt``. A show library is listed by episode
+        (``type=4``), since a file belongs to an episode, not to its show.
+        """
+        params = {
+            "sort": "addedAt:desc",
+            "X-Plex-Container-Start": "0",
+            "X-Plex-Container-Size": str(size),
+        }
+        item_type = PLEX_ITEM_TYPE_BY_SECTION.get(section_type)
+        if item_type:
+            params["type"] = item_type
+        container = await self._get_json(f"/library/sections/{section_id}/all", params=params)
+        items: list[PlexItemFiles] = []
+        for raw in container.get("Metadata", []) or []:
+            if not isinstance(raw, dict) or not raw.get("ratingKey"):
+                continue
+            files = tuple(
+                str(part["file"])
+                for media in raw.get("Media", []) or []
+                if isinstance(media, dict)
+                for part in media.get("Part", []) or []
+                if isinstance(part, dict) and part.get("file")
+            )
+            items.append(
+                PlexItemFiles(
+                    rating_key=str(raw["ratingKey"]),
+                    title=str(raw.get("title") or ""),
+                    files=files,
+                )
+            )
+        return items
 
     async def list_collections(self, library_id: str) -> list[PlexCollection]:
         """``GET /library/sections/{library_id}/collections`` — that library's collections.

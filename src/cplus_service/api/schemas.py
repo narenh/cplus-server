@@ -53,6 +53,12 @@ class ReleaseFields(MediaIdentity):
     release_title: str = Field(min_length=1)
     size_bytes: int | None = Field(default=None, ge=0)
 
+    #: The release's ``info_hash`` from the search result, when it had one.
+    #: Optional, and only used by grab tracking to find the torrent in
+    #: qBittorrent; without it the server looks the hash up from its own recent
+    #: searches, then falls back to matching the torrent by name.
+    info_hash: str | None = Field(default=None, max_length=128)
+
 
 class GrabRequest(ReleaseFields):
     """``POST /grab`` — tvOS only.

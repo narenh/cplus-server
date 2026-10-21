@@ -1,0 +1,23 @@
+{# The grab-tracking master switch. Returned by POST /admin/config/grab-tracking,
+   so the checkbox always shows what the server saved rather than what was
+   clicked. It writes through on its own, like the Seerr webhook buttons below:
+   the page's Save button is for the fields, not for this. #}
+<div id="grab-tracking-switch">
+  <label class="notify-master">
+    <input type="checkbox" name="tracking_enabled"
+           {% if config.grab_tracking_enabled %}checked{% endif %}
+           hx-post="/admin/config/grab-tracking"
+           hx-target="#grab-tracking-switch"
+           hx-swap="outerHTML">
+    <span>Follow grabs into Plex</span>
+  </label>
+  {% if not config.grab_tracking_enabled %}
+    <p class="readonly-value unset">Off — Canopy+ falls back to its own refresh timers.</p>
+  {% elif not config.qbittorrent_url %}
+    <p class="readonly-value unset">On, but inactive until a qBittorrent URL is saved.</p>
+  {% elif not plex_connected %}
+    <p class="readonly-value unset">On, but inactive: no Plex server is connected. Sign out and back in, or press Reconnect on the Libraries tab.</p>
+  {% else %}
+    <p class="readonly-value">On — Canopy+ follows each grab here instead of guessing.</p>
+  {% endif %}
+</div>

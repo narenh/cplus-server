@@ -101,7 +101,7 @@ Only the handful that must exist before the UI does:
 | `CPLUS_PORT` | `8080` | Listen port |
 | `CPLUS_HOST` | `0.0.0.0` | Bind address |
 | `CPLUS_DB_PATH` | `/data/cplus.db` | SQLite file, on the mounted volume |
-| `CPLUS_LOG_LEVEL` | `info` | uvicorn log level |
+| `CPLUS_LOG_LEVEL` | `info` | uvicorn log level, and the level of grab tracking's own log lines (see [Grab tracking](#the-log)) |
 | `CPLUS_FORWARDED_ALLOW_IPS` | `*` | Which peers' `X-Forwarded-*` headers to trust. Safe as `*` behind a proxy; narrow it if the port is exposed directly |
 | `CPLUS_ALIGN_DIR` | *(set to `/align` in `docker-compose.yml`)* | The volume shared with the `cplus-aligner` sidecar, on both services. Unset, the Audiobooks tab says Canopy+ Audiobooks isn't set up. See [Canopy+ Audiobooks](#canopy-audiobooks) |
 | `CPLUS_INTERNAL_URL` | `http://cplus-service:8080` | How the aligner sidecar reaches this service for audio. The default is the compose service name; change it only if you rename the service |
@@ -204,6 +204,9 @@ src/cplus_service/
   quality/describe.py   the same profile in plain English, for the admin UI
   quality/samples.py    the fixed release cast the profile preview ranks
   prowlarr/client.py    async Prowlarr API wrapper
+  qbittorrent/client.py async qBittorrent Web API v2 wrapper (grab tracking only)
+  tracking/             grab tracking: finding the torrent, header pieces, the
+                        Plex scan and match, per-grab state and the long poll
   seerr/client.py       async Seerr API wrapper (auth + allowlisted request ops)
   seerr/webhook.py      reading Seerr's outbound webhook, forgivingly
   auth/plex_cache.py    persisted Plex-token -> user mapping (tvOS auth)
@@ -212,8 +215,8 @@ src/cplus_service/
   search/stream.py      IMDB and free-text search, NDJSON phases
   api/app.py            FastAPI factory + lifespan
   api/deps.py           auth/config/client dependencies
-  api/routes/           register, home, titles, tmdb_actions, grab, manager,
-                        request, seerr, webhooks, playback
+  api/routes/           register, home, titles, tmdb_actions, grab, grabs,
+                        manager, request, seerr, webhooks, playback
   api/routes/admin/     the admin webui: config, profiles, actions,
                         permissions, activity, playback, login (Plex PIN flow)
   playback/             playback events: the body Canopy+ posts, forwarding it
@@ -594,7 +597,7 @@ migration deletes, so nothing can prove what they were resolved against.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /capabilities` | none | What this instance has switched on, before anyone signs in: `{"notifications": bool, "playback_events": bool}` |
+| `GET /capabilities` | none | What this instance has switched on, before anyone signs in: `{"notifications": bool, "playback_events": bool, "grab_tracking": bool}` |
 | `GET /register` | live Seerr | **tvOS only.** The auth checkpoint. Always reports `plex_server` and `audiobooks` (whether there is a finished read-along book the caller can see); with `first_run=true`, bundles the Libraries seed and the caller's Home |
 | `GET /audiobooks` | cache + Plex | Finished read-along books in libraries the caller can see, with their progress. See [Audiobooks for clients](#audiobooks-for-clients) |
 | `GET /audiobooks/{ratingKey}` | cache + Plex | One book's index: files and their offsets, chapters, chunk time ranges, `version` |
@@ -606,10 +609,11 @@ migration deletes, so nothing can prove what they were resolved against.
 | `GET /titles/{imdb_id}/actions` | cache | NDJSON stream: releases plus, per permitted action, a recommended release. Empty unless the caller holds a Prowlarr-backed action |
 | `GET /movies/tmdb/{tmdb_id}/actions` | cache | A movie with no IMDB id: nothing to search with, so Request only. Plain JSON, one line's shape |
 | `GET /tv/tmdb/{tmdb_id}/actions` | cache | A TV title: grab actions undecided, so Request only. Plain JSON, one line's shape |
-| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?}` |
+| `POST /grab` | cache | `{action_id, release_guid, indexer_id, release_title, size_bytes?, info_hash?}` → `{success, message, grab_id}`. `grab_id` is set only when [grab tracking](#grab-tracking) started for this grab, otherwise `null` |
+| `GET /grabs/{grab_id}?since=&wait=` | cache | A tracked grab's phase, download numbers and, once ready, its Plex `rating_key`. A long poll; own grabs only. See [Grab tracking](#grab-tracking) |
 | `POST /playback/events` | cache | One moment in an Apple TV's playback, forwarded to the admin's webhooks. 202 at once; 403 while the Playback tab's switch is off; 422 for an unknown event. See [Playback events](#playback-events) |
 | `GET /manager/search` | live Seerr | **admin only.** Unrestricted search by IMDB id or free text, independent of holding any action |
-| `POST /manager/grab` | live Seerr | **admin only.** `{release_guid, indexer_id, release_title, size_bytes?}` — no action, and no client to name: Prowlarr picks its own default |
+| `POST /manager/grab` | live Seerr | **admin only.** `{release_guid, indexer_id, release_title, size_bytes?, info_hash?}` — no action, and no client to name: Prowlarr picks its own default. Tracked like `/grab` |
 | `GET /manager/tmdb-token` | live Seerr | **admin only.** The saved TMDB bearer token, verbatim — clients need it to resolve TMDB ids to IMDB ids |
 | `POST /manager/push-devices` | live Seerr | **admin only.** `{device_token, environment?, device_name?}` — the app offering its APNs token. 409 while notifications are off |
 | `DELETE /manager/push-devices/{token}` | live Seerr | **admin only.** The app handing its own token back on sign-out. Never gated on notifications being on |
@@ -707,7 +711,11 @@ state rather than a client omission. Both bodies reject unknown fields, so
 handed an `action_id`.
 
 Because the grab body is self-contained, the server keeps **no state between
-a search/actions call and a grab** — a restart in between is harmless.
+a search/actions call and a grab** — a restart in between is harmless. The one
+exception is an optimisation, not a dependency: searches remember each
+release's info hash in memory, so that [grab tracking](#grab-tracking) can find
+the grabbed torrent by hash. Lose that (a restart, say) and tracking matches the
+torrent by name instead; the grab itself never notices.
 
 ### Inbound webhook (Seerr)
 
@@ -728,8 +736,10 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 |---|---|
 | `GET /admin/login` | The only ungated admin route. Shows the Seerr host; cannot set it |
 | `POST /admin/plex/pin`, `GET /admin/plex/pin/{id}` | Proxied Plex PIN flow. Ungated, and so takes no parameters at all |
-| `GET/POST /admin/config` | Prowlarr, preferred indexer, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
+| `GET/POST /admin/config` | Prowlarr, preferred indexer, qBittorrent, TMDB bearer token. The Seerr host is displayed read-only — there is no endpoint that changes it |
 | `POST /admin/config/verify-prowlarr` | Connect/Verify button |
+| `POST /admin/config/verify-qbittorrent` | Signs in to qBittorrent with the saved settings and reports its version |
+| `POST /admin/config/grab-tracking` | The grab-tracking master switch; returns itself |
 | `POST /admin/config/seerr-webhook`, `/seerr-webhook/disable` | Issue (or rotate) the secret Seerr presents at `POST /webhooks/seerr`, and forget it again. Generated here, never typed — the page shows it because the next step is pasting it into Seerr |
 | `GET /admin/prowlarr/indexers`, `/download-clients` | Proxies, for dropdowns |
 | `GET /admin/quality-profiles`, `/new`, `/{id}` | List, create, edit |
@@ -747,7 +757,7 @@ Session-gated, ADMIN-bit-gated, all server-rendered:
 | `POST /admin/audiobooks/books/{ratingKey}/import` | Upload a finished alignment made elsewhere (the book's "⋯" menu) |
 | `GET /admin/audiobooks/cover/{ratingKey}` | Cover art, fetched with the admin token so the page never holds it |
 
-The three proxy/verify endpoints answer **JSON by default** and HTML with
+The proxy/verify endpoints answer **JSON by default** and HTML with
 `?format=html`. JSON keeps them usable as an API; the HTML variant is what the
 page swaps straight into the DOM.
 
@@ -1396,6 +1406,169 @@ themselves are in the database (`playback_webhooks`). A Home Assistant webhook
 URL is its own credential — anyone holding it can fire the automation — so the
 log names a webhook by scheme and host only; the full URL appears only on the
 Playback tab.
+
+## Grab tracking
+
+When Canopy+ grabs a release, Prowlarr sends it to the action's download client
+exactly as it always has. If that client is a qBittorrent that downloads
+straight into a folder Plex watches, Plex can play the file long before it has
+finished — it only needs the first few MB to identify it. Grab tracking is cplus
+following the download to that moment and telling the app: find the torrent,
+have qBittorrent fetch the start of the file first, scan just that folder the
+moment the file is scannable, and catch the new item the moment Plex adds it.
+The app shows progress, then starts playback, instead of refreshing every
+library on a timer and hoping.
+
+**It is a side job.** It starts only after Prowlarr has accepted the grab, the
+grab request makes no call to qBittorrent, and nothing tracking does can turn a
+successful grab into a failed one. An unreachable qBittorrent, a refused
+password, a torrent that never shows up: each ends that grab's tracking in
+`failed` with a sentence saying why, and changes nothing else. With tracking off
+or not configured, a grab behaves exactly as it did before tracking existed, and
+`grab_id` comes back `null` so the app keeps its own timers.
+
+### What it needs
+
+* **qBittorrent's Web UI** — URL, username and password on the Configuration
+  tab, with a **Verify qBittorrent connection** button. The password is stored
+  like the Prowlarr key: in the database, never rendered into a page, never
+  logged, never sent anywhere but qBittorrent. Leave both blank if the Web UI
+  lets this server in without signing in.
+* **The switch** ("Follow grabs into Plex", under the qBittorrent fields). Off by
+  default.
+* **A Plex server** — the one found when the admin signs in to this console
+  (the Libraries tab's Reconnect re-finds it). Its admin token does the scanning.
+* **Same paths on both sides.** cplus never touches the disk: it hands Plex the
+  path qBittorrent reports (`E:\Movies\Some.Release.2024\…`), so Plex must see
+  the same path — in practice, Plex and qBittorrent on the same machine.
+* **qBittorrent writing straight into the library**: no "Keep incomplete torrents
+  in" folder and no `.!qB` extension for incomplete files. Preallocation off is
+  best, so the file on disk is the downloaded part and nothing else.
+
+Grabs are not sent any differently: Prowlarr still chooses the download client,
+category and save path. cplus only finds the torrent afterwards.
+
+`GET /capabilities` reports `"grab_tracking": true` only when all of the above
+holds — switch on, qBittorrent URL set, Plex server known. That is the app's cue
+to follow `GET /grabs/{id}` rather than its own timers.
+
+### What happens to a grab
+
+One background task per grab walks these phases:
+
+1. **`finding_torrent`** — polls qBittorrent's torrent list about once a second
+   for up to ~30 s. By info hash when one is known — from the search result
+   this service saw for that release moments earlier, a magnet link standing in
+   for the guid, an `info_hash` the app sent, or Prowlarr's grab echo — and
+   otherwise the newest torrent added since just before the grab whose name is
+   the release title, compared without case or punctuation (or a name that
+   merely contains the title, like `…-GRP[TGx]`, when long enough to trust). If
+   nothing new turns up, an older torrent of the same name is used: qBittorrent
+   ignores a torrent it already has. The hash found is recorded on the grab.
+2. **`downloading_header`** — switches on *sequential download* and
+   *first/last piece priority* for that torrent. Both qBittorrent endpoints
+   toggle, so each is flipped only if `torrents/info` says it is off. Once a
+   magnet link's metadata has arrived, the main file is the torrent's largest
+   video file (`mkv`, `mp4`, `m4v`, `avi`, `ts`, `m2ts`, …). From its
+   `piece_range` and the torrent's piece size, the pieces holding its first
+   3 MiB and its last piece are worked out — including the extra piece needed
+   when the file does not start on a piece boundary, the norm in a multi-file
+   torrent — and `pieceStates` is polled about once a second until all are
+   complete. Gives up after 30 minutes.
+3. **`scanning`** — `GET /library/sections/{id}/refresh?path=<folder>` on the
+   library whose folder holds the release, with the path spelled exactly as
+   qBittorrent spells it. The folder is the torrent's own folder for a
+   multi-file torrent, the file's directory for a single file. Library folders
+   are compared case-insensitively and in either slash direction; the deepest
+   match wins. If no library holds it, every library of the release's kind
+   (`show` for a name like `S01E02`, otherwise `movie`) is scanned whole, and
+   the log says so.
+4. **`matching`** — polls those libraries' most recently added items about once
+   a second for one whose file is the main file (same comparison), for up to
+   ~60 s, scanning once more if it has not appeared after ~20 s.
+5. **`ready`** with its `rating_key`, or **`failed`** with an `error`, from any
+   phase. A refused password fails at once; other errors from qBittorrent or
+   Plex are retried a few times first.
+
+Plex's notification websocket would catch the item without polling; this
+version polls, which is one small request a second for the few seconds a grab
+spends in `matching`.
+
+### `GET /grabs/{grab_id}`
+
+Authenticated like `POST /grab` (the stored token mapping). A caller sees only
+their own grabs; anyone else's, an unknown id, and a grab that was never
+tracked are all 404.
+
+A **long poll**. `since` is the last `version` the app saw (default `0`);
+`wait` is how long to hold the request open, in seconds, capped at 25. A state
+newer than `since` is answered at once; otherwise the request waits until
+something changes or `wait` runs out, and answers with the current state either
+way:
+
+```json
+{
+  "grab_id": 17,
+  "version": 9,
+  "phase": "downloading_header",
+  "title": "Some.Release.2024.1080p.WEB-DL-GRP",
+  "header": {"have_mb": 2.0, "need_mb": 5.0},
+  "download": {"progress": 0.0123, "speed_mbps": 84.2, "eta_seconds": 1430},
+  "rating_key": null,
+  "error": null
+}
+```
+
+* `phase` — `finding_torrent`, `downloading_header`, `scanning`, `matching`,
+  `ready`, `failed`.
+* `version` — goes up by one on every change, the download numbers included.
+* `header` — MiB of the pieces Plex needs before the scan, and how many are on
+  disk. Whole pieces, so with large pieces `need_mb` is more than 3. `null`s
+  until the file list is known.
+* `download` — `progress` 0–1 for the whole torrent, `speed_mbps` in
+  **megabits** per second, `eta_seconds` (`null` when qBittorrent has no
+  estimate). `null`s until the torrent is found.
+* `rating_key` — set once `ready`: the movie or episode to play.
+* `error` — set once `failed`, fit to show.
+
+A loop for the app:
+
+```
+POST /grab                          → {"success": true, "grab_id": 17}
+GET  /grabs/17                      → version 1, finding_torrent
+GET  /grabs/17?since=1&wait=25      → version 2 … as soon as it changes
+…                                   → until phase is ready (play rating_key)
+                                      or failed (show error)
+```
+
+### What is kept
+
+The live state is in memory, for an hour after a grab finishes. The phase,
+torrent hash, rating key and error are also written to the grab's row
+(`grabs.tracking_phase`, `torrent_hash`, `rating_key`, `tracking_error`), so
+after a restart `GET /grabs/{id}` answers a finished grab from the row and an
+unfinished one as `failed` (nothing is following it any more). The Grabs tab
+shows each tracked grab's phase beside its release, with the error as a
+tooltip.
+
+### The log
+
+Every step is logged at INFO with the grab id, the seconds since the grab and
+the title — the torrent found and how (hash cut to 8 characters), the main file
+and its size, the header pieces and their size, the header completing, each
+scan with its library and folder, the item found — and each grab ends with one
+summary line:
+
+```
+grab 12 tracking done in 14.2 s: torrent 1.1 s, header 6.8 s, scan→item 6.3 s, rating_key 12345
+grab 13 tracking failed after 31.0 s during finding_torrent: qBittorrent never showed this download. …
+```
+
+No token, password or cookie appears in any of it. uvicorn gives handlers only
+to its own loggers, so every other logger in this process prints warnings and
+errors only; these two (`cplus_service.tracking` and
+`cplus_service.qbittorrent`) get a handler of their own at `CPLUS_LOG_LEVEL`.
+The rest of the service's logging is unchanged.
 
 ## Canopy+ Audiobooks
 

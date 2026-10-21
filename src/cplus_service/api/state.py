@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ..audiobooks.access import PlexAccess
 from ..playback.forward import PlaybackLog
+from ..tracking.hashes import ReleaseHashCache
+from ..tracking.tracker import GrabTracker
 
 
 @dataclass
@@ -65,6 +67,14 @@ class AppState:
     that hold a Prowlarr key or a Seerr session. Its own short timeout, too: see
     :data:`~cplus_service.playback.forward.DELIVERY_TIMEOUT_SECONDS`."""
 
+    qbittorrent_http: httpx.AsyncClient
+    """Fifth client, for qBittorrent's Web UI (grab tracking).
+
+    Separate because qBittorrent hands out a session cookie that is as good as
+    its password, and that cookie has no business in a jar shared with the
+    clients that talk to Prowlarr or arbitrary webhook URLs. Short timeouts:
+    every call is a small read on the LAN, polled about once a second."""
+
     pending_plex_logins: dict[int, PendingPlexLogin] = field(default_factory=dict)
     """In-flight webui sign-ins, keyed by plex.tv PIN id.
 
@@ -81,3 +91,10 @@ class AppState:
     playback: PlaybackLog = field(default_factory=PlaybackLog)
     """The Playback tab's recent events and each webhook's last delivery
     result. In memory only, by design: see :mod:`cplus_service.playback`."""
+
+    grab_tracker: GrabTracker = field(default_factory=GrabTracker)
+    """Tracked grabs and the tasks tracking them. See :mod:`cplus_service.tracking`."""
+
+    release_hashes: ReleaseHashCache = field(default_factory=ReleaseHashCache)
+    """Info hashes seen in recent searches, keyed by release, so a grab can
+    find its torrent by hash. See :mod:`cplus_service.tracking.hashes`."""

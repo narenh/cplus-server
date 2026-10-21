@@ -21,6 +21,7 @@ import httpx
 
 from ..release.models import ParsedRelease
 from ..release.parser import parse_prowlarr_results
+from ..tracking.hashes import ReleaseHashCache
 from .models import DownloadClient, GrabResult, Indexer, SystemStatus
 
 logger = logging.getLogger(__name__)
@@ -73,12 +74,14 @@ class ProwlarrClient:
         *,
         client: httpx.AsyncClient | None = None,
         timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+        hash_cache: ReleaseHashCache | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self._timeout = timeout
         self._client = client
         self._owns_client = client is None
+        self._hash_cache = hash_cache
 
     # ----------------------------------------------------------------- #
     # Lifecycle
@@ -187,6 +190,17 @@ class ProwlarrClient:
             )
         return payload
 
+    def _remember_hashes(self, releases: Sequence[ParsedRelease]) -> None:
+        """Note each release's info hash for grab tracking, if a cache was given.
+
+        See :mod:`cplus_service.tracking.hashes`: a grab arrives carrying only
+        the guid, and this is where the hash for that guid was last seen.
+        """
+        if self._hash_cache is None:
+            return
+        for release in releases:
+            self._hash_cache.remember(release.indexer_id, release.guid, release.info_hash)
+
     # ----------------------------------------------------------------- #
     # API surface
     # ----------------------------------------------------------------- #
@@ -233,6 +247,7 @@ class ProwlarrClient:
 
         raw_results = await self._request_list("GET", "search", params=params)
         releases = parse_prowlarr_results(raw_results)
+        self._remember_hashes(releases)
         logger.debug(
             "prowlarr search imdb=%s raw=%d parsed=%d (full discs dropped=%d)",
             imdb_id,
@@ -264,6 +279,7 @@ class ProwlarrClient:
 
         raw_results = await self._request_list("GET", "search", params=params)
         releases = parse_prowlarr_results(raw_results)
+        self._remember_hashes(releases)
         logger.debug(
             "prowlarr text search %r raw=%d parsed=%d (full discs dropped=%d)",
             query,

@@ -185,6 +185,10 @@ class ParsedRelease(ParsedTitle):
     download_url: str | None = None
     info_url: str | None = None
     protocol: str | None = None
+    info_hash: str | None = None
+    """The torrent's info hash in lower-case hex, when the indexer gave one
+    (directly or inside a magnet link) — ``None`` for usenet, and for most
+    private trackers. See :mod:`cplus_service.release.infohash`."""
 
     @property
     def size_gb(self) -> float | None:

@@ -46,6 +46,46 @@
     <span id="verify-result" class="inline-result"></span>
   </div>
 
+  <h2>qBittorrent</h2>
+  <p class="hint">
+    Optional. When Canopy+ grabs a release, Prowlarr still sends it to the
+    action's download client exactly as before. With qBittorrent set here and
+    the switch on, cplus then finds that torrent in qBittorrent, has it download
+    the start of the video first, asks Plex to scan just that folder as soon as
+    the first few MB are on disk, and tells Canopy+ the moment the item exists —
+    so playback can start while the rest downloads. Plex and qBittorrent must
+    see the same paths (normally: the same machine), and qBittorrent must write
+    straight into the library folder: no "Keep incomplete torrents in" folder
+    and no <code>.!qB</code> extension.
+  </p>
+  <label for="qbittorrent_url">Web UI URL</label>
+  <input type="url" id="qbittorrent_url" name="qbittorrent_url" value="{{ config.qbittorrent_url or '' }}"
+         data-original="{{ config.qbittorrent_url or '' }}"
+         placeholder="http://192.168.1.20:8080">
+
+  <label for="qbittorrent_username">Username</label>
+  <input type="text" id="qbittorrent_username" name="qbittorrent_username" autocomplete="off"
+         value="{{ config.qbittorrent_username or '' }}"
+         data-original="{{ config.qbittorrent_username or '' }}">
+
+  <label for="qbittorrent_password">Password</label>
+  <input type="password" id="qbittorrent_password" name="qbittorrent_password" autocomplete="off" data-original=""
+         placeholder="{{ '············ (unchanged)' if config.qbittorrent_password else 'optional' }}">
+  <p class="hint">
+    {% if config.qbittorrent_password %}A password is saved. Leave blank to keep it.{% else %}Not set.{% endif %}
+    Leave both blank if qBittorrent lets this server in without signing in.
+  </p>
+
+  <div class="row">
+    <button type="button" class="secondary"
+            hx-post="/admin/config/verify-qbittorrent?format=html"
+            hx-target="#verify-qbittorrent-result"
+            hx-swap="innerHTML">Verify qBittorrent connection</button>
+    <span id="verify-qbittorrent-result" class="inline-result"></span>
+  </div>
+
+  {% include "partials/grab_tracking_switch.html" %}
+
   <h2>TMDB</h2>
   <label for="tmdb_bearer_token">Bearer token</label>
   <input type="password" id="tmdb_bearer_token" name="tmdb_bearer_token" autocomplete="off" data-original=""

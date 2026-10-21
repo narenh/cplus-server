@@ -1,8 +1,9 @@
 """FastAPI application factory.
 
-Long-lived resources (the database engine and the four outbound HTTP clients —
-one for Prowlarr, one kept separate for Seerr, one for the notification relay,
-one for playback-event webhooks)
+Long-lived resources (the database engine and the five outbound HTTP clients —
+one for Prowlarr (and the admin's Plex server), one kept separate for Seerr, one
+for the notification relay, one for playback-event webhooks, one for
+qBittorrent)
 are created once per process in the lifespan and hung off ``app.state``.
 Nothing per-request owns them.
 """
@@ -49,6 +50,7 @@ from .routes import (
     audiobooks,
     capabilities,
     grab,
+    grabs,
     home,
     internal,
     manager,
@@ -117,6 +119,9 @@ def create_app(
         # same length (see cplus_service.playback.forward); this one bounds
         # each phase so a dead host is given up on promptly.
         playback_http = httpx.AsyncClient(timeout=httpx.Timeout(DELIVERY_TIMEOUT_SECONDS))
+        # qBittorrent, for grab tracking: small LAN reads polled about once a
+        # second, so a dead host should fail fast and be retried.
+        qbittorrent_http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
 
         if create_schema:
             await create_all(active_engine)
@@ -128,6 +133,7 @@ def create_app(
             seerr_http=seerr_http,
             relay_http=relay_http,
             playback_http=playback_http,
+            qbittorrent_http=qbittorrent_http,
         )
 
         async with session_scope(sessionmaker) as session:
@@ -163,6 +169,7 @@ def create_app(
         try:
             yield
         finally:
+            await app.state.cplus.grab_tracker.aclose()
             if monitor is not None:
                 monitor.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -171,6 +178,7 @@ def create_app(
             await seerr_http.aclose()
             await relay_http.aclose()
             await playback_http.aclose()
+            await qbittorrent_http.aclose()
             if owns_engine:
                 await active_engine.dispose()
 
@@ -190,6 +198,7 @@ def create_app(
     app.include_router(titles.router)
     app.include_router(tmdb_actions.router)
     app.include_router(grab.router)
+    app.include_router(grabs.router)
     app.include_router(manager.router)
     app.include_router(push_devices.router)
     app.include_router(playback.router)

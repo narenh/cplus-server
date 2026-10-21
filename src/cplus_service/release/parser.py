@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
+from .infohash import info_hash_of
 from .models import ParsedRelease, ParsedTitle, Resolution, Source
 
 # --------------------------------------------------------------------------- #
@@ -445,6 +446,7 @@ def parse_prowlarr_result(raw: Mapping[str, Any]) -> ParsedRelease:
         download_url=raw.get("downloadUrl") or raw.get("magnetUrl"),
         info_url=raw.get("infoUrl"),
         protocol=raw.get("protocol"),
+        info_hash=info_hash_of(raw),
     )
 
 

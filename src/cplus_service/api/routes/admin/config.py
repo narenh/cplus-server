@@ -1,4 +1,4 @@
-"""Configuration page and the Prowlarr proxy endpoints.
+"""Configuration page, the Prowlarr proxy endpoints, and qBittorrent for grab tracking.
 
 The three proxy/verify endpoints answer JSON by default and HTML when asked with
 ``?format=html``. JSON keeps them usable as a real API; the HTML variant is what
@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from ....db.models import Config
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
+from ....qbittorrent.client import QBittorrentClient, QBittorrentError
 from ....settings import SEERR_URL_ENV, seerr_url
 from ....web import templates
 from ...deps import DbDep, StateDep
@@ -74,6 +75,7 @@ async def config_page(request: Request, db: DbDep, admin: AdminPageDep) -> Respo
         {
             **_webhook_context(request, config),
             "admin": admin,
+            **_tracking_context(config),
             # Straight from the environment, never from the database — the page
             # shows the one live answer rather than a copy that could drift.
             "seerr_url": seerr_url(),
@@ -93,6 +95,7 @@ async def save_config(
     prowlarr_api_key: str = Form(default=""),
     preferred_indexer_id: str | None = Form(default=None),
     tmdb_bearer_token: str = Form(default=""),
+    qbittorrent_password: str = Form(default=""),
 ) -> Response:
     config = await get_config(db)
     config.prowlarr_url = prowlarr_url.strip().rstrip("/") or None
@@ -104,6 +107,19 @@ async def save_config(
 
     if tmdb_bearer_token.strip():
         config.tmdb_bearer_token = tmdb_bearer_token.strip()
+
+    # Absent leaves the saved value alone, so a post that predates these
+    # fields cannot clear them; present and empty clears it. Read off the raw
+    # form because FastAPI turns an empty optional form field into its
+    # default, which would make "emptied" and "absent" the same thing. The
+    # password follows the API key's rule instead: blank always means "keep it".
+    form = await request.form()
+    if "qbittorrent_url" in form:
+        config.qbittorrent_url = str(form["qbittorrent_url"]).strip().rstrip("/") or None
+    if "qbittorrent_username" in form:
+        config.qbittorrent_username = str(form["qbittorrent_username"]).strip() or None
+    if qbittorrent_password:
+        config.qbittorrent_password = qbittorrent_password
 
     # Three states, not two. Empty means the "All indexers" default, which is
     # null and not a sentinel — but *absent* means the page could not offer a
@@ -254,3 +270,68 @@ async def list_download_clients(
             {"clients": clients, "error": error, "selected": None},
         )
     return JSONResponse({"download_clients": clients, "error": error})
+
+
+# --------------------------------------------------------------------------- #
+# qBittorrent (grab tracking)
+# --------------------------------------------------------------------------- #
+
+
+def _tracking_context(config: Config) -> dict[str, object]:
+    """What the grab-tracking switch renders from."""
+    return {
+        "config": config,
+        "plex_connected": bool(config.plex_admin_token and config.plex_server_base_url),
+    }
+
+
+@router.post("/config/verify-qbittorrent")
+async def verify_qbittorrent(
+    request: Request, state: StateDep, db: DbDep, admin: AdminPageDep, format: Format = "json"
+) -> Response:
+    """Sign in to qBittorrent with the saved settings and read its version.
+
+    A throwaway client, not the one grab tracking shares: a verify must prove
+    the saved password works *now*, not reuse a session cookie from before it
+    was changed.
+    """
+    config = await get_config(db)
+    if not config.qbittorrent_url:
+        result = {"ok": False, "message": "Set the qBittorrent URL first, then save."}
+    else:
+        qbt = QBittorrentClient(
+            config.qbittorrent_url,
+            config.qbittorrent_username,
+            config.qbittorrent_password,
+            client=state.qbittorrent_http,
+        )
+        try:
+            version = await qbt.app_version()
+            api = await qbt.webapi_version()
+            result = {"ok": True, "message": f"Connected to qBittorrent {version} (Web API {api})."}
+        except QBittorrentError as exc:
+            result = {"ok": False, "message": str(exc)}
+
+    if format == "html":
+        return templates.TemplateResponse(request, "partials/verify.html", result)
+    return JSONResponse(result)
+
+
+@router.post("/config/grab-tracking", response_class=HTMLResponse)
+async def set_grab_tracking(
+    request: Request,
+    db: DbDep,
+    admin: AdminPageDep,
+    tracking_enabled: Annotated[str | None, Form()] = None,
+) -> Response:
+    """The grab-tracking master switch. Returns itself, showing what was saved.
+
+    A checkbox posts its value only when ticked, so absence is "off".
+    """
+    config = await get_config(db)
+    config.grab_tracking_enabled = tracking_enabled is not None
+    await db.flush()
+    logger.info("grab tracking switched %s", "on" if config.grab_tracking_enabled else "off")
+    return templates.TemplateResponse(
+        request, "partials/grab_tracking_switch.html", _tracking_context(config)
+    )

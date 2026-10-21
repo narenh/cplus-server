@@ -23,7 +23,11 @@ async def test_a_fresh_install_reports_notifications_off(
     response = await client.get("/capabilities")
 
     assert response.status_code == 200
-    assert response.json() == {"notifications": False, "playback_events": False}
+    assert response.json() == {
+        "notifications": False,
+        "playback_events": False,
+        "grab_tracking": False,
+    }
 
 
 async def test_it_reports_notifications_on_once_the_admin_enables_them(

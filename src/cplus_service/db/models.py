@@ -175,6 +175,33 @@ class Config(Base):
         Boolean, default=False, server_default="0"
     )
 
+    #: qBittorrent's Web UI address, e.g. ``http://192.168.1.20:8080``. Set,
+    #: together with the switch below, it turns on grab tracking: after a grab,
+    #: cplus finds the torrent in qBittorrent, has it fetch the start of the
+    #: file first, and tells Plex to scan the moment the file is scannable. See
+    #: :mod:`cplus_service.tracking`. ``None`` means not configured, and grabs
+    #: behave exactly as they did before tracking existed.
+    qbittorrent_url: Mapped[str | None] = mapped_column(String(512))
+
+    #: The Web UI username. Not a secret, so it is shown back on the page.
+    #: Blank (with a blank password) for a Web UI that lets this address in
+    #: without signing in.
+    qbittorrent_username: Mapped[str | None] = mapped_column(String(256))
+
+    #: The Web UI password. Stored like ``prowlarr_api_key`` — plaintext in
+    #: this row, never rendered into a page, never logged, never exposed over
+    #: the API.
+    qbittorrent_password: Mapped[str | None] = mapped_column(String(256))
+
+    #: The master switch for grab tracking, off by default like the other
+    #: switches. Tracking needs this *and* ``qbittorrent_url`` *and* a known
+    #: Plex server; ``GET /capabilities`` reports ``grab_tracking`` only when
+    #: all three hold, which is what tells the app to use ``GET /grabs/{id}``
+    #: instead of its own timers.
+    grab_tracking_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+
     #: The admin's own Plex auth token, kept from their most recent sign-in.
     #:
     #: Every other admin-facing use of Plex in this service resolves through
@@ -521,6 +548,22 @@ class Grab(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+    # Grab tracking (see :mod:`cplus_service.tracking`). All null for a grab
+    # made while tracking was off, which is every grab made before it existed.
+    # The live numbers (progress, speed) are kept in memory only; these are
+    # what is worth having after a restart.
+
+    #: The qBittorrent torrent this grab became, once found.
+    torrent_hash: Mapped[str | None] = mapped_column(String(64))
+    #: The tracking phase last reached — a :class:`~cplus_service.tracking.state.GrabPhase`
+    #: value. A non-final phase on a grab no task is tracking means the server
+    #: restarted mid-way.
+    tracking_phase: Mapped[str | None] = mapped_column(String(32))
+    #: The Plex item the download became, once ``ready``.
+    rating_key: Mapped[str | None] = mapped_column(String(32))
+    #: Why tracking ``failed``, in a sentence fit for the app.
+    tracking_error: Mapped[str | None] = mapped_column(String(512))
 
 
 class AdminSession(Base):

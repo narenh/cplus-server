@@ -81,7 +81,12 @@ async def get_prowlarr(state: StateDep, config: ConfigDep) -> ProwlarrClient:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Prowlarr is not configured yet. Set it in the admin settings.",
         )
-    return ProwlarrClient(config.prowlarr_url, config.prowlarr_api_key, client=state.http)
+    return ProwlarrClient(
+        config.prowlarr_url,
+        config.prowlarr_api_key,
+        client=state.http,
+        hash_cache=state.release_hashes,
+    )
 
 
 ProwlarrDep = Annotated[ProwlarrClient, Depends(get_prowlarr)]

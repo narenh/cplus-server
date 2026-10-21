@@ -5,19 +5,31 @@
 calling and *which* download client to send to. Once that is resolved, sending
 the release to Prowlarr and writing the ``grabs``/activity-log rows is
 identical — that shared tail lives here so neither route repeats it.
+
+So does starting grab tracking (see :mod:`cplus_service.tracking`), for the
+same reason: once the grab row exists, following the download to Plex does not
+depend on who asked for it.
 """
 
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Action, ActivityLog, EventType, Grab, User
+from ..db.session import get_config
 from ..notify.messages import media_from_release_title, user_action
 from ..prowlarr.client import ProwlarrClient, ProwlarrError
+from ..release.infohash import info_hash_from_magnet, info_hash_of, normalise_info_hash
+from ..tracking.hashes import ReleaseHashCache
+from ..tracking.runner import TrackingSettings
+from ..tracking.state import GrabPhase
 from .notifications import media_of, schedule
 from .schemas import GrabResponse, ReleaseFields
 from .state import AppState
@@ -57,8 +69,11 @@ async def execute_grab(
     event_type = EventType.ADMIN if admin else EventType.GRAB
     kind = {"kind": "grab"} if admin else {}
 
+    # Before the grab is sent: grab tracking looks for a torrent qBittorrent
+    # added after (about) this moment.
+    grabbed_at = time.time()
     try:
-        await prowlarr.grab(
+        result = await prowlarr.grab(
             guid=body.release_guid,
             indexer_id=body.indexer_id,
             download_client_id=download_client_id,
@@ -142,4 +157,97 @@ async def execute_grab(
             exclude_user_id=user.id,
         )
 
-    return GrabResponse(success=True, grab_id=record.id)
+    # Strictly after Prowlarr has accepted the grab, and unable to change its
+    # outcome: starting tracking reads the config row and nothing else — no
+    # call to qBittorrent happens on this request — and any failure to start
+    # leaves the grab exactly as successful as it already is.
+    tracked = await start_tracking(
+        db, state, record, body=body, prowlarr_echo=result.raw, grabbed_at=grabbed_at
+    )
+    # ``grab_id`` is what the app follows on ``GET /grabs/{id}``, so it is only
+    # handed out for a grab that is actually being followed. Without it the app
+    # keeps its own refresh timers. (Neither shipped client reads it today: the
+    # tvOS app ignores the field, and the admin app decodes it as optional.)
+    return GrabResponse(success=True, grab_id=record.id if tracked else None)
+
+
+def hash_hints(
+    body: ReleaseFields, prowlarr_echo: Mapping[str, Any], cache: ReleaseHashCache
+) -> list[str]:
+    """Every info hash this grab's torrent might answer to, best source first.
+
+    The app's own ``info_hash`` if it sent one; the hash this service saw for
+    the release in a recent search; a magnet link standing in for the guid; and
+    whatever Prowlarr echoed back from the grab. Often none of them — a private
+    tracker gives no hash anywhere — and then the torrent is found by name.
+    """
+    candidates = [
+        normalise_info_hash(body.info_hash),
+        cache.lookup(body.indexer_id, body.release_guid),
+        info_hash_from_magnet(body.release_guid),
+        info_hash_of(prowlarr_echo),
+    ]
+    hints: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in hints:
+            hints.append(candidate)
+    return hints
+
+
+async def start_tracking(
+    db: AsyncSession,
+    state: AppState,
+    record: Grab,
+    *,
+    body: ReleaseFields,
+    prowlarr_echo: Mapping[str, Any],
+    grabbed_at: float,
+) -> bool:
+    """Begin following ``record``'s download to Plex, if grab tracking is on.
+
+    Returns whether tracking started. Does nothing at all when it is off or not
+    fully configured, so the grab behaves exactly as it did before tracking
+    existed. Never talks to qBittorrent: whether qBittorrent is reachable, and
+    whether it accepts the password, is the background task's to find out, and
+    it reports a failure there as that grab's ``failed`` phase.
+
+    When it is on, the grab row is committed here, ahead of the request's own
+    commit: the tracking task writes to the row from its own session, and must
+    find it there.
+    """
+    settings = TrackingSettings.from_config(await get_config(db))
+    if settings is None:
+        return False
+    record.tracking_phase = GrabPhase.FINDING_TORRENT.value
+    await db.commit()
+    try:
+        _launch(state, record, settings, body=body, prowlarr_echo=prowlarr_echo,
+                grabbed_at=grabbed_at)
+    except Exception:
+        logger.exception("grab %s: could not start tracking", record.id)
+        record.tracking_phase = GrabPhase.FAILED.value
+        record.tracking_error = "Tracking could not start."
+        return False
+    return True
+
+
+def _launch(
+    state: AppState,
+    record: Grab,
+    settings: TrackingSettings,
+    *,
+    body: ReleaseFields,
+    prowlarr_echo: Mapping[str, Any],
+    grabbed_at: float,
+) -> None:
+    state.grab_tracker.start(
+        grab_id=record.id,
+        user_id=record.user_id,
+        title=record.release_title,
+        hash_hints=hash_hints(body, prowlarr_echo, state.release_hashes),
+        grabbed_at=grabbed_at,
+        settings=settings,
+        sessionmaker=state.sessionmaker,
+        qbittorrent_http=state.qbittorrent_http,
+        plex_http=state.http,
+    )

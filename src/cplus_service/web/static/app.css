@@ -571,6 +571,13 @@ td.release, td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .badge.by-admin { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .badge.by-user { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
 
+/* Grab tracking's phase, beside a release on the Grabs page: neutral while it
+   is under way, green once the item is in Plex, red when it failed (the error
+   is the tooltip). */
+.badge.tracking { background: color-mix(in srgb, var(--text-2, currentColor) 14%, transparent); color: inherit; font-weight: 500; }
+.badge.tracking.ready { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.tracking.failed { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+
 /* Says who a column is for, in the header, so the difference between the
    admin's own name for an action and the copy its button carries is visible
    without reading the note under the table. */
