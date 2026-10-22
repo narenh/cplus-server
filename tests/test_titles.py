@@ -467,6 +467,142 @@ async def test_titles_with_no_results_still_completes_the_stream(
 
 
 @respx.mock
+async def test_a_search_that_finds_nothing_offers_no_grab_actions(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    await grant(db, user, await make_action(db, "Stream Now"))
+    await grant(db, user, await make_action(db, "Add to Library"))
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    # Nothing to grab, so no grab buttons; the client says "Unavailable".
+    assert ndjson(response) == [{"phase": "all", "releases": [], "actions": []}]
+
+
+@respx.mock
+async def test_a_search_that_finds_nothing_still_offers_request(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    request_action = (
+        await db.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalar_one()
+    await grant(db, user, request_action)
+    await grant(db, user, await make_action(db, "Stream Now"))
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    [line] = ndjson(response)
+    assert [a["kind"] for a in line["actions"]] == ["request"]
+
+
+@respx.mock
+async def test_a_failed_search_offers_no_grab_actions(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(return_value=httpx.Response(500))
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    await grant(db, user, await make_action(db, "Stream Now"))
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    [line] = ndjson(response)
+    assert line["actions"] == []
+    assert "error" in line
+
+
+@respx.mock
+async def test_releases_filtered_out_by_the_profile_still_offer_the_grab_action(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    mock_prowlarr_search([WEB_1080])
+    await authenticate(client, plex_headers)
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream 4K")
+    profile = await db.get(QualityProfile, action.quality_profile_id)
+    assert profile is not None
+    profile.rules = [{"type": "keyword_exclude", "values": ["1080p"]}]
+    await db.commit()
+    await grant(db, user, action)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    # Something was found, so the person can still pick a release by hand.
+    [line] = ndjson(response)
+    assert line["actions"][0]["kind"] == "grab"
+    assert line["actions"][0]["recommended_release_guid"] is None
+
+
+@respx.mock
+async def test_grab_actions_wait_out_an_empty_preferred_phase(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    configured.preferred_indexer_id = 1
+    db.add(configured)
+    await db.commit()
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    def by_indexer(request: httpx.Request) -> httpx.Response:
+        scoped = request.url.params.get("indexerIds")
+        return httpx.Response(200, json=[] if scoped else [WEB_1080])
+
+    respx.get(f"{PROWLARR_URL}/api/v1/search").mock(side_effect=by_indexer)
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    preferred, everything = ndjson(response)
+    assert preferred["actions"] == []
+    assert everything["actions"][0]["id"] == action.id
+    assert everything["actions"][0]["recommended_release_guid"] == "guid-fhd"
+
+
+@respx.mock
+async def test_grab_actions_survive_an_all_phase_with_nothing_new(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
+) -> None:
+    mock_seerr_auth()
+    await authenticate(client, plex_headers)
+
+    configured.preferred_indexer_id = 1
+    db.add(configured)
+    await db.commit()
+
+    user = (await db.execute(select(User))).scalar_one()
+    action = await make_action(db, "Stream Now")
+    await grant(db, user, action)
+
+    # Same release from both calls, so the `all` line carries no releases of
+    # its own — but the preferred line already found one.
+    mock_prowlarr_search([WEB_2160])
+
+    response = await client.get("/titles/tt0111161/actions", headers=plex_headers)
+
+    preferred, everything = ndjson(response)
+    assert everything["releases"] == []
+    assert everything["actions"][0]["recommended_release_guid"] == "guid-uhd"
+
+
+@respx.mock
 async def test_preferred_only_scopes_titles_to_one_indexer(
     client: httpx.AsyncClient, db: AsyncSession, configured: Config, plex_headers: dict
 ) -> None:

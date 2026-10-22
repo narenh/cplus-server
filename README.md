@@ -634,6 +634,12 @@ client routes a press on `kind`: `"request"` posts to `/request`, `"grab"`
 posts to `/grab`. The full release list rides along in the same response, so
 "view all releases" needs no second call.
 
+**`"grab"` actions are only listed once a release has been found.** A line sent
+before any release has arrived (an empty `preferred` line, or a search that
+found nothing at all) leaves them out, because their buttons would have nothing
+to grab. A title that no indexer has ends with Request alone, or with an empty
+`actions`, which the client shows as unavailable.
+
 **Print `display_title` on the button, not `name`.** Every action reports
 both. The name is the admin's own label — it identifies the action in the
 admin UI, the grab history and notification text — while `display_title` is
@@ -915,7 +921,9 @@ of its recommended release or `null` if nothing survived that action's quality
 profile filters. The built-in Request action always appears with
 `recommended_release_guid: null` — it has no quality profile and never touches
 Prowlarr, so there is nothing to recommend, but the action itself is still
-reported so the client always knows which buttons to draw. **A caller holding
+reported so the client always knows which buttons to draw. `"grab"` actions are
+left out of any line sent before a release has been found, since their buttons
+would have nothing behind them. **A caller holding
 no Prowlarr-backed action never triggers a Prowlarr call at all** — actions are
 the only grant of indexer access a regular user has, so the response is a
 single `releases: []` line naming whatever they *are* permitted (Request, or

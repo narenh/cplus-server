@@ -11,6 +11,15 @@ do:
   one shared Prowlarr fetch, and reports its recommended release (or ``null``
   if nothing survived its filters).
 
+**Grab actions are only offered once a release has been found.** While no
+line has carried a single release — the preferred indexer came back empty, or
+nothing came back anywhere — every ``grab`` action is left out, because its
+button would lead to an empty release list. When the final line still has none,
+the client is left with Request alone, or nothing, which it shows as
+unavailable. A release that its profile filters out still counts: that action
+is offered with a ``null`` recommendation, because the person can still pick a
+release by hand.
+
 Every action is reported with both a ``name`` and a ``display_title``, and the
 client should print the **display title** on the button. The name is the
 admin's own label — it identifies the action in the admin UI and in
@@ -181,7 +190,8 @@ async def title_actions(
     this reuses unchanged. As with ``GET /manager/search``, the client's merge
     rule is **apply the last line you received, wholesale**: each line's
     ``actions`` array is complete on its own, not a delta from the previous
-    one.
+    one. Grab offers are absent from any line sent before a release has been
+    found; see the module docstring.
 
     ``preferred_only`` restricts the search to the admin's preferred indexer;
     see ``GET /manager/search`` for its exact semantics, which are identical
@@ -234,6 +244,10 @@ async def title_actions(
             yield json.dumps(payload, separators=(",", ":")) + "\n"
             return
 
+        # Every release any line has carried so far. The `all` line only sends
+        # what `preferred` had not, so its own `releases` cannot answer this.
+        found_any = False
+
         async for phase in stream_search(
             prowlarr=prowlarr,
             imdb_id=imdb_id,
@@ -243,8 +257,15 @@ async def title_actions(
         ):
             payload = phase.to_payload()
             recommendations = payload.pop("recommendations")
+            found_any = found_any or bool(phase.releases)
 
-            payload["actions"] = _ranked_offers(scorable, request_action, recommendations)
+            # No release yet means a grab button has nothing behind it: no
+            # recommendation to confirm and an empty list to pick from. Leaving
+            # them out is what lets the client say "Unavailable" (or offer only
+            # Request) when no indexer has the title.
+            payload["actions"] = _ranked_offers(
+                scorable if found_any else (), request_action, recommendations
+            )
 
             yield json.dumps(payload, separators=(",", ":")) + "\n"
 
