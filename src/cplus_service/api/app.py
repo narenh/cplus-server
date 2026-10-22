@@ -33,7 +33,7 @@ from ..bootstrap import (
     ensure_default_home_shelf,
     ensure_default_quality_profile,
     ensure_default_top_shelf,
-    ensure_request_action,
+    ensure_request_actions,
 )
 from ..db.session import (
     create_all,
@@ -137,7 +137,7 @@ def create_app(
         )
 
         async with session_scope(sessionmaker) as session:
-            await ensure_request_action(session)
+            await ensure_request_actions(session)
             await ensure_default_quality_profile(session)
             await ensure_default_home_shelf(session, await get_config(session))
             await ensure_default_carousel(session, await get_config(session))

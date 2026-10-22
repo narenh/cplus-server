@@ -524,7 +524,7 @@ async def test_a_request_filed_through_the_app_is_not_announced_twice(
         await db.execute(select(User).where(User.plex_username == "Robin Example"))
     ).scalar_one()
     action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     await grant(db, requester, action)
 

@@ -1,8 +1,8 @@
 """First-run seeding.
 
-The built-in Request action must always exist, so it is seeded idempotently on
-startup rather than by a data migration — that way an existing deployment gains
-it on upgrade without anyone running anything.
+The built-in Request actions (one for films, one for TV) must always exist, so
+they are seeded idempotently on startup rather than by a data migration — that
+way a fresh install gains them without anyone running anything.
 
 The starter quality profile is seeded the same way, for a different reason:
 every Prowlarr-backed action needs a profile, so an install with none has a
@@ -27,13 +27,19 @@ from .quality.models import default_profile
 
 logger = logging.getLogger(__name__)
 
-#: What the built-in action is called when seeded, and the one word the admin
-#: UI keeps for it. Nothing *looks it up* by name — the server finds this action
-#: by ``is_system`` and clients tell it apart by the ``kind`` field in the
-#: actions payload — so an admin may rename it freely. The word is reserved for
-#: a different reason: it names what this service does when it files a request
-#: in Seerr, so no other action may wear it and mislead whoever presses it.
+#: The button title both built-in Request actions are seeded with, and the one
+#: word the admin UI keeps for them. Nothing *looks it up* — the server finds
+#: these actions by ``request_type`` and clients tell them apart by the ``kind``
+#: field in the actions payload — so an admin may retitle them freely. The word
+#: is reserved for a different reason: it names what this service does when it
+#: files a request in Seerr, so no other action may wear it and mislead whoever
+#: presses it.
 REQUEST_ACTION_NAME = "Request"
+
+#: What each built-in Request action is called when seeded. Two names because
+#: names are unique and both appear side by side on the Users page; the button
+#: on the television reads :data:`REQUEST_ACTION_NAME` for both.
+REQUEST_ACTION_NAMES = {"movie": "Request Movies", "tv": "Request TV"}
 
 #: The starter profile's name. Like every other name here it is a label and not
 #: a contract — an ordinary profile an admin may rename, edit or delete once
@@ -41,47 +47,53 @@ REQUEST_ACTION_NAME = "Request"
 DEFAULT_PROFILE_NAME = "All"
 
 
-async def get_request_action(session: AsyncSession) -> Action | None:
-    """The built-in Request action, identified by its system flag."""
-    result = await session.execute(select(Action).where(Action.is_system.is_(True)))
+async def get_request_action(session: AsyncSession, media_type: str) -> Action | None:
+    """The built-in Request action for ``"movie"`` or ``"tv"``."""
+    result = await session.execute(select(Action).where(Action.request_type == media_type))
     return result.scalars().first()
 
 
-async def ensure_request_action(session: AsyncSession) -> Action | None:
-    """Seed the built-in Request action if it is missing.
+async def ensure_request_actions(session: AsyncSession) -> None:
+    """Seed whichever built-in Request action is missing.
 
-    Idempotent. It carries no download client and no quality profile — it never
-    touches Prowlarr, so the global preferred-indexer setting does not apply to
-    it either. Permissions are granted through the normal ``permissions`` table,
-    exactly like any admin-defined action.
+    Idempotent. They carry no download client and no quality profile — they
+    never touch Prowlarr, so the global preferred-indexer setting does not apply
+    to them either. Permissions are granted through the normal ``permissions``
+    table, exactly like any admin-defined action.
+
+    An install that already had a single Request action was split into these
+    two by migration ``a7c3e5f19b28``, which also carried over every grant;
+    this only ever seeds on a fresh install.
     """
-    existing = await get_request_action(session)
-    if existing is not None:
-        return existing
+    for media_type, name in REQUEST_ACTION_NAMES.items():
+        if await get_request_action(session, media_type) is not None:
+            continue
 
-    clash = await session.execute(select(Action).where(Action.name == REQUEST_ACTION_NAME))
-    if clash.scalars().first() is not None:
-        # Names are unique and an admin-defined action already holds this one.
-        # Reachable only on an install that predates the built-in action and
-        # already had one of its own called "Request"; leave their
-        # configuration alone rather than mangling it, and say what to do.
-        logger.error(
-            "cannot seed the built-in request action: a non-system action is already"
-            " named %r. Rename that one to enable /request.",
-            REQUEST_ACTION_NAME,
+        clash = await session.execute(select(Action).where(Action.name == name))
+        if clash.scalars().first() is not None:
+            # Names are unique and an admin-defined action already holds this
+            # one. Leave their configuration alone rather than mangling it, and
+            # say what to do.
+            logger.error(
+                "cannot seed the built-in %s request action: an action is already"
+                " named %r. Rename that one to enable /request for %s.",
+                media_type,
+                name,
+                media_type,
+            )
+            continue
+
+        action = Action(
+            name=name,
+            display_title=REQUEST_ACTION_NAME,
+            is_system=True,
+            request_type=media_type,
+            download_client_id=None,
+            quality_profile_id=None,
         )
-        return None
-
-    action = Action(
-        name=REQUEST_ACTION_NAME,
-        is_system=True,
-        download_client_id=None,
-        quality_profile_id=None,
-    )
-    session.add(action)
-    await session.flush()
-    logger.info("seeded the built-in Request action (id=%s)", action.id)
-    return action
+        session.add(action)
+        await session.flush()
+        logger.info("seeded the built-in %r action (id=%s)", name, action.id)
 
 
 async def ensure_default_quality_profile(session: AsyncSession) -> QualityProfile | None:

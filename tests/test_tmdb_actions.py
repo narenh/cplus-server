@@ -20,7 +20,7 @@ import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cplus_service.bootstrap import REQUEST_ACTION_NAME
+from cplus_service.bootstrap import REQUEST_ACTION_NAMES
 from cplus_service.db.models import Action, Config, Permission, User
 from cplus_service.db.session import get_config
 
@@ -31,6 +31,9 @@ TMDB_ID = 1396
 #: Movie 550 and TV series 550 are unrelated titles, which is why these are two
 #: paths rather than one.
 ROUTES = ["/movies/tmdb", "/tv/tmdb"]
+
+#: The built-in Request action each route reports.
+MEDIA_TYPES = {"/movies/tmdb": "movie", "/tv/tmdb": "tv"}
 
 
 @pytest.fixture(params=ROUTES)
@@ -53,8 +56,9 @@ async def only_user(db: AsyncSession) -> User:
     return (await db.execute(select(User))).scalars().one()
 
 
-async def request_action(db: AsyncSession) -> Action:
-    result = await db.execute(select(Action).where(Action.is_system.is_(True)))
+async def request_action(db: AsyncSession, route: str) -> Action:
+    """The built-in Request action ``route`` reports."""
+    result = await db.execute(select(Action).where(Action.request_type == MEDIA_TYPES[route]))
     return result.scalars().one()
 
 
@@ -89,15 +93,32 @@ async def test_reports_request_when_the_caller_holds_it(
     client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
 ) -> None:
     await signed_in(client, plex_headers)
-    await grant(db, await only_user(db), await request_action(db))
+    await grant(db, await only_user(db), await request_action(db, route))
 
     response = await client.get(actions_url(route), headers=plex_headers)
 
     assert response.status_code == 200
     action = response.json()["actions"][0]
     assert action["kind"] == "request"
-    assert action["name"] == REQUEST_ACTION_NAME
+    assert action["name"] == REQUEST_ACTION_NAMES[MEDIA_TYPES[route]]
     assert action["recommended_release_guid"] is None
+
+
+@respx.mock
+async def test_each_route_reports_only_its_own_request_action(
+    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
+) -> None:
+    # Granted separately so an admin can let someone ask for series without
+    # asking for films; holding the other one must not leak across.
+    await signed_in(client, plex_headers)
+    other = next(r for r in ROUTES if r != route)
+    await grant(db, await only_user(db), await request_action(db, other))
+
+    assert (await client.get(actions_url(route), headers=plex_headers)).json()["actions"] == []
+
+    await grant(db, await only_user(db), await request_action(db, route))
+    actions = (await client.get(actions_url(route), headers=plex_headers)).json()["actions"]
+    assert [a["id"] for a in actions] == [(await request_action(db, route)).id]
 
 
 @respx.mock
@@ -140,7 +161,7 @@ async def test_the_shape_matches_one_line_of_the_movie_stream(
     # So a client decodes all three endpoints with one type and draws them with
     # one piece of code. `phase` and `releases` are inert, kept only for that.
     await signed_in(client, plex_headers)
-    await grant(db, await only_user(db), await request_action(db))
+    await grant(db, await only_user(db), await request_action(db, route))
 
     body = (await client.get(actions_url(route), headers=plex_headers)).json()
 
@@ -163,7 +184,9 @@ async def test_display_title_falls_back_to_the_name(
     client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
 ) -> None:
     await signed_in(client, plex_headers)
-    action = await request_action(db)
+    action = await request_action(db, route)
+    action.display_title = None
+    await db.commit()
     await grant(db, await only_user(db), action)
 
     body = (await client.get(actions_url(route), headers=plex_headers)).json()
@@ -176,7 +199,7 @@ async def test_an_admins_button_copy_is_used_when_set(
     client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
 ) -> None:
     await signed_in(client, plex_headers)
-    action = await request_action(db)
+    action = await request_action(db, route)
     action.display_title = "Ask for this"
     await db.commit()
     await grant(db, await only_user(db), action)
@@ -184,7 +207,7 @@ async def test_an_admins_button_copy_is_used_when_set(
     body = (await client.get(actions_url(route), headers=plex_headers)).json()
 
     assert body["actions"][0]["display_title"] == "Ask for this"
-    assert body["actions"][0]["name"] == REQUEST_ACTION_NAME
+    assert body["actions"][0]["name"] == REQUEST_ACTION_NAMES[MEDIA_TYPES[route]]
 
 
 # --------------------------------------------------------------------------- #
@@ -211,7 +234,7 @@ async def test_never_calls_prowlarr(
     )
     await signed_in(client, plex_headers)
     user = await only_user(db)
-    await grant(db, user, await request_action(db))
+    await grant(db, user, await request_action(db, route))
     await grant(db, user, await make_action(db, "Add in 4K"))
 
     await client.get(actions_url(route), headers=plex_headers)
@@ -227,7 +250,7 @@ async def test_answers_with_prowlarr_unconfigured(
     # Prowlarr, so an install that never configured it still answers here.
     assert (await get_config(db)).prowlarr_url is None
     await signed_in(client, plex_headers)
-    await grant(db, await only_user(db), await request_action(db))
+    await grant(db, await only_user(db), await request_action(db, route))
 
     response = await client.get(actions_url(route), headers=plex_headers)
 
@@ -247,7 +270,7 @@ async def test_the_tmdb_id_is_not_consulted(
     # It is in the path because the id identifies the title, and because a route
     # that cannot name its subject is one nothing can later be added to.
     await signed_in(client, plex_headers)
-    await grant(db, await only_user(db), await request_action(db))
+    await grant(db, await only_user(db), await request_action(db, route))
 
     response = await client.get(actions_url(route, tmdb_id), headers=plex_headers)
 
@@ -262,7 +285,8 @@ async def test_the_two_routes_are_distinct_and_both_registered(
     # Guards the reason for the split: the same id under each media type is two
     # different titles, and both paths must actually exist.
     await signed_in(client, plex_headers)
-    await grant(db, await only_user(db), await request_action(db))
+    for each in ROUTES:
+        await grant(db, await only_user(db), await request_action(db, each))
 
     movie = await client.get("/movies/tmdb/550/actions", headers=plex_headers)
     tv = await client.get("/tv/tmdb/550/actions", headers=plex_headers)

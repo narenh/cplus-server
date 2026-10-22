@@ -227,3 +227,99 @@ def test_via_manager_is_backfilled_from_the_activity_log(tmp_path: Path) -> None
 
     # The orphan's action was deleted after the fact — still not an admin grab.
     assert stored == {"guid-admin": 1, "guid-orphan": 0, "guid-action": 0}
+
+
+#: The head before the built-in Request action was split by media type.
+PRE_REQUEST_SPLIT_REVISION = "f4b7d2e9a1c3"
+
+
+def _install_with_one_request_action(db_path: Path, name: str = "Request") -> None:
+    result = _run_alembic(db_path, "upgrade", PRE_REQUEST_SPLIT_REVISION)
+    assert result.returncode == 0, result.stderr
+
+    connection = sqlite3.connect(db_path)
+    connection.execute("INSERT INTO quality_profiles (id, name, rules) VALUES (1, 'All', '[]')")
+    connection.executemany(
+        "INSERT INTO actions (id, name, display_title, sort_order, icon, is_system,"
+        " download_client_id, quality_profile_id) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)",
+        [
+            (1, name, 20, "plus", 1, None, None),
+            (2, "Stream Now", 10, None, 0, 5, 1),
+        ],
+    )
+    connection.executemany(
+        "INSERT INTO users (id, seerr_user_id, plex_username) VALUES (?, ?, ?)",
+        [(1, 41, "both"), (2, 42, "stream-only")],
+    )
+    connection.executemany(
+        "INSERT INTO permissions (user_id, action_id) VALUES (?, ?)",
+        [(1, 1), (1, 2), (2, 2)],
+    )
+    connection.commit()
+    connection.close()
+
+    result = _run_alembic(db_path, "upgrade", "head")
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_request_action_is_split_without_changing_who_can_request(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "split.db"
+    _install_with_one_request_action(db_path)
+
+    connection = sqlite3.connect(db_path)
+    actions = {
+        row[0]: row[1:]
+        for row in connection.execute(
+            "SELECT request_type, id, name, display_title, sort_order, icon"
+            " FROM actions WHERE is_system = 1"
+        )
+    }
+    tv_id = actions["tv"][0]
+    grants = set(connection.execute("SELECT user_id, action_id FROM permissions"))
+    grab = connection.execute("SELECT request_type FROM actions WHERE id = 2").fetchone()
+    connection.close()
+
+    # The old action is the films one, under a name the TV one can sit beside,
+    # and both buttons still read "Request".
+    assert actions["movie"] == (1, "Request Movies", "Request", 20, "plus")
+    assert actions["tv"][1:] == ("Request TV", "Request", 20, "plus")
+    # Whoever could request before can request both; nobody else gains it.
+    assert grants == {(1, 1), (1, 2), (2, 2), (1, tv_id)}
+    assert grab == (None,)
+
+
+def test_a_renamed_request_action_keeps_its_name_and_its_button(tmp_path: Path) -> None:
+    db_path = tmp_path / "renamed.db"
+    _install_with_one_request_action(db_path, name="Ask the household")
+
+    connection = sqlite3.connect(db_path)
+    names = dict(
+        connection.execute(
+            "SELECT request_type, name || ' / ' || display_title FROM actions"
+            " WHERE is_system = 1"
+        )
+    )
+    connection.close()
+
+    assert names == {
+        "movie": "Ask the household / Ask the household",
+        "tv": "Ask the household (TV) / Ask the household",
+    }
+
+
+def test_the_request_split_downgrades_back_to_one_action(tmp_path: Path) -> None:
+    db_path = tmp_path / "downgrade.db"
+    _install_with_one_request_action(db_path)
+
+    result = _run_alembic(db_path, "downgrade", PRE_REQUEST_SPLIT_REVISION)
+    assert result.returncode == 0, result.stderr
+
+    connection = sqlite3.connect(db_path)
+    system = connection.execute("SELECT id, name FROM actions WHERE is_system = 1").fetchall()
+    grants = set(connection.execute("SELECT user_id, action_id FROM permissions"))
+    connection.close()
+
+    assert system == [(1, "Request")]
+    assert grants == {(1, 1), (1, 2), (2, 2)}

@@ -11,8 +11,8 @@ Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 (search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
 set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
 **movies-only** when driven by IMDB ID. Two things sit outside that: the
-built-in **Request** action, which supports TV, is keyed by TMDB id and never
-touches Prowlarr at all; and **free-text search**, which is not category-scoped
+built-in **Request** actions, one for films and one for TV, which are keyed by
+TMDB id and never touch Prowlarr at all; and **free-text search**, which is not category-scoped
 and returns whatever Prowlarr indexes.
 
 ---
@@ -228,7 +228,7 @@ src/cplus_service/
   web/                  Jinja2 templates + vendored HTMX, Open Props and CSS
   db/models.py          SQLAlchemy 2.0 schema
   home.py               the Home document: whose it is, its wire shape, its stamp
-  bootstrap.py          seeds the built-in Request action and the "All" profile
+  bootstrap.py          seeds the built-in Request actions and the "All" profile
 src/cplus_align/        the aligner sidecar (python -m cplus_align)
   protocol.py           the shared directory both containers talk through
   epub.py               reading and checking epubs (stdlib; cplus uses it too)
@@ -953,8 +953,9 @@ concurrency, not eventual correctness.
 
 `GET /titles/{imdb_id}/actions` answers the full question for a movie. Two
 reduced endpoints answer it for the cases where that is impossible, and today
-both give the same answer: **the built-in Request action if the caller holds it,
-and nothing else.**
+both give the same answer: **the built-in Request action for that media type if
+the caller holds it, and nothing else** — Request Movies on the movie route,
+Request TV on the TV route.
 
 | | Why it exists | Will it ever grow? |
 |---|---|---|
@@ -1088,7 +1089,8 @@ for its Plex token.
 Two things are seeded on startup rather than by a data migration, so an
 existing deployment picks them up on upgrade with nothing to run.
 
-**The built-in Request action** — always, if missing. See below.
+**The built-in Request actions** (Request Movies and Request TV) — always, if
+missing. See below.
 
 **A starter quality profile named `All`** — only when the `quality_profiles`
 table is empty. Every Prowlarr-backed action needs a profile, so an install
@@ -1106,18 +1108,32 @@ next start seeds it again.
 
 ---
 
-## Built-in Request action
+## Built-in Request actions
 
-Seeded idempotently on startup, marked `is_system`, and carrying neither a
-download client nor a quality profile — a CHECK constraint allows those nulls
-only for a system action. Granted per user through the normal `permissions`
-table like any other action. Its name and button title are the admin's to
-change like any other action's — and it is the only action allowed to use the
-word `Request` for either. It cannot be deleted, and it takes no download
-client or quality profile.
+There are two: **Request Movies** and **Request TV**. Each is seeded
+idempotently on startup, marked `is_system` with a `request_type` of `movie` or
+`tv`, and carries neither a download client nor a quality profile — CHECK
+constraints allow those nulls only for a system action, and a `request_type`
+only on one. Each is granted per user through the normal `permissions` table
+like any other action, so an admin can let someone ask for series without
+letting them ask for films, or the other way round. `POST /request` checks the
+one matching the body's `type`; the detail-page endpoints report only the one
+matching the title.
 
-It is the one part of the service that is **not** movies-only, and the one that
-is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
+Both are seeded with the button title `Request`, so the television reads the
+same for either. Their names and button titles are the admin's to change like
+any other action's — and they are the only actions allowed to use `Request`,
+`Request Movies` or `Request TV` for either. They cannot be deleted, and they
+take no download client or quality profile.
+
+An install from before the split had a single Request action. Migration
+`a7c3e5f19b28` made it the films one (renaming it `Request Movies` if it still
+had its seeded name, with its button pinned to `Request`), created the TV one
+alongside, and granted it to everyone who held Request — so nobody gained or
+lost anything on upgrade.
+
+They are the one part of the service that is **not** movies-only, and the one
+that is **TMDB-keyed** rather than IMDB-keyed, because that is what Seerr's request
 endpoint takes. The client sends the TMDB id straight from Plex metadata; the
 service never resolves IMDB → TMDB.
 
@@ -1912,11 +1928,12 @@ and says so rather than erroring.
 ### Guards worth knowing about
 
 * **No name identifies anything, but one word is held back.** The built-in
-  Request action can be renamed like any other: the server finds it by
-  `is_system` and clients tell a request button from a grab button by the
+  Request actions can be renamed like any other: the server finds them by
+  `request_type` and clients tell a request button from a grab button by the
   `kind` field, so a name is a label. The exception is about meaning rather
-  than machinery — only the built-in action may be named or titled `Request`
-  (any capitalisation, whole label, not a substring), because that word is what
+  than machinery — only the built-in actions may be named or titled `Request`,
+  `Request Movies` or `Request TV` (any capitalisation, whole label, not a
+  substring), because that word is what
   this service calls filing a request in Seerr and a grab button wearing it
   would promise a user the one thing it cannot do. What the built-in one
   refuses is a download client or a quality profile — it never touches

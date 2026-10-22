@@ -319,7 +319,7 @@ async def the_calling_user(db: AsyncSession, username: str) -> User:
 
 async def grant_request_action(db: AsyncSession, user: User) -> None:
     action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     await grant(db, user, action)
 

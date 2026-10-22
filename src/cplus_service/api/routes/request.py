@@ -1,4 +1,4 @@
-"""``POST /request`` — the built-in Request action.
+"""``POST /request`` — the built-in Request actions, one per media type.
 
 The odd one out in several ways, all deliberate:
 
@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from ...auth.identity import authenticate_plex_token
-from ...bootstrap import REQUEST_ACTION_NAME, get_request_action
+from ...bootstrap import REQUEST_ACTION_NAMES, get_request_action
 from ...db.models import ActivityLog, EventType, Permission, SeerrRequestNotice
 from ...notify.messages import MediaSummary, user_requested
 from ...seerr.client import SeerrAuthError, SeerrError
@@ -46,8 +46,10 @@ async def create_request(
 ) -> RequestResponse | JSONResponse:
     """File a request in Seerr on the caller's behalf.
 
-    No ``action_id`` is needed — there is exactly one Request action, so the
-    server resolves it and checks the caller's permission on it directly.
+    No ``action_id`` is needed — there is exactly one Request action per media
+    type, so the server resolves the one for ``type`` and checks the caller's
+    permission on it directly. Holding Request Movies says nothing about TV,
+    and the other way round.
     """
     try:
         user, auth = await authenticate_plex_token(db, seerr, plex_token)
@@ -60,11 +62,12 @@ async def create_request(
             status.HTTP_502_BAD_GATEWAY, f"Could not reach Seerr: {exc}"
         ) from exc
 
-    action = await get_request_action(db)
+    action = await get_request_action(db, body.type)
     if action is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"The built-in {REQUEST_ACTION_NAME} action is not available on this server.",
+            f"The built-in {REQUEST_ACTION_NAMES[body.type]} action is not available"
+            " on this server.",
         )
 
     granted = await db.execute(

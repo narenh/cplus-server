@@ -66,9 +66,11 @@
 
     {% if action.is_system %}
       <p class="field-note muted">
-        Files a request in Seerr. Never touches Prowlarr, so it has no
-        download client or quality profile — and it is the only action that
-        supports TV as well as films.
+        Files a request in Seerr for
+        {% if action.request_type == "tv" %}a TV series{% else %}a film{% endif %}.
+        Never touches Prowlarr, so it has no download client or quality profile.
+        {% if action.request_type == "tv" %}It is the only action that works on
+        TV, so without it a user's TV pages show "Unavailable".{% endif %}
       </p>
     {% else %}
       <div class="field">

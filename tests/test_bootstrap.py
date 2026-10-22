@@ -17,9 +17,10 @@ from cplus_service.bootstrap import (
     DEFAULT_PROFILE_NAME,
     ensure_default_home_shelf,
     ensure_default_quality_profile,
-    ensure_request_action,
+    ensure_request_actions,
+    get_request_action,
 )
-from cplus_service.db.models import QualityProfile
+from cplus_service.db.models import Action, QualityProfile
 from cplus_service.db.session import create_all, create_engine, create_session_factory, get_config
 from cplus_service.quality.engine import recommend
 from cplus_service.quality.models import FILTER_RULE_TYPES
@@ -125,13 +126,33 @@ async def test_the_starter_is_an_ordinary_profile_the_admin_may_edit(
 async def test_the_request_action_and_the_starter_profile_are_independent(
     session: AsyncSession,
 ) -> None:
-    action = await ensure_request_action(session)
+    await ensure_request_actions(session)
     profile = await ensure_default_quality_profile(session)
 
-    assert action is not None and profile is not None
-    # The system action deliberately has no profile: it never touches Prowlarr,
-    # so seeding one does not give it something to score against.
-    assert action.quality_profile_id is None
+    assert profile is not None
+    # The system actions deliberately have no profile: they never touch
+    # Prowlarr, so seeding one does not give them something to score against.
+    for media_type in ("movie", "tv"):
+        action = await get_request_action(session, media_type)
+        assert action is not None
+        assert action.quality_profile_id is None
+
+
+async def test_a_request_action_is_seeded_for_films_and_for_tv(
+    session: AsyncSession,
+) -> None:
+    await ensure_request_actions(session)
+    await ensure_request_actions(session)
+
+    actions = (
+        await session.execute(select(Action).where(Action.is_system.is_(True)))
+    ).scalars().all()
+    assert sorted((a.request_type, a.name) for a in actions) == [
+        ("movie", "Request Movies"),
+        ("tv", "Request TV"),
+    ]
+    # Both buttons read the same on the television.
+    assert {a.button_title for a in actions} == {"Request"}
 
 
 # --------------------------------------------------------------------------- #

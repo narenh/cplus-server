@@ -5,8 +5,9 @@ already run once at launch to establish the token mapping. For every action
 the caller holds permission for, this reports what pressing that button would
 do:
 
-* the built-in Request action needs nothing else and is reported immediately —
-  it has no quality profile and never touches Prowlarr;
+* the built-in Request Movies action needs nothing else and is reported
+  immediately — it has no quality profile and never touches Prowlarr. This is
+  a film's page, so Request TV is never reported here;
 * every Prowlarr-backed action is scored against its own quality profile, from
   one shared Prowlarr fetch, and reports its recommended release (or ``null``
   if nothing survived its filters).
@@ -62,6 +63,7 @@ from ...db.models import Action, ActivityLog, EventType, Permission, QualityProf
 from ...quality.models import QualityProfile as ProfileSchema
 from ...search.stream import PHASE_ALL, ScorableAction, stream_search
 from ..deps import CachedUserDep, ConfigDep, DbDep, ProwlarrDep
+from ..schemas import MEDIA_TYPE_MOVIE
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +125,15 @@ def request_offer_for(action: Action) -> dict[str, Any]:
     }
 
 
-async def permitted_request_action(session: AsyncSession, user_id: int) -> Action | None:
-    """The built-in Request action, if the caller has been granted it."""
+async def permitted_request_action(
+    session: AsyncSession, user_id: int, media_type: str
+) -> Action | None:
+    """The built-in Request action for ``"movie"`` or ``"tv"``, if the caller
+    has been granted it."""
     result = await session.execute(
         select(Action)
         .join(Permission, Permission.action_id == Action.id)
-        .where(Permission.user_id == user_id, Action.is_system.is_(True))
+        .where(Permission.user_id == user_id, Action.request_type == media_type)
     )
     return result.scalars().first()
 
@@ -199,7 +204,7 @@ async def title_actions(
     since no search happens at all in that case.
     """
     scorable = await scorable_actions(db, user.id)
-    request_action = await permitted_request_action(db, user.id)
+    request_action = await permitted_request_action(db, user.id, MEDIA_TYPE_MOVIE)
 
     request_offer = (
         request_offer_for(request_action) if request_action is not None else None

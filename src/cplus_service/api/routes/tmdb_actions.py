@@ -5,7 +5,9 @@ search for.
 searches Prowlarr and scores what comes back against every action the caller
 holds. These two answer the reduced question for the cases where that is not
 possible, and today the answer is always the same one — **the built-in Request
-action, if the caller holds it, and nothing else.**
+action for that media type, if the caller holds it, and nothing else.** The
+movie route reports Request Movies and the TV route Request TV; an admin grants
+the two separately.
 
 Two of them, not one, because **TMDB ids are namespaced by media type**: movie
 550 and TV series 550 are unrelated titles, so a single ``/{tmdb_id}/actions``
@@ -58,14 +60,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.models import User
 from ...search.stream import PHASE_ALL
 from ..deps import CachedUserDep, DbDep
+from ..schemas import MEDIA_TYPE_MOVIE, MEDIA_TYPE_TV
 from .titles import permitted_request_action, request_offer_for
 
 router = APIRouter(tags=["client"])
 
 
-async def request_only_payload(db: AsyncSession, user: User) -> dict[str, Any]:
-    """The shared body: Request if they hold it, nothing else, no releases."""
-    request_action = await permitted_request_action(db, user.id)
+async def request_only_payload(
+    db: AsyncSession, user: User, media_type: str
+) -> dict[str, Any]:
+    """The shared body: Request for this media type if they hold it, nothing
+    else, no releases."""
+    request_action = await permitted_request_action(db, user.id, media_type)
 
     actions: list[dict[str, Any]] = []
     if request_action is not None:
@@ -85,7 +91,7 @@ async def movie_tmdb_actions(
     the id is what identifies the title, and because a route that cannot name
     its subject is one nothing else can ever be added to.
     """
-    return await request_only_payload(db, user)
+    return await request_only_payload(db, user, MEDIA_TYPE_MOVIE)
 
 
 @router.get("/tv/tmdb/{tmdb_id}/actions")
@@ -98,4 +104,4 @@ async def tv_tmdb_actions(
     the one that may grow grab actions later, and it should be able to do so
     without touching the movie path.
     """
-    return await request_only_payload(db, user)
+    return await request_only_payload(db, user, MEDIA_TYPE_TV)

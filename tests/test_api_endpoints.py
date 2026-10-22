@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 import respx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -250,7 +251,7 @@ async def test_grab_rejects_the_request_action(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     await grant(db, user, request_action)
 
@@ -328,13 +329,46 @@ async def test_grab_requires_a_cached_token(
 
 
 async def grant_request_action(client, db, plex_headers) -> Action:  # noqa: ANN001
+    """Grant both built-in Request actions; returns the films one."""
+    await authenticate(client, plex_headers)
+    user = (await db.execute(select(User))).scalar_one()
+    for media_type in ("tv", "movie"):
+        action = (
+            await db.execute(select(Action).where(Action.request_type == media_type))
+        ).scalar_one()
+        await grant(db, user, action)
+    return action
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("held", "body"),
+    [
+        ("movie", {"tmdb_id": 1399, "type": "tv", "seasons": [1]}),
+        ("tv", {"tmdb_id": 693134, "type": "movie"}),
+    ],
+)
+async def test_request_needs_the_action_for_its_media_type(
+    client: httpx.AsyncClient,
+    db: AsyncSession,
+    configured: Config,
+    plex_headers: dict,
+    held: str,
+    body: dict,
+) -> None:
+    mock_seerr_auth()
+    route = respx.post(f"{SEERR_URL}/api/v1/request")
     await authenticate(client, plex_headers)
     user = (await db.execute(select(User))).scalar_one()
     action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == held))
     ).scalar_one()
     await grant(db, user, action)
-    return action
+
+    response = await client.post("/request", json=body, headers=plex_headers)
+
+    assert response.status_code == 403
+    assert not route.called
 
 
 @respx.mock

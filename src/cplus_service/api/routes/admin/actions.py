@@ -1,16 +1,18 @@
 """Action CRUD.
 
 **Every action's name and button title are the admin's to change, the built-in
-Request action included.** Nothing identifies an action by its name: the server
-finds the built-in one by ``is_system`` and the client tells a request button
-from a grab button by the ``kind`` field in the actions payload. So a name is a
-label and nothing else, and an admin who wants their Request button filed as
-"Ask the household" may have it.
+Request actions included.** There are two of those, Request Movies and Request
+TV, so films and series can be granted separately. Nothing identifies an action
+by its name: the server finds the built-in ones by ``request_type`` and the
+client tells a request button from a grab button by the ``kind`` field in the
+actions payload. So a name is a label and nothing else, and an admin who wants
+their Request button filed as "Ask the household" may have it.
 
 One word is held back, and for a reason about meaning rather than machinery:
 "Request" is what this service calls filing a request in Seerr, so only the
-built-in action may be named or titled it. A grab button labelled *Request*
-would tell a user it was going to do the one thing it cannot. Nothing breaks if
+built-in actions may be named or titled it, or their seeded names. A grab
+button labelled *Request* would tell a user it was going to do the one thing it
+cannot. Nothing breaks if
 it happens — no lookup consults the word — it is simply a lie to whoever is
 holding the remote, so the admin UI declines to write it.
 
@@ -39,7 +41,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from ....bootstrap import REQUEST_ACTION_NAME
+from ....bootstrap import REQUEST_ACTION_NAME, REQUEST_ACTION_NAMES
 from ....db.models import Action, QualityProfile
 from ....db.session import get_config
 from ....prowlarr.client import ProwlarrClient, ProwlarrError
@@ -184,20 +186,26 @@ def _clean_confirm_body(raw: str) -> str | None:
     return clean
 
 
+#: Whole labels only a built-in Request action may wear, casefolded.
+_RESERVED_WORDS = {
+    word.casefold() for word in (REQUEST_ACTION_NAME, *REQUEST_ACTION_NAMES.values())
+}
+
+
 def _reject_reserved_word(value: str | None, *, field: str) -> None:
-    """Keep "Request", however capitalised, to the built-in action.
+    """Keep "Request", "Request Movies" and "Request TV", however capitalised,
+    to the built-in actions.
 
     Matched on the whole label rather than as a substring: "Request" is the
     claim being reserved, while "Request in 4K" or "Requested" are an admin's
     own words and none of our business.
     """
-    if value is None or value.casefold() != REQUEST_ACTION_NAME.casefold():
+    if value is None or value.casefold() not in _RESERVED_WORDS:
         return
     raise HTTPException(
         status.HTTP_409_CONFLICT,
-        f"'{REQUEST_ACTION_NAME}' belongs to the built-in action — it means"
-        " filing a request in Seerr, which this action cannot do. Pick another"
-        f" {field}.",
+        f"'{value}' belongs to the built-in action — it means filing a request"
+        f" in Seerr, which this action cannot do. Pick another {field}.",
     )
 
 

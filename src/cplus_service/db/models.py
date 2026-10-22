@@ -411,17 +411,24 @@ class Action(Base):
     Maps a Prowlarr download client to a quality profile.  Users are granted a
     subset of actions via :class:`Permission`.
 
-    The built-in Request action is the one exception: it is seeded with
-    ``is_system=True`` and carries neither a download client nor a quality
-    profile, because it never touches Prowlarr.  The CHECK constraint keeps the
-    nullable columns from being abused: only a system action may omit them.
+    The built-in Request actions are the exception: there are two, one per
+    media type, seeded with ``is_system=True`` and a ``request_type`` of
+    ``"movie"`` or ``"tv"``.  They carry neither a download client nor a
+    quality profile, because they never touch Prowlarr.  The CHECK constraints
+    keep the nullable columns from being abused: only a system action may omit
+    them, and only a system action has a ``request_type``.
 
-    ``is_system`` is that action's identity — every lookup of it goes through
-    the flag, and clients tell a request button from a grab button by the
-    ``kind`` field the actions payload carries.  Nothing anywhere identifies an
-    action by its name, which is why the built-in one can be renamed like any
-    other.  It cannot be deleted: it is the only route to ``POST /request``,
-    and the next startup would seed it again regardless.
+    They are two actions rather than one so an admin can grant requesting films
+    and requesting TV separately, with the same per-user checkbox as everything
+    else.  A user granted grab actions may have no use for requesting films but
+    still need a way to ask for a series, which only Request can do.
+
+    ``request_type`` is each one's identity — every lookup of them goes through
+    it, and clients tell a request button from a grab button by the ``kind``
+    field the actions payload carries.  Nothing anywhere identifies an action
+    by its name, which is why the built-in ones can be renamed like any other.
+    They cannot be deleted: each is the only route to ``POST /request`` for its
+    media type, and the next startup would seed it again regardless.
 
     ``sort_order`` is the admin's ranking, and it covers the built-in action
     too — a client draws the actions in the order it is sent them, and tvOS has
@@ -446,6 +453,11 @@ class Action(Base):
             "is_system = 1 OR (download_client_id IS NOT NULL"
             " AND quality_profile_id IS NOT NULL)",
             name="ck_action_targets_required_unless_system",
+        ),
+        CheckConstraint(
+            "(is_system = 1 AND request_type IN ('movie', 'tv'))"
+            " OR (is_system = 0 AND request_type IS NULL)",
+            name="ck_action_request_type_only_on_system",
         ),
     )
 
@@ -481,6 +493,10 @@ class Action(Base):
         ForeignKey("quality_profiles.id", ondelete="RESTRICT")
     )
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    #: ``"movie"`` or ``"tv"`` on the two built-in Request actions — which one
+    #: this is — and ``None`` on every grab action.  Unique, so there is never
+    #: more than one of each.
+    request_type: Mapped[str | None] = mapped_column(String(8), unique=True, index=True)
 
     quality_profile: Mapped[QualityProfile | None] = relationship(
         back_populates="actions", lazy="selectin"

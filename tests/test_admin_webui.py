@@ -1126,7 +1126,7 @@ async def test_the_users_page_lists_actions_in_rank_order(
     """
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     system.sort_order = 30
     await make_action(db, "Zulu", sort_order=10)
@@ -1140,6 +1140,19 @@ async def test_the_users_page_lists_actions_in_rank_order(
         for name in ("Zulu", "Alpha", system.name)
     ]
     assert shown == sorted(shown)
+
+
+async def test_requesting_films_and_tv_are_granted_separately(
+    client: httpx.AsyncClient, db: AsyncSession
+) -> None:
+    await signed_in(client, db)
+    db.add(User(seerr_user_id=99, plex_username="someone"))
+    await db.commit()
+
+    page = (await client.get("/admin/users")).text
+
+    assert "Request Movies" in page
+    assert "Request TV" in page
 
 
 async def test_the_stylesheets_are_served_from_this_image(
@@ -1384,7 +1397,9 @@ async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -
     assert action.is_system is False
 
 
-@pytest.mark.parametrize("word", ["Request", "request", "REQUEST", "  ReQuEsT  "])
+@pytest.mark.parametrize(
+    "word", ["Request", "request", "REQUEST", "  ReQuEsT  ", "Request Movies", "request tv"]
+)
 @pytest.mark.parametrize("field", ["name", "display_title"])
 async def test_only_the_built_in_action_may_say_request(
     client: httpx.AsyncClient, db: AsyncSession, word: str, field: str
@@ -1406,9 +1421,9 @@ async def test_only_the_built_in_action_may_say_request(
 
     assert response.status_code == 409
     assert "built-in action" in response.json()["detail"]
-    # Nothing was written: the built-in action is still the only one there is.
+    # Nothing was written: the built-in actions are still the only ones there are.
     saved = (await db.execute(select(Action))).scalars().all()
-    assert [action.is_system for action in saved] == [True]
+    assert [action.is_system for action in saved] == [True, True]
 
 
 async def test_renaming_an_action_to_the_reserved_word_is_refused_too(
@@ -1461,7 +1476,7 @@ async def test_the_built_in_action_keeps_the_word_it_is_named_after(
     # including when an admin renames it back after trying something else.
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
 
     await client.post(f"/admin/actions/{system.id}", data={"name": "Ask the household"})
@@ -1485,7 +1500,7 @@ async def test_the_built_in_action_can_be_renamed(
     # under different words may have them.
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
 
     response = await client.post(
@@ -1508,7 +1523,7 @@ async def test_the_built_in_action_takes_no_prowlarr_targets(
     # client is not something it could use.
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
 
     response = await client.post(
@@ -1527,7 +1542,7 @@ async def test_the_built_in_action_cannot_be_deleted(
 ) -> None:
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
 
     delete = await client.post(f"/admin/actions/{system.id}/delete")
@@ -1687,7 +1702,7 @@ async def test_dragging_actions_rewrites_every_rank(
     """Positions come from the submitted order, not from the ids in it."""
     await signed_in(client, db)
     system = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     first = await make_action(db, "Stream Now", sort_order=50)
     second = await make_action(db, "Add to Library", sort_order=60)

@@ -177,7 +177,7 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     grab_action = await make_action(db, "Stream Now")
     await grant(db, user, request_action)
@@ -190,7 +190,7 @@ async def test_titles_includes_the_request_action_without_a_recommendation(
     # still reported — just with no recommendation, not omitted.
     assert actions[request_action.id] == {
         "id": request_action.id,
-        "name": "Request",
+        "name": "Request Movies",
         "display_title": "Request",
         "kind": "request",
         "icon": None,
@@ -217,7 +217,7 @@ async def test_actions_arrive_in_the_admins_order(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     request_action.sort_order = 20
     await db.commit()
@@ -374,7 +374,7 @@ async def test_the_request_action_is_told_apart_by_kind_not_by_its_words(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     request_action.name = "Ask the household"
     request_action.display_title = "Ask for this"
@@ -425,7 +425,7 @@ async def test_a_user_with_only_the_request_action_never_triggers_a_search(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     await grant(db, user, request_action)
 
@@ -440,7 +440,7 @@ async def test_a_user_with_only_the_request_action_never_triggers_a_search(
             "actions": [
                 {
                     "id": request_action.id,
-                    "name": "Request",
+                    "name": "Request Movies",
                     "display_title": "Request",
                     "kind": "request",
                     "icon": None,
@@ -494,7 +494,7 @@ async def test_a_search_that_finds_nothing_still_offers_request(
 
     user = (await db.execute(select(User))).scalar_one()
     request_action = (
-        await db.execute(select(Action).where(Action.is_system.is_(True)))
+        await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
     await grant(db, user, request_action)
     await grant(db, user, await make_action(db, "Stream Now"))
