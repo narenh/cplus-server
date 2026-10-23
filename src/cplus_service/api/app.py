@@ -49,6 +49,7 @@ from .routes import (
     admin,
     audiobooks,
     capabilities,
+    devices,
     grab,
     grabs,
     home,
@@ -206,6 +207,7 @@ def create_app(
     app.include_router(seerr.router)
     app.include_router(webhooks.router)
     app.include_router(audiobooks.router)
+    app.include_router(devices.router)
     app.include_router(internal.router)
     app.include_router(admin.router)
 

@@ -1,0 +1,2 @@
+{# The network a decision was made on. Takes `network`. #}
+{% if network == "none" %}<span class="muted">no network</span>{% elif network %}<span class="muted">on {{ {"wifi": "Wi-Fi", "ethernet": "Ethernet"}.get(network, network) }}</span>{% endif %}

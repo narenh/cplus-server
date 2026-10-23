@@ -1,0 +1,4 @@
+{# A connection's tier as a pill, coloured by kind: local green, remote blue,
+   relay amber, nothing-answered red. Takes `tier`. #}
+{% set kind = tier_kind(tier) %}
+<span class="badge tier tier-{{ kind }}">{% if tier is none %}no connection{% else %}{{ tier_labels.get(tier, tier) }}{% endif %}</span>

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+{% set d = row.device %}
+<p class="hint">
+  {{ row.username }}{% if d.profile %} · {{ d.profile }}{% endif %}
+  {% if d.app_version %} · Canopy+ {{ d.app_version }}{% endif %}
+  · last seen {{ d.last_seen_at|when }}
+</p>
+{% if row.never_local %}
+  <p class="tv-warning">Never connected locally on Wi-Fi or Ethernet. Usually <code>plex.direct</code>
+    DNS is blocked by the router, or the TV is on a different network from the server.</p>
+{% endif %}
+{% if row.on_relay %}
+  <p class="tv-warning">On Plex's relay, which caps bandwidth.</p>
+{% endif %}
+
+{% if not events %}
+  <p class="empty">No decisions from the last 90 days.</p>
+{% else %}
+<ol class="timeline">
+  {% for event, groups in events %}
+    <li class="decision">
+      <div class="decision-head">
+        <span class="decision-when">{{ event.at|when }}</span>
+        <span class="badge decision-reason">{{ event.reason }}</span>
+        {% with network = event.network %}{% include "partials/network.html" %}{% endwith %}
+        {% if event.app_version and event.app_version != d.app_version %}
+          <span class="muted">· {{ event.app_version }}</span>
+        {% endif %}
+      </div>
+      <div class="decision-result">
+        {% with tier = event.chosen_tier %}{% include "partials/tier_badge.html" %}{% endwith %}
+        {% if event.chosen_uri %}
+          <span class="tv-uri">{{ event.chosen_uri }}</span>
+          {% if event.chosen_via_443 %}<span class="muted">via 443 retry</span>{% endif %}
+        {% endif %}
+        {% if event.previous_tier or event.previous_uri %}
+          <div class="decision-previous">
+            was {{ tier_labels.get(event.previous_tier, event.previous_tier or "?") }}
+            {% if event.previous_uri %}<span class="tv-uri">{{ event.previous_uri }}</span>{% endif %}
+          </div>
+        {% endif %}
+      </div>
+      {% if groups %}
+        <div class="candidates">
+          {% for tier, candidates in groups %}
+            <div class="candidate-group">
+              <div class="candidate-tier">{{ tier_labels.get(tier, tier) }}</div>
+              <ul>
+                {% for c in candidates %}
+                  {% set kind = outcome_kind(c.outcome) %}
+                  <li class="candidate outcome-{{ kind }}">
+                    <span class="candidate-outcome">{{ outcome_labels.get(c.outcome, c.outcome) }}{% if c.httpStatus %} {{ c.httpStatus }}{% endif %}</span>
+                    <span class="tv-uri">{{ c.uri }}</span>
+                    {% if c.via443Retry %}<span class="muted">via 443</span>{% endif %}
+                    {% if c.latencyMs is not none %}<span class="candidate-latency">{{ c.latencyMs }} ms</span>{% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ol>
+{% if events|length >= page_size %}
+  <p class="hint">Showing the newest {{ page_size }} decisions.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

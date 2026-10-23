@@ -962,3 +962,79 @@ class AudiobookBookmark(Base):
             "rating_key",
         ),
     )
+
+
+class ClientDevice(Base):
+    """One install of the tvOS client, as it reports how it reaches Plex.
+
+    Identified by the ``X-Plex-Client-Identifier`` the app already sends Plex,
+    scoped to the account that sent it: the identifier is the client's own
+    claim, so one account cannot write to a row another account's TV made.
+
+    The ``current_*`` columns and the two ``last_*_at`` stamps are a summary of
+    :class:`ConnectionEvent` rows, kept here so the admin list is one query, and
+    so "has this TV ever connected locally" outlives the events' retention.
+    """
+
+    __tablename__ = "client_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client_identifier: Mapped[str] = mapped_column(String(128))
+    #: The name the user gave the TV in Canopy+, latest as sent.
+    device_name: Mapped[str | None] = mapped_column(String(256))
+    #: Plex Home profile of the newest batch; events carry their own.
+    profile: Mapped[str] = mapped_column(String(64), server_default="")
+    app_version: Mapped[str | None] = mapped_column(String(32))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    #: When cplus last heard from it — our clock, not the TV's.
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    #: The newest decision's outcome, by the TV's own clock (one clock, so
+    #: ordering within a device is sound). ``current_tier`` ``None`` with a
+    #: ``current_at`` means nothing answered.
+    current_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_uri: Mapped[str | None] = mapped_column(String(512))
+    current_tier: Mapped[str | None] = mapped_column(String(16))
+    current_network: Mapped[str | None] = mapped_column(String(16))
+    #: Last decision made on Wi-Fi or Ethernet, and last one that chose a
+    #: local address. The first without the second is the "never local" case.
+    last_lan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_local_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("user_id", "client_identifier"),)
+
+
+class ConnectionEvent(Base):
+    """One decision a TV made about which address to reach Plex on.
+
+    Keyed by the id the client makes, so a batch it resends after losing the
+    answer is inert. ``at`` is the TV's clock and only orders one TV's events;
+    ``received_at`` is ours, and is what retention counts from.
+
+    ``candidates`` is the list as sent (uri, tier, via443Retry, outcome,
+    latencyMs, httpStatus); nothing queries into it.
+    """
+
+    __tablename__ = "connection_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("client_devices.id", ondelete="CASCADE")
+    )
+    profile: Mapped[str] = mapped_column(String(64), server_default="")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    reason: Mapped[str] = mapped_column(String(32))
+    network: Mapped[str | None] = mapped_column(String(16))
+    app_version: Mapped[str | None] = mapped_column(String(32))
+    server_machine_id: Mapped[str | None] = mapped_column(String(64))
+    previous_uri: Mapped[str | None] = mapped_column(String(512))
+    previous_tier: Mapped[str | None] = mapped_column(String(16))
+    chosen_uri: Mapped[str | None] = mapped_column(String(512))
+    chosen_tier: Mapped[str | None] = mapped_column(String(16))
+    chosen_via_443: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+    __table_args__ = (Index("ix_connection_events_device_at", "device_id", "at"),)

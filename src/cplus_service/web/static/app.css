@@ -1140,3 +1140,61 @@ table.preview .dropped-by { color: var(--err); }
 .upload-form .uploading { display: none; }
 .upload-form.htmx-request .uploading { display: inline; }
 .upload-form.htmx-request .file-button { display: none; }
+
+/* TVs ------------------------------------------------------------------- */
+
+/* One row per TV: name, current connection, last seen. Below 640px the three
+   stack, like .book-list. Warnings take the full width under the row. */
+.tv-list {
+  list-style: none; margin: 0; padding: 0;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel); box-shadow: var(--lift-1);
+}
+.tv-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(140px, auto);
+  gap: 6px 16px; align-items: start; padding: 10px 12px;
+}
+.tv-row + .tv-row { border-top: 1px solid var(--line-soft); }
+.tv-warnings { grid-column: 1 / -1; }
+@media (max-width: 640px) {
+  .tv-row { grid-template-columns: minmax(0, 1fr); }
+}
+.tv-name, .tv-conn { min-width: 0; }
+.tv-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.tv-uri { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tv-warning {
+  margin: 4px 0; padding: 6px 10px; font-size: 13px; max-width: 78ch;
+  border-left: 3px solid var(--warn); border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+
+.badge.tier-local { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.tier-remote, .badge.tier-other { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.badge.tier-relay { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+.badge.tier-none { background: var(--err); color: var(--on-err); }
+
+/* A TV's decisions, newest first. Each lists what it tried, by tier, best
+   first; the failures that mean "the network" (DNS, TLS, timeout) are filled
+   red so they read from across the page. */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.decision {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-panel); box-shadow: var(--lift-1); padding: 10px 12px;
+}
+.decision-head, .decision-result { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.decision-head { font-size: 13px; margin-bottom: 6px; }
+.badge.decision-reason { background: var(--line-soft); color: var(--ink); font-weight: 500; }
+.decision-previous { flex-basis: 100%; font-size: 13px; color: var(--muted); }
+.candidates { margin-top: 8px; display: grid; gap: 6px; }
+.candidate-tier { font-size: 12px; font-weight: 600; color: var(--muted); }
+.candidate-group ul { list-style: none; margin: 2px 0 0; padding: 0; }
+.candidate { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; padding: 1px 0; }
+.candidate-outcome { font-weight: 600; min-width: 7em; }
+.candidate-latency { color: var(--muted); font-variant-numeric: tabular-nums; }
+.outcome-ok .candidate-outcome { color: var(--ok); }
+.outcome-quiet .candidate-outcome { color: var(--warn); }
+.outcome-muted .candidate-outcome { color: var(--muted); font-weight: 400; }
+.outcome-loud .candidate-outcome {
+  background: var(--err); color: var(--on-err);
+  padding: 0 6px; border-radius: var(--radius-pill); min-width: 0;
+}

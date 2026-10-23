@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="hint">
+  How each Canopy+ TV reaches this Plex server, as the TV reports it: directly on
+  the local network, remotely, or through Plex's relay. Reports are kept for 90 days.
+</p>
+
+{% if not rows %}
+  <p class="empty">No TV has reported a connection yet.</p>
+{% else %}
+<ul class="tv-list">
+  {% for row in rows %}
+    {% set d = row.device %}
+    <li class="tv-row">
+      <div class="tv-name">
+        <a href="/admin/devices/{{ d.id }}"><strong>{{ d.device_name or "Unnamed TV" }}</strong></a>
+        <div class="tv-sub">{{ row.username }}{% if d.profile %} · {{ d.profile }}{% endif %}</div>
+      </div>
+      <div class="tv-conn">
+        {% if d.current_at %}
+          {% with tier = d.current_tier %}{% include "partials/tier_badge.html" %}{% endwith %}
+          {% with network = d.current_network %}{% include "partials/network.html" %}{% endwith %}
+          {% if d.current_uri %}<div class="tv-uri">{{ d.current_uri }}</div>{% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </div>
+      <div class="tv-seen">
+        {{ d.last_seen_at|when }}
+        {% if d.app_version %}<div class="tv-sub">Canopy+ {{ d.app_version }}</div>{% endif %}
+      </div>
+      {% if row.never_local or row.on_relay %}
+        <div class="tv-warnings">
+          {% if row.never_local %}
+            <p class="tv-warning">Never connected locally on Wi-Fi or Ethernet. Usually
+              <code>plex.direct</code> DNS is blocked by the router, or the TV is on a different
+              network from the server.</p>
+          {% endif %}
+          {% if row.on_relay %}
+            <p class="tv-warning">On Plex's relay, which caps bandwidth.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

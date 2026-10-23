@@ -15,6 +15,7 @@ from . import (
     activity,
     audiobooks,
     config,
+    devices,
     libraries,
     login,
     notifications,
@@ -37,5 +38,6 @@ router.include_router(notifications.router)
 router.include_router(playback.router)
 router.include_router(libraries.router)
 router.include_router(audiobooks.router)
+router.include_router(devices.router)
 
 __all__ = ["router"]
