@@ -66,6 +66,35 @@ def test_resolution_prefers_the_highest_when_several_are_named() -> None:
     assert parse_title("Movie.2024.2160p.1080p.WEB-DL-GRP").resolution is Resolution.UHD_2160P
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Joker.2019.UHD.BluRay.1080p.HDR.x265-GRP",
+        "Joker.2019.1080p.UHD.BluRay.DD+7.1.HDR.x265-GRP",
+        "Joker.2019.UHD.BluRay.1080p.DV.HDR.HEVC-GRP",
+        "Joker 2019 UHD BluRay 1080p x264-GRP",
+        "Dune.2021.4K.Remastered.1080p.BluRay.x264-GRP",
+        "The.Bear.S03E01.UHD.BluRay.1080p.HDR.x265-GRP",
+        "The.Bear.S03.1080p.UHD.BluRay.DDP5.1.x264-GRP",
+    ],
+)
+def test_an_explicit_1080p_beats_a_uhd_or_4k_source_tag(title: str) -> None:
+    assert parse_title(title).resolution is Resolution.FHD_1080P
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Joker.2019.UHD.BluRay.2160p.HDR.x265-GRP",
+        "Joker.2019.UHD.BluRay.x265.HDR-GRP",
+        "Joker.2019.4K.UHD.BluRay.DV.HDR.x265-GRP",
+        "The.Bear.S03E01.UHD.BluRay.HDR.x265-GRP",
+    ],
+)
+def test_uhd_and_4k_still_mean_2160p_when_no_lower_resolution_is_named(title: str) -> None:
+    assert parse_title(title).resolution is Resolution.UHD_2160P
+
+
 # --------------------------------------------------------------------------- #
 # Source
 # --------------------------------------------------------------------------- #
@@ -142,6 +171,8 @@ def test_full_disc_detected(title: str) -> None:
         # A 1080p disc carries AVC/VC-1, never HEVC, so HEVC there still reads
         # as a re-encode.
         "Movie.2024.1080p.BluRay.HEVC.DTS-HD.MA.5.1-GRP",
+        # Nor is a 1080p title a UHD disc just because it names its UHD source.
+        "Movie.2024.UHD.BluRay.1080p.HDR.HEVC-GRP",
     ],
 )
 def test_hevc_is_only_excused_on_a_uhd_disc(title: str) -> None:

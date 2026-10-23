@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from cplus_service.release.models import ParsedRelease, Resolution
+from cplus_service.release.parser import parse_prowlarr_result
 from cplus_service.search.categorize import (
+    CATEGORY_4K,
+    CATEGORY_4K_DV,
+    CATEGORY_HD1080,
     CATEGORY_ORDER,
     categorize_releases,
     category_of,
@@ -42,6 +48,26 @@ def test_2160p_without_dolby_vision_is_4k() -> None:
 def test_1080p_is_hd1080() -> None:
     r = release(resolution=Resolution.FHD_1080P)
     assert category_of(r) == "hd1080"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Joker.2019.UHD.BluRay.1080p.HDR.x265-GRP", CATEGORY_HD1080),
+        ("Joker.2019.UHD.BluRay.1080p.DV.HDR.x265-GRP", CATEGORY_HD1080),
+        ("The.Bear.S03E01.1080p.UHD.BluRay.DDP5.1.x264-GRP", CATEGORY_HD1080),
+        ("Joker.2019.UHD.BluRay.2160p.HDR.x265-GRP", CATEGORY_4K),
+        ("Joker.2019.UHD.BluRay.x265.HDR-GRP", CATEGORY_4K),
+        ("Joker.2019.2160p.UHD.BluRay.DV.HDR.x265-GRP", CATEGORY_4K_DV),
+    ],
+)
+def test_a_1080p_encode_of_a_uhd_disc_is_hd1080_not_4k(title: str, expected: str) -> None:
+    # The indexer often files these under Movies/UHD (2045) or TV/UHD (5045);
+    # the category Prowlarr reports must not pull them back into 4K.
+    parsed = parse_prowlarr_result(
+        {"title": title, "guid": "g", "categories": [{"id": 2045, "name": "Movies/UHD"}]}
+    )
+    assert category_of(parsed) == expected
 
 
 def test_720p_is_other() -> None:

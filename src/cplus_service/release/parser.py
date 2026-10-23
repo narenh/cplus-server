@@ -57,11 +57,16 @@ def _tok(pattern: str) -> re.Pattern[str]:
 
 # Ordered — the first hit wins, so 2160p is tested before 1080p.
 _RESOLUTIONS: list[tuple[Resolution, re.Pattern[str]]] = [
-    (Resolution.UHD_2160P, _tok(r"(?:2160[pi]?|4k|uhd|3840\s?x\s?2160)")),
+    (Resolution.UHD_2160P, _tok(r"(?:2160[pi]?|3840\s?x\s?2160)")),
     (Resolution.FHD_1080P, _tok(r"(?:1080[pi]|1920\s?x\s?1080)")),
     (Resolution.HD_720P, _tok(r"(?:720[pi]|1280\s?x\s?720)")),
     (Resolution.SD_480P, _tok(r"(?:480[pi]|576[pi]|640\s?x\s?480|dvd\s?rip)")),
 ]
+
+# `4K`/`UHD` only imply 2160p when no explicit resolution is named: they often
+# describe the *source* disc, as in ``UHD.BluRay.1080p`` — a 1080p encode of a
+# 4K disc.
+_UHD_MARKER = _tok(r"(?:4k|uhd)")
 
 _REMUX = _tok(r"(?:bd|uhd|br)?remux")
 _WEB_DL = _tok(r"web[\s-]?dl")
@@ -185,6 +190,8 @@ def _parse_resolution(norm: str) -> Resolution:
     for resolution, pattern in _RESOLUTIONS:
         if pattern.search(norm):
             return resolution
+    if _UHD_MARKER.search(norm):
+        return Resolution.UHD_2160P
     return Resolution.UNKNOWN
 
 
@@ -234,7 +241,14 @@ def _parse_source(norm: str) -> tuple[Source, bool]:
         return Source.WEB_DL, False
 
     bluray = bool(_BLURAY_FAMILY.search(norm))
-    encoded = _has_encode_evidence(norm, uhd_disc=bluray and bool(_UHD_DISC.search(norm)))
+    # A title naming a lower resolution (``UHD.BluRay.1080p.HEVC``) is no UHD
+    # disc, whatever source it was encoded from.
+    uhd_disc = (
+        bluray
+        and bool(_UHD_DISC.search(norm))
+        and _parse_resolution(norm) in (Resolution.UHD_2160P, Resolution.UNKNOWN)
+    )
+    encoded = _has_encode_evidence(norm, uhd_disc=uhd_disc)
     disc_marker = bool(_DISC_MARKER.search(norm)) or (bluray and bool(_COMPLETE.search(norm)))
     is_full_disc = disc_marker or (bluray and not encoded)
 
