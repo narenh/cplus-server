@@ -4,25 +4,24 @@ Clients read a book a chunk at a time (about ten minutes of audio each) rather
 than as one document, so opening a 40-hour book costs the same as opening a
 short one and seeking is one small request.
 
-Alignments arrive two ways: from the sidecar when a job finishes, and uploaded
-by an admin (an alignment already made elsewhere, e.g. with ``bookalign.py`` on
-a faster machine). Both are the same ``version: 1`` document and go through the
-same checks; an upload is additionally matched against the album's audio in
-Plex, since nothing else ties it to that book.
+Alignments are made elsewhere (``bookalign.py``, or the parked aligner in
+``parked/cplus_align``) and uploaded by an admin as a ``version: 1`` document.
+An upload is checked, then matched against the album's audio in Plex, since
+nothing else ties it to that book.
 """
 
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import AudiobookAlignment, AudiobookChunk, AudiobookJob
-from .jobs import fingerprint
+from ..db.models import AudiobookAlignment, AudiobookChunk
+from ..plex.client import PlexAlbum, PlexAudioPart
 
 #: A chunk closes at the first paragraph break after this much audio.
 CHUNK_SECONDS = 600.0
@@ -84,12 +83,44 @@ def parse_result(data: bytes) -> dict[str, Any]:
     return result
 
 
-def load_result(path: Path) -> dict[str, Any]:
-    try:
-        data = path.read_bytes()
-    except OSError as exc:
-        raise InvalidResult(f"unreadable result: {exc}") from exc
-    return parse_result(data)
+def track_payload(parts: list[PlexAudioPart]) -> list[dict[str, Any]]:
+    """The album's files as Plex lists them, in listening order."""
+    return [
+        {
+            "n": n,
+            "rating_key": part.track_rating_key,
+            "title": part.track_title,
+            "part_id": part.part_id,
+            "key": part.key,
+            "size": part.size,
+            "duration": part.duration,
+            "container": part.container,
+        }
+        for n, part in enumerate(parts)
+    ]
+
+
+def fingerprint(tracks: list[dict[str, Any]]) -> str:
+    """Which files an alignment was made from: part ids and sizes, in order.
+
+    Replacing an album's audio in Plex gives it new parts (or new sizes), so a
+    changed fingerprint means the stored timings belong to audio that is gone.
+    """
+    basis = "|".join(f"{t.get('part_id')}:{t.get('size')}" for t in tracks)
+    return hashlib.sha256(basis.encode()).hexdigest()[:32]
+
+
+async def alignments_for(
+    db: AsyncSession, server_id: str, rating_keys: list[str]
+) -> dict[str, AudiobookAlignment]:
+    if not rating_keys:
+        return {}
+    rows = await db.execute(
+        select(AudiobookAlignment)
+        .where(AudiobookAlignment.plex_server_id == server_id)
+        .where(AudiobookAlignment.rating_key.in_(rating_keys))
+    )
+    return {row.rating_key: row for row in rows.scalars()}
 
 
 def _span(seconds: float) -> str:
@@ -198,14 +229,16 @@ def decode_chunk(data: bytes) -> list[dict[str, Any]]:
     return json.loads(gzip.decompress(data))
 
 
-def build_alignment(job: AudiobookJob, result: dict[str, Any]) -> AudiobookAlignment:
-    """The row (with its chunks) for a job's result. Pure: no I/O."""
+def build_alignment(
+    *, server_id: str, album: PlexAlbum, tracks: list[dict[str, Any]], result: dict[str, Any]
+) -> AudiobookAlignment:
+    """The row (with its chunks) for an alignment of ``album``. Pure: no I/O."""
     audio = result.get("audio") or {}
     offsets = {int(t["n"]): t for t in audio.get("tracks") or [] if "n" in t}
-    tracks = []
-    for track in job.tracks:
+    stored_tracks = []
+    for track in tracks:
         measured = offsets.get(int(track["n"]), {})
-        tracks.append(
+        stored_tracks.append(
             {
                 "n": track["n"],
                 "rating_key": track.get("rating_key"),
@@ -217,19 +250,18 @@ def build_alignment(job: AudiobookJob, result: dict[str, Any]) -> AudiobookAlign
     sections = [{k: s[k] for k in SECTION_FIELDS if k in s} for s in result.get("sections") or []]
     book = result.get("book") or {}
     alignment = AudiobookAlignment(
-        plex_server_id=job.plex_server_id,
-        rating_key=job.rating_key,
-        library_id=job.library_id,
-        title=job.title,
-        author=job.author,
-        duration=float(audio.get("duration") or sum(t["duration"] or 0 for t in job.tracks)),
-        tracks=tracks,
-        fingerprint=fingerprint(job.tracks),
+        plex_server_id=server_id,
+        rating_key=album.rating_key,
+        library_id=album.library_id,
+        title=album.title,
+        author=album.author,
+        duration=float(audio.get("duration") or sum(t["duration"] or 0 for t in tracks)),
+        tracks=stored_tracks,
+        fingerprint=fingerprint(tracks),
         sections=sections,
         stats=dict(result.get("stats") or {}),
-        epub_title=book.get("title") or job.epub_title,
-        epub_author=", ".join(book.get("authors") or []) or job.epub_author,
-        job_id=job.id,
+        epub_title=book.get("title"),
+        epub_author=", ".join(book.get("authors") or []) or None,
     )
     alignment.chunks = [
         AudiobookChunk(

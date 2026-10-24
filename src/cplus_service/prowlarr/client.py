@@ -21,6 +21,7 @@ import httpx
 
 from ..release.models import ParsedRelease
 from ..release.parser import parse_prowlarr_results
+from ..tls import tls_context
 from ..tracking.hashes import ReleaseHashCache
 from .models import DownloadClient, GrabResult, Indexer, SystemStatus
 
@@ -90,7 +91,7 @@ class ProwlarrClient:
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            self._client = httpx.AsyncClient(verify=tls_context(), timeout=self._timeout)
             self._owns_client = True
         return self._client
 

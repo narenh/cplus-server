@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 
-{% include "partials/audiobook_runtime.html" %}
-
 <section class="card">
   <h2>Books</h2>
   <p class="hint">
     In Plex, an audiobook is an album in a music library. Pick the library your
-    audiobooks are in; each book aligned here appears in Canopy+ with its text.
+    audiobooks are in, then upload each book's alignment — a JSON file made from
+    its audio and epub. A book with an alignment shows its text in Canopy+.
   </p>
 
   {% if plex_error %}

@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...auth.identity import authenticate_plex_token
 from ...db.models import ApnsDevice, ApnsEnvironment, User
 from ...seerr.client import SeerrAuthError, SeerrClient, SeerrError
+from ...settings import notifications_available
 from ..deps import ConfigDep, DbDep, PlexTokenDep, SeerrDep
 from ..schemas import PushDeviceRegistration, PushDeviceResponse
 
@@ -86,7 +87,7 @@ async def register_push_device(
     """
     user = await _admin_caller(db, seerr, plex_token)
 
-    if not config.notifications_enabled:
+    if not (notifications_available() and config.notifications_enabled):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Notifications are switched off for this instance. Watch "

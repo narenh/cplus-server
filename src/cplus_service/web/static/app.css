@@ -1110,27 +1110,6 @@ table.preview .dropped-by { color: var(--err); }
 .status-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; }
 .pager { justify-content: center; }
 
-/* A progress bar that only ever means one thing: how far along this job is.
-   The indeterminate form is for the moments with nothing to measure yet (the
-   upload has landed but the aligner hasn't picked it up). */
-.bar {
-  height: 6px; border-radius: var(--radius-pill); background: var(--line-soft);
-  overflow: hidden; margin: 6px 0; max-width: 420px;
-}
-.bar > span {
-  display: block; height: 100%; background: var(--accent);
-  transition: width .6s ease;
-}
-.bar.indeterminate > span { width: 30%; animation: bar-slide 1.3s ease-in-out infinite; }
-@keyframes bar-slide {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(340%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .bar > span { transition: none; }
-  .bar.indeterminate > span { animation: none; width: 100%; opacity: .35; }
-}
-
 /* A file picker that looks like the other buttons; picking a file submits it. */
 .file-button { position: relative; overflow: hidden; }
 .file-button input[type="file"] {

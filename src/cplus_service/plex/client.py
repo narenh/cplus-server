@@ -33,6 +33,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from ..tls import tls_context
+
 logger = logging.getLogger(__name__)
 
 PLEX_API = "https://plex.tv/api/v2"
@@ -74,7 +76,7 @@ class PlexPinClient:
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            self._client = httpx.AsyncClient(verify=tls_context(), timeout=self._timeout)
             self._owns_client = True
         return self._client
 
@@ -351,7 +353,7 @@ class PlexServerClient:
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            self._client = httpx.AsyncClient(verify=tls_context(), timeout=self._timeout)
             self._owns_client = True
         return self._client
 

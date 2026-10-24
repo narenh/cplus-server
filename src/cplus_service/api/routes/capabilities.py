@@ -25,6 +25,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ...db.session import get_config
+from ...settings import notifications_available
 from ...tracking.runner import tracking_enabled
 from ..deps import DbDep
 
@@ -60,7 +61,7 @@ async def capabilities(db: DbDep) -> dict[str, bool]:
     """
     config = await get_config(db)
     return {
-        "notifications": bool(config.notifications_enabled),
+        "notifications": notifications_available() and bool(config.notifications_enabled),
         "playback_events": bool(config.playback_events_enabled),
         "grab_tracking": tracking_enabled(config),
     }

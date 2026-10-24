@@ -34,27 +34,20 @@
     <p class="field-label">Webhook URL</p>
     <p class="readonly-value">{{ webhook_url }}</p>
     <p class="hint">
-      This is the address <em>you</em> reached this page on. If Seerr sees this
-      service under a different name — a reverse proxy, a container network, a
-      LAN address — use the one Seerr can resolve, keeping
-      <code>{{ webhook_path }}</code> on the end.
+      If Seerr reaches cplus at a different address (a proxy, container network
+      or LAN IP), use that one, ending in <code>{{ webhook_path }}</code>.
     </p>
 
     <p class="field-label">Authorization Header</p>
     <p class="readonly-value">{{ config.seerr_webhook_secret }}</p>
     <p class="hint">
-      Paste this into Seerr's <strong>Authorization Header</strong> field
-      verbatim. It is the whole of what proves a post really came from your
-      Seerr, so treat it like a password — though note that it authenticates
-      that one endpoint and nothing else, and that endpoint can do nothing but
-      log a request and notify you about it.
+      Paste this into Seerr's <strong>Authorization Header</strong> field. Treat
+      it like a password. It only allows logging a request.
     </p>
 
     <p class="hint">
       Under <strong>Notification Types</strong>, tick <strong>Request Pending
       Approval</strong> and <strong>Request Automatically Approved</strong>.
-      Anything else you tick is accepted and ignored, so Seerr will not record
-      a failed delivery for it.
     </p>
 
     <div class="row">
@@ -67,16 +60,13 @@
               hx-post="/admin/config/seerr-webhook/disable"
               hx-target="#seerr-webhook"
               hx-swap="outerHTML"
-              hx-confirm="Turn the webhook off? Requests filed in Seerr stop being logged and stop reaching your phone.">Turn off</button>
+              hx-confirm="Turn the webhook off? Requests filed in Seerr stop being logged{% if notifications_available() %} and stop reaching your phone{% endif %}.">Turn off</button>
     </div>
   {% else %}
     <p class="readonly-value unset">Off — nothing posted to {{ webhook_path }} is accepted.</p>
     <p class="hint">
-      Requests filed in the app are logged and pushed to you already. This is
-      the other door: someone opening Seerr in a browser and requesting there.
-      Switching it on generates a secret to paste into Seerr's webhook
-      settings, and from then on those requests land in your activity log and
-      on your phone like any other.
+      Logs requests made directly in Seerr{% if notifications_available() %} and notifies you{% endif %}, the same as requests
+      made in the app. Turning this on creates a secret to paste into Seerr.
     </p>
 
     <div class="row">

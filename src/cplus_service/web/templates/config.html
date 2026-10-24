@@ -48,15 +48,11 @@
 
   <h2>qBittorrent</h2>
   <p class="hint">
-    Optional. When Canopy+ grabs a release, Prowlarr still sends it to the
-    action's download client exactly as before. With qBittorrent set here and
-    the switch on, cplus then finds that torrent in qBittorrent, has it download
-    the start of the video first, asks Plex to scan just that folder as soon as
-    the first few MB are on disk, and tells Canopy+ the moment the item exists —
-    so playback can start while the rest downloads. Plex and qBittorrent must
-    see the same paths (normally: the same machine), and qBittorrent must write
-    straight into the library folder: no "Keep incomplete torrents in" folder
-    and no <code>.!qB</code> extension.
+    Optional. Lets Canopy+ start playing a grab before it finishes: cplus has
+    qBittorrent download the start of the file first, asks Plex to scan it, and
+    tells the app when it's ready. Plex and qBittorrent must see the same paths,
+    and qBittorrent must download straight into the library folder (no
+    incomplete-torrents folder, no <code>.!qB</code> extension).
   </p>
   <label for="qbittorrent_url">Web UI URL</label>
   <input type="url" id="qbittorrent_url" name="qbittorrent_url" value="{{ config.qbittorrent_url or '' }}"
@@ -92,11 +88,9 @@
          placeholder="{{ '············ (unchanged)' if config.tmdb_bearer_token else 'required' }}">
   <p class="hint">
     {% if config.tmdb_bearer_token %}A token is saved. Leave blank to keep it.{% else %}Not set yet.{% endif %}
-    A TMDB v4 read-access token. Unlike the keys above, this one is readable
-    over the API (<code>GET /manager/tmdb-token</code>) by anyone who can
-    manage requests, because the admin app needs it to look titles up — fine
-    for a low-impact, easily rotated key, not a place to put anything more
-    sensitive.
+    A TMDB v4 read-access token. Anyone who can manage requests can read it
+    (the admin app uses it to look up titles), so use one you can easily
+    regenerate.
   </p>
 
   <div class="row">
@@ -122,13 +116,9 @@
       <p class="readonly-value unset">Not set — no one can sign in.</p>
     {% endif %}
     <p class="hint">
-      Set by <code>{{ seerr_url_env }}</code> in the environment, not here. It is
-      what authenticates every user and files requests on their behalf, and it is
-      what decides who counts as an admin — so it is deliberately not something
-      any request to this service can change. To point at a different instance,
-      change the variable and redeploy; on the next start every device and browser
-      session is signed out, since permissions and the admin bit were all resolved
-      against the old instance.
+      Set by <code>{{ seerr_url_env }}</code> in the environment, because Seerr
+      decides who's an admin. To change it, update the variable and redeploy.
+      Everyone gets signed out.
     </p>
   </section>
 

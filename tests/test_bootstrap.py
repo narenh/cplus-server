@@ -152,7 +152,7 @@ async def test_a_request_action_is_seeded_for_films_and_for_tv(
         ("tv", "Request TV"),
     ]
     # Both buttons read the same on the television.
-    assert {a.button_title for a in actions} == {"Request"}
+    assert {a.display_title for a in actions} == {"Request"}
 
 
 # --------------------------------------------------------------------------- #

@@ -145,11 +145,11 @@ def _clean_icon(raw: str) -> str | None:
     return clean
 
 
-def _clean_display_title(raw: str) -> str | None:
-    """Normalise the button-copy field. Blank means "use the name"."""
+def _clean_display_title(raw: str) -> str:
+    """Normalise the button-copy field, which every action must have."""
     clean = raw.strip()
     if not clean:
-        return None
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "An action needs a button title.")
     if len(clean) > MAX_DISPLAY_TITLE:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

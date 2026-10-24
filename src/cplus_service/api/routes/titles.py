@@ -25,8 +25,7 @@ Every action is reported with both a ``name`` and a ``display_title``, and the
 client should print the **display title** on the button. The name is the
 admin's own label — it identifies the action in the admin UI and in
 notification text — while the display title is copy chosen for whoever is
-holding the remote. An action with no display title configured reports its name
-in both fields, so a client can read ``display_title`` unconditionally.
+holding the remote. Every action has both.
 
 **Route on ``kind``, never on either of them.** Both are free text an admin can
 change at any moment, the built-in Request action's included; ``kind`` is what
@@ -93,7 +92,7 @@ async def scorable_actions(session: AsyncSession, user_id: int) -> list[Scorable
         ScorableAction(
             id=action.id,
             name=action.name,
-            display_title=action.button_title,
+            display_title=action.display_title,
             sort_order=action.sort_order,
             icon=action.icon,
             confirm_body=action.confirm_body,
@@ -117,7 +116,7 @@ def request_offer_for(action: Action) -> dict[str, Any]:
     return {
         "id": action.id,
         "name": action.name,
-        "display_title": action.button_title,
+        "display_title": action.display_title,
         "kind": KIND_REQUEST,
         "icon": action.icon,
         "confirm_body": action.confirm_body,
@@ -166,7 +165,7 @@ def _ranked_offers(
                 {
                     "id": action.id,
                     "name": action.name,
-                    "display_title": action.display_title or action.name,
+                    "display_title": action.display_title,
                     "kind": KIND_GRAB,
                     "icon": action.icon,
                     "confirm_body": action.confirm_body,

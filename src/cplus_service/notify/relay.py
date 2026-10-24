@@ -45,6 +45,7 @@ from typing import Any
 import httpx
 
 from ..db.models import ApnsEnvironment, Config
+from ..settings import notifications_available
 from .messages import Notification
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,7 @@ class RelaySettings:
         setup step: switching notifications on enrols, so the only way to be
         enabled without a key is for that call to have failed.
         """
-        if not config.notifications_enabled:
+        if not (notifications_available() and config.notifications_enabled):
             return None
 
         api_key = (config.notification_relay_api_key or "").strip()

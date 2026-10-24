@@ -7,13 +7,22 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14",
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.34",
+    # Not uvicorn[standard]: its file watcher, websockets, YAML and .env
+    # support are for development and other apps, and cost memory and image
+    # size here. uvloop and httptools are the two parts that make serving
+    # cheaper; uvloop has no Windows build, where uvicorn falls back to asyncio.
+    "uvicorn>=0.34",
+    "uvloop>=0.21; sys_platform != 'win32'",
+    "httptools>=0.6",
     "greenlet>=3.1",
     # Plain httpx. Push goes through a relay that holds the APNs signing key,
     # so nothing here speaks to Apple: no HTTP/2 requirement, and no
     # `cryptography` to sign a provider token with. Both were dependencies of
     # this service until the relay took the key.
     "httpx>=0.28",
+    # httpx's own CA bundle, named directly because cplus_service.tls builds
+    # the one TLS context every client shares from it.
+    "certifi>=2024.2",
     "jinja2>=3.1",
     "python-multipart>=0.0.20",
     "pydantic>=2.10",
@@ -28,9 +37,6 @@ dev = [
     "respx>=0.22",
     "asgi-lifespan>=2.1",
     "ruff>=0.8",
-    # The aligner's anchoring and sampling logic is plain numpy and is tested
-    # here; its model-driven parts need torch and are exercised by a real run.
-    "numpy>=2.0",
 ]
 
 [build-system]
@@ -38,7 +44,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cplus_service", "src/cplus_align"]
+packages = ["src/cplus_service"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

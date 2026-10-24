@@ -10,8 +10,6 @@ Nothing per-request owns them.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,9 +21,6 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from cplus_align.protocol import AlignPaths, align_dir
-
-from ..audiobooks import monitor as aligner_monitor
 from ..auth.identity import sync_seerr_instance
 from ..auth.sessions import purge_expired_sessions
 from ..bootstrap import (
@@ -44,6 +39,7 @@ from ..db.session import (
 )
 from ..playback.forward import DELIVERY_TIMEOUT_SECONDS
 from ..settings import SEERR_URL_ENV, seerr_url
+from ..tls import tls_context
 from ..web import STATIC_DIR
 from .routes import (
     admin,
@@ -53,7 +49,6 @@ from .routes import (
     grab,
     grabs,
     home,
-    internal,
     manager,
     playback,
     push_devices,
@@ -108,21 +103,24 @@ def create_app(
         owns_engine = engine is None
         active_engine = engine or create_engine(db_path)
         sessionmaker = create_session_factory(active_engine)
-        http = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
-        seerr_http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0))
+        tls = tls_context()
+        http = httpx.AsyncClient(verify=tls, timeout=httpx.Timeout(60.0, connect=10.0))
+        seerr_http = httpx.AsyncClient(verify=tls, timeout=httpx.Timeout(30.0, connect=10.0))
         # The notification relay. The timeout is short because a push runs
         # after the response has already gone out: nothing is waiting on it,
         # but a hung connection would still pin a background task. Ordinary
         # HTTP/1.1 — the relay is the one that has to speak HTTP/2, to Apple.
-        relay_http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+        relay_http = httpx.AsyncClient(verify=tls, timeout=httpx.Timeout(10.0, connect=5.0))
         # Playback-event webhooks: admin-typed URLs, usually a home automation
         # hub on the LAN. Delivery also runs under an overall deadline of the
         # same length (see cplus_service.playback.forward); this one bounds
         # each phase so a dead host is given up on promptly.
-        playback_http = httpx.AsyncClient(timeout=httpx.Timeout(DELIVERY_TIMEOUT_SECONDS))
+        playback_http = httpx.AsyncClient(
+            verify=tls, timeout=httpx.Timeout(DELIVERY_TIMEOUT_SECONDS)
+        )
         # qBittorrent, for grab tracking: small LAN reads polled about once a
         # second, so a dead host should fail fast and be retried.
-        qbittorrent_http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
+        qbittorrent_http = httpx.AsyncClient(verify=tls, timeout=httpx.Timeout(15.0, connect=5.0))
 
         if create_schema:
             await create_all(active_engine)
@@ -161,20 +159,10 @@ def create_app(
                 SEERR_URL_ENV,
             )
 
-        # Follows the aligner sidecar's job files, when this deployment has one.
-        monitor: asyncio.Task[None] | None = None
-        root = align_dir()
-        if root is not None:
-            monitor = asyncio.create_task(aligner_monitor.run(sessionmaker, AlignPaths(root)))
-
         try:
             yield
         finally:
             await app.state.cplus.grab_tracker.aclose()
-            if monitor is not None:
-                monitor.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await monitor
             await http.aclose()
             await seerr_http.aclose()
             await relay_http.aclose()
@@ -208,7 +196,6 @@ def create_app(
     app.include_router(webhooks.router)
     app.include_router(audiobooks.router)
     app.include_router(devices.router)
-    app.include_router(internal.router)
     app.include_router(admin.router)
 
     app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")

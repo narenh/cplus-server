@@ -12,9 +12,7 @@
 <section class="builder-section filters">
   <h2><span class="step">1</span> Never grab</h2>
   <p class="lede">
-    A filter removes releases from consideration entirely — nothing below can
-    bring one back. Order does not matter here: one filter anywhere applies to
-    everything.
+    Filters remove releases completely. Order doesn't matter.
   </p>
 
   {% with section = "filter",
@@ -41,11 +39,9 @@
 <section class="builder-section choices">
   <h2><span class="step">2</span> Prefer, in order</h2>
   <p class="lede">
-    Each row describes a <em>kind</em> of release you would rather have. Every
-    release matching the 1st choice beats every release matching the 2nd,
-    whatever the tie-breakers say. A release matching none of them ranks last —
-    still eligible, just last. This is how "the biggest 4K WEB copy, or failing
-    that the biggest 1080p under 15 GB" gets said.
+    Each row is a <em>kind</em> of release you'd prefer, best first. Anything
+    matching row 1 beats anything matching row 2. Releases matching no row still
+    qualify, but rank last.
   </p>
 
   {% include "partials/choice_rows.html" %}
@@ -62,10 +58,8 @@
 <section class="builder-section preferences">
   <h2><span class="step">3</span> Break ties by</h2>
   <p class="lede">
-    Used inside a choice, when several releases are the same kind. Order matters:
-    the first decides, each later one breaks the ties the previous one left. A
-    choice that takes "the biggest file" has already decided, so these only
-    settle what it could not.
+    These decide between releases that match the same choice. The first decides;
+    later ones only settle remaining ties.
   </p>
 
   {% with section = "preference",

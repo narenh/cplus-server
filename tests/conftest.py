@@ -22,7 +22,7 @@ from cplus_service.api.app import create_app
 from cplus_service.db.models import Action, ApnsDevice, Config, Permission, QualityProfile, User
 from cplus_service.db.session import create_engine, get_config
 from cplus_service.notify.relay import RELAY_URL_ENV, RelaySettings
-from cplus_service.settings import SEERR_URL_ENV
+from cplus_service.settings import NOTIFICATIONS_ENV, SEERR_URL_ENV
 
 SEERR_URL = "http://seerr.test:5055"
 PROWLARR_URL = "http://prowlarr.test:9696"
@@ -83,6 +83,15 @@ def seerr_env(monkeypatch: pytest.MonkeyPatch) -> str:
     return SEERR_URL
 
 
+@pytest.fixture(autouse=True)
+def notifications_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Offer notifications, as the Coolify deployment does.
+
+    The published image leaves them off; a test about that deletes the variable.
+    """
+    monkeypatch.setenv(NOTIFICATIONS_ENV, "1")
+
+
 @pytest_asyncio.fixture
 async def app(tmp_path: Path, seerr_env: str) -> AsyncIterator[FastAPI]:
     engine = create_engine(tmp_path / "api.db")
@@ -133,6 +142,7 @@ async def make_action(
     sort_order: int = 0,
     icon: str | None = None,
     confirm_body: str | None = None,
+    display_title: str | None = None,
 ) -> Action:
     """An ordinary Prowlarr-backed action with a permissive profile."""
     profile = QualityProfile(name=f"{name} profile", rules=[])
@@ -140,6 +150,7 @@ async def make_action(
     await db.flush()
     action = Action(
         name=name,
+        display_title=display_title or name,
         download_client_id=download_client_id,
         quality_profile_id=profile.id,
         sort_order=sort_order,

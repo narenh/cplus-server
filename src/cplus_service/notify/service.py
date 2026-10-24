@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.models import ApnsDevice
 from ..db.session import get_config
+from ..settings import notifications_available
 from .messages import Notification
 from .prefs import is_enabled
 from .relay import RelayClient, RelaySettings, SendOutcome
@@ -199,7 +200,7 @@ async def _deliver_in_session(
 
     # The master switch first, before the per-type ones: an install with
     # notifications off should read as "off", not as "that type is off".
-    if not config.notifications_enabled:
+    if not (notifications_available() and config.notifications_enabled):
         return DispatchReport(skipped_reason=DISABLED_REASON)
 
     if not await is_enabled(session, notification.type):

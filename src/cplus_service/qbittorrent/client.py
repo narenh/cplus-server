@@ -38,6 +38,8 @@ from typing import Any, Self
 
 import httpx
 
+from ..tls import tls_context
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
@@ -234,7 +236,7 @@ class QBittorrentClient:
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            self._client = httpx.AsyncClient(verify=tls_context(), timeout=self._timeout)
             self._owns_client = True
         return self._client
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,13 +46,22 @@ from ....notify.types import (
     NotificationType,
     NotificationTypeInfo,
 )
+from ....settings import notifications_available
 from ....web import templates
 from ...deps import DbDep, StateDep
 from .deps import AdminPageDep
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/notifications", tags=["admin"])
+def _require_available() -> None:
+    """The whole tab is absent unless the deployment offers notifications."""
+    if not notifications_available():
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+
+router = APIRouter(
+    prefix="/notifications", tags=["admin"], dependencies=[Depends(_require_available)]
+)
 
 #: What the "send a test" button sends. Deliberately a real, ordinary-looking
 #: notification rather than one that says TEST: the point of the button is to

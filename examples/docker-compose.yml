@@ -1,0 +1,37 @@
+# cplus, from the published image. Copy this file anywhere, set CPLUS_SEERR_URL,
+# then:
+#
+#   docker compose up -d
+#
+# and open http://<this machine>:8080 to sign in with Plex and finish setup.
+#
+# (The docker-compose.yml at the root of the repo is the Coolify deployment,
+# which builds from source. This one doesn't need the source at all.)
+
+services:
+  cplus:
+    image: ghcr.io/narenh/cplus-server:latest
+    container_name: cplus
+    restart: unless-stopped
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      # Required: your Seerr's address, as this container can reach it. Seerr
+      # decides who can sign in and who is an admin.
+      CPLUS_SEERR_URL: http://seerr:5055
+
+      # Who owns the files in ./data on this machine (`id -u` and `id -g`).
+      PUID: 1000
+      PGID: 1000
+
+      # Your timezone, for the times in logs.
+      TZ: Etc/UTC
+
+    volumes:
+      # Everything cplus keeps is one SQLite file in here. Back this up.
+      - ./data:/data
+
+    # Steady use is about 80 MB. The headroom is for a large Prowlarr search.
+    mem_limit: 160m

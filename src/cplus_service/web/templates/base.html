@@ -39,7 +39,7 @@
   ("/admin/libraries", "libraries", "Libraries & Home"),
   ("/admin/audiobooks", "audiobooks", "Audiobooks"),
   ("/admin/devices", "devices", "TVs"),
-  ("/admin/notifications", "notifications", "Notifications"),
+] + ([("/admin/notifications", "notifications", "Notifications")] if notifications_available() else []) + [
   ("/admin/playback", "playback", "Playback"),
   ("/admin/config", "config", "Configuration"),
 ] %}

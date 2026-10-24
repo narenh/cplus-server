@@ -7,3 +7,7 @@ __pycache__
 tests
 scripts
 docker-compose.yml
+parked
+examples
+.github
+.claude

@@ -27,7 +27,6 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
-    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -442,9 +441,7 @@ class Action(Base):
     is the copy the client prints on the button, and it answers a different
     question: an admin may name an
     action "Add to library in HD" for their own bookkeeping while the person
-    holding the remote should just see "Play Now".  It is optional; when it is
-    unset the name is the button copy, which is why every existing install
-    keeps behaving exactly as before.
+    holding the remote should just see "Play Now".  Both are required.
     """
 
     __tablename__ = "actions"
@@ -464,11 +461,9 @@ class Action(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
 
-    #: Optional button copy for the client.  Not unique — two actions may
+    #: The button copy users see in the client.  Not unique — two actions may
     #: reasonably print the same words — and never used to identify anything.
-    #: ``None`` means "use the name", which is what every action created before
-    #: this column existed does.
-    display_title: Mapped[str | None] = mapped_column(String(128))
+    display_title: Mapped[str] = mapped_column(String(128))
 
     #: Rank among the caller's actions, ascending.  Not unique: two actions may
     #: share a rank, and ``id`` settles it rather than the admin being made to
@@ -502,14 +497,6 @@ class Action(Base):
         back_populates="actions", lazy="selectin"
     )
     users: Mapped[list[User]] = relationship(secondary="permissions", back_populates="actions")
-
-    @property
-    def button_title(self) -> str:
-        """The copy a client should print on this action's button.
-
-        The one place the fallback lives, so no caller has to remember it.
-        """
-        return self.display_title or self.name
 
 
 class Permission(Base):
@@ -750,70 +737,6 @@ class ActivityLog(Base):
     )
 
 
-class AudiobookJobStatus(StrEnum):
-    """Where one alignment job is. See :mod:`cplus_service.audiobooks`."""
-
-    VERIFYING = "verifying"
-    QUEUED = "queued"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-    @property
-    def active(self) -> bool:
-        return self in (self.VERIFYING, self.QUEUED, self.RUNNING)
-
-
-class AudiobookJob(Base):
-    """One epub upload for one book, from verification to a finished alignment.
-
-    The work itself happens in the aligner sidecar; this row is cplus-service's
-    record of it, kept current from the files the sidecar writes (see
-    :mod:`cplus_service.audiobooks.monitor`). Rows are kept after they finish so
-    the tab can say what happened; the uploaded epub is not — it is deleted with
-    the job's working directory once the job ends.
-
-    ``secret`` authorises the sidecar's audio requests for this job and nothing
-    else; it stops working the moment the job is no longer active.
-    """
-
-    __tablename__ = "audiobook_jobs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    plex_server_id: Mapped[str] = mapped_column(String(64))
-    rating_key: Mapped[str] = mapped_column(String(32), index=True)
-    library_id: Mapped[str] = mapped_column(String(32))
-    title: Mapped[str] = mapped_column(String(512))
-    author: Mapped[str | None] = mapped_column(String(512))
-    status: Mapped[AudiobookJobStatus] = mapped_column(String(16), index=True)
-    #: What the sidecar says it is doing ("Listening to the audio"), and how far.
-    stage: Mapped[str | None] = mapped_column(String(128))
-    progress: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
-    eta_seconds: Mapped[int | None] = mapped_column(Integer)
-    #: The verification verdict, a warning worth keeping, or why it failed.
-    message: Mapped[str | None] = mapped_column(Text)
-    secret: Mapped[str] = mapped_column(String(64))
-    #: The album's files at upload time, in listening order — what the sidecar
-    #: is sent and what the finished alignment's track offsets refer to.
-    tracks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    epub_title: Mapped[str | None] = mapped_column(String(512))
-    epub_author: Mapped[str | None] = mapped_column(String(512))
-    epub_words: Mapped[int | None] = mapped_column(Integer)
-    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    #: When the sidecar last reported on this job; a running job that stops
-    #: reporting is shown as stalled rather than as frozen at its last percent.
-    heard_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    @property
-    def is_active(self) -> bool:
-        # The column is a plain string, so a loaded row holds ``str``, not the enum.
-        return AudiobookJobStatus(self.status).active
-
-
 class AudiobookAlignment(Base):
     """A finished alignment: one book's sentences, timed against its audio.
 
@@ -852,7 +775,6 @@ class AudiobookAlignment(Base):
     stats: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     epub_title: Mapped[str | None] = mapped_column(String(512))
     epub_author: Mapped[str | None] = mapped_column(String(512))
-    job_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     chunks: Mapped[list[AudiobookChunk]] = relationship(

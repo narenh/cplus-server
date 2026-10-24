@@ -1,18 +1,8 @@
-"""Audiobook read-along: aligning an epub's sentences to a Plex audiobook's audio.
+"""Audiobook read-along: an epub's sentences timed against a Plex audiobook's audio.
 
-cplus-service owns everything an admin or a client sees — the Audiobooks tab,
-the job records, the finished alignments — and none of the heavy lifting. That
-happens in the ``cplus-aligner`` sidecar (:mod:`cplus_align`), which this side
-talks to only through the shared directory described in
-:mod:`cplus_align.protocol`:
-
-* :mod:`.runtime` reads whether the sidecar is up and its runtime installed,
-  and asks it to install or remove the runtime.
-* :mod:`.jobs` turns an upload into a job directory the sidecar will pick up.
-* :mod:`.monitor` follows each job's files, keeps its row current, and ingests
-  the result (:mod:`.ingest`) when one appears.
-
-The sidecar reaches back in for exactly one thing — the audio — through
-``/internal/aligner/jobs/{id}/tracks/{n}``, which relays Plex with the admin
-token so the token itself never leaves this container.
+cplus serves alignments; it doesn't make them. An admin uploads one made
+elsewhere (see ``parked/cplus_align`` for the aligner this service used to run
+alongside it), :mod:`.ingest` checks it against the album in Plex and stores it
+in chunks, and clients read it through :mod:`cplus_service.api.routes.audiobooks`.
+:mod:`.access` decides who may see which book.
 """

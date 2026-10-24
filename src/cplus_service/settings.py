@@ -74,4 +74,24 @@ def seerr_url_fingerprint() -> str:
     return hashlib.sha256((seerr_url() or "").encode("utf-8")).hexdigest()
 
 
-__all__ = ["SEERR_URL_ENV", "seerr_url", "seerr_url_fingerprint"]
+NOTIFICATIONS_ENV = "CPLUS_NOTIFICATIONS"
+
+
+def notifications_available() -> bool:
+    """Whether this deployment offers push notifications at all.
+
+    Off unless ``CPLUS_NOTIFICATIONS=1``. Pushes reach only the cplus management
+    app, which isn't distributed, so the published image hides the
+    Notifications tab and tells clients there is nothing to register for. The
+    Coolify deployment turns it on in ``docker-compose.yml``.
+    """
+    return os.environ.get(NOTIFICATIONS_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+__all__ = [
+    "NOTIFICATIONS_ENV",
+    "SEERR_URL_ENV",
+    "notifications_available",
+    "seerr_url",
+    "seerr_url_fingerprint",
+]

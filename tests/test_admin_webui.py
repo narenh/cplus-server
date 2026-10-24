@@ -1256,7 +1256,7 @@ async def test_saving_one_action_answers_with_that_card_alone(
     response = await client.post(
         f"/admin/actions/{edited.id}",
         data={
-            "name": "Stream It",
+            "name": "Stream It", "display_title": "Go",
             "download_client_id": "5",
             "quality_profile_id": str(edited.quality_profile_id),
         },
@@ -1284,7 +1284,7 @@ async def test_a_write_that_changes_the_ranking_answers_with_the_whole_list(
         response = await client.post(
             "/admin/actions",
             data={
-                "name": "Add 4K",
+                "name": "Add 4K", "display_title": "Go",
                 "download_client_id": "5",
                 "quality_profile_id": str(action.quality_profile_id),
             },
@@ -1386,7 +1386,12 @@ async def test_creating_an_action(client: httpx.AsyncClient, db: AsyncSession) -
 
     response = await client.post(
         "/admin/actions",
-        data={"name": "Add 4K", "download_client_id": "5", "quality_profile_id": str(profile.id)},
+        data={
+            "name": "Add 4K",
+            "display_title": "Go",
+            "download_client_id": "5",
+            "quality_profile_id": str(profile.id),
+        },
         follow_redirects=False,
     )
     assert response.status_code == 200
@@ -1415,6 +1420,7 @@ async def test_only_the_built_in_action_may_say_request(
 
     form = {
         "name": "Stream Now",
+        "display_title": "Play Now",
         "download_client_id": "5",
         "quality_profile_id": str(profile.id),
     }
@@ -1436,7 +1442,7 @@ async def test_renaming_an_action_to_the_reserved_word_is_refused_too(
     response = await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "REQUEST",
+            "name": "REQUEST", "display_title": "Go",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
         },
@@ -1480,7 +1486,9 @@ async def test_the_built_in_action_keeps_the_word_it_is_named_after(
         await db.execute(select(Action).where(Action.request_type == "movie"))
     ).scalar_one()
 
-    await client.post(f"/admin/actions/{system.id}", data={"name": "Ask the household"})
+    await client.post(
+        f"/admin/actions/{system.id}", data={"name": "Ask the household", "display_title": "Go"}
+    )
     response = await client.post(
         f"/admin/actions/{system.id}",
         data={"name": "Request", "display_title": "Request"},
@@ -1529,7 +1537,12 @@ async def test_the_built_in_action_takes_no_prowlarr_targets(
 
     response = await client.post(
         f"/admin/actions/{system.id}",
-        data={"name": "Request", "download_client_id": "5", "quality_profile_id": "1"},
+        data={
+            "name": "Request",
+            "display_title": "Go",
+            "download_client_id": "5",
+            "quality_profile_id": "1",
+        },
     )
     assert response.status_code == 400
     assert "never touches" in response.json()["detail"]
@@ -1562,7 +1575,7 @@ async def test_an_ordinary_action_still_needs_its_prowlarr_targets(
     action = await make_action(db, "Stream Now")
 
     response = await client.post(
-        f"/admin/actions/{action.id}", data={"name": "Stream Now"}
+        f"/admin/actions/{action.id}", data={"name": "Stream Now", "display_title": "Go"}
     )
     assert response.status_code == 400
 
@@ -1592,7 +1605,7 @@ async def test_a_new_admin_can_create_an_action_without_building_a_profile_first
     created = await client.post(
         "/admin/actions",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "download_client_id": "5",
             "quality_profile_id": str(starter.id),
         },
@@ -1625,10 +1638,9 @@ async def test_an_action_can_carry_button_copy_separate_from_its_name(
         await db.execute(select(Action).where(Action.name == "Add to library in HD"))
     ).scalar_one()
     assert action.display_title == "Play Now"
-    assert action.button_title == "Play Now"
 
 
-async def test_a_blank_button_title_falls_back_to_the_name(
+async def test_a_blank_button_title_is_refused(
     client: httpx.AsyncClient, db: AsyncSession
 ) -> None:
     await signed_in(client, db)
@@ -1636,7 +1648,7 @@ async def test_a_blank_button_title_falls_back_to_the_name(
     action.display_title = "Play Now"
     await db.commit()
 
-    await client.post(
+    response = await client.post(
         f"/admin/actions/{action.id}",
         data={
             "name": "Stream Now",
@@ -1646,10 +1658,11 @@ async def test_a_blank_button_title_falls_back_to_the_name(
         },
         follow_redirects=False,
     )
+    assert response.status_code == 400
+    assert "needs a button title" in response.text
 
     await db.refresh(action)
-    assert action.display_title is None
-    assert action.button_title == "Stream Now"
+    assert action.display_title == "Play Now"
 
 
 async def test_a_button_title_longer_than_the_column_is_rejected(
@@ -1670,7 +1683,7 @@ async def test_a_button_title_longer_than_the_column_is_rejected(
     assert response.status_code == 400
 
     await db.refresh(action)
-    assert action.display_title is None
+    assert action.display_title == "Stream Now"
 
 
 async def test_editing_and_deleting_an_ordinary_action(
@@ -1682,7 +1695,7 @@ async def test_editing_and_deleting_an_ordinary_action(
     await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Later",
+            "name": "Stream Later", "display_title": "Go",
             "download_client_id": "9",
             "quality_profile_id": str(action.quality_profile_id),
         },
@@ -1767,7 +1780,7 @@ async def test_a_new_action_lands_last_in_the_ranking(
     await client.post(
         "/admin/actions",
         data={
-            "name": "Add 4K",
+            "name": "Add 4K", "display_title": "Go",
             "download_client_id": "5",
             "quality_profile_id": str(profile.id),
         },
@@ -1794,7 +1807,7 @@ async def test_an_unknown_icon_is_saved_rather_than_refused(
     response = await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "icon": "sparkle.magnifyingglass.badge",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
@@ -1818,7 +1831,7 @@ async def test_an_icon_that_is_not_a_symbol_name_is_refused(
     response = await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "icon": "<script>alert(1)</script>",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
@@ -1839,7 +1852,7 @@ async def test_a_blank_icon_clears_it(
     await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "icon": "  ",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
@@ -1862,7 +1875,7 @@ async def test_confirmation_copy_is_saved_with_its_placeholders_intact(
     response = await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "confirm_body": "  {release} will stream, using {size}.  ",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
@@ -1889,7 +1902,7 @@ async def test_an_unknown_placeholder_in_the_confirmation_copy_is_refused(
     response = await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "confirm_body": "Grabbing {relase} now.",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),
@@ -1912,7 +1925,7 @@ async def test_blank_confirmation_copy_clears_it(
     await client.post(
         f"/admin/actions/{action.id}",
         data={
-            "name": "Stream Now",
+            "name": "Stream Now", "display_title": "Go",
             "confirm_body": "   ",
             "download_client_id": "5",
             "quality_profile_id": str(action.quality_profile_id),

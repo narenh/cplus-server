@@ -31,9 +31,9 @@
     <div class="field">
       <label for="title-{{ action.id }}">Button title</label>
       <input form="action-{{ action.id }}" id="title-{{ action.id }}" type="text"
-             name="display_title" value="{{ action.display_title or '' }}"
-             data-original="{{ action.display_title or '' }}"
-             maxlength="128" placeholder="{{ action.name }}">
+             name="display_title" value="{{ action.display_title }}"
+             data-original="{{ action.display_title }}"
+             maxlength="128" required>
     </div>
 
     <div class="field">

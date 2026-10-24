@@ -10,8 +10,7 @@
 
 {% if not choices %}
   <p class="empty">
-    No choices yet — every release that survives the filters is treated as the
-    same kind of thing, and the tie-breakers below decide between them.
+    No choices yet, so the tie-breakers below decide.
   </p>
 {% endif %}
 
@@ -72,9 +71,7 @@
                  placeholder="at most (GB)">
         </div>
         <p class="hint">
-          A release whose size the indexer did not report never satisfies a size
-          bound — it falls through to a later choice rather than being let in on
-          a guess.
+          A release with no reported size never matches a size limit.
         </p>
       </div>
 

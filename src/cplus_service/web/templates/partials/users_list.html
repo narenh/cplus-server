@@ -9,8 +9,7 @@
 <div id="users-list">
 {% if not users %}
   <p class="empty">
-    No users yet. A user appears here the first time their client signs in —
-    identity comes from Seerr, so there is nobody to grant access to until then.
+    No users yet. People appear here after they first sign in to the app.
   </p>
 {% else %}
 <div class="action-list">
@@ -46,10 +45,8 @@
   {% endfor %}
 </div>
 <p class="hint">
-  Granting takes effect at the user's next app launch, when their client calls
-  <code>/register</code> again — actions and searches authenticate from a
-  cache rather than re-checking Seerr on every request. Removing a user is
-  immediate.
+  New permissions apply the next time the user opens the app. Removing a user
+  takes effect immediately.
 </p>
 {% endif %}
 </div>

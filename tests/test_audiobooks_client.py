@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cplus_service.audiobooks.ingest import build_alignment, replace_alignment
 from cplus_service.auth.plex_cache import remember_token
-from cplus_service.db.models import AudiobookJob, AudiobookProgress, Config, User
+from cplus_service.db.models import AudiobookProgress, Config, User
 from cplus_service.db.session import get_config
+from cplus_service.plex.client import PlexAlbum
 
 from .audiobook_fixtures import PLEX_SERVER_URL, SERVER_ID, children_payload, result_payload
 from .conftest import PLEX_RESOURCES_URL, PLEX_TOKEN, SEERR_URL, seerr_user_payload
@@ -85,19 +86,21 @@ def plex():
 async def aligned(
     db: AsyncSession, *, rating_key: str = "501", library_id: str = "7", title: str = "The Hobbit"
 ) -> int:
-    job = AudiobookJob(
-        plex_server_id=SERVER_ID,
+    album = PlexAlbum(
         rating_key=rating_key,
-        library_id=library_id,
         title=title,
         author="J. R. R. Tolkien",
-        status="done",
-        secret="s",
-        tracks=[{"n": 0, "rating_key": "502", "part_id": "9001", "size": 1, "duration": 37500.0}],
+        library_id=library_id,
+        thumb=None,
+        year=None,
+        tracks=1,
     )
-    db.add(job)
-    await db.flush()
-    alignment = build_alignment(job, result_payload(sentences=6))
+    alignment = build_alignment(
+        server_id=SERVER_ID,
+        album=album,
+        tracks=[{"n": 0, "rating_key": "502", "part_id": "9001", "size": 1, "duration": 37500.0}],
+        result=result_payload(sentences=6),
+    )
     await replace_alignment(db, alignment)
     await db.commit()
     return alignment.id

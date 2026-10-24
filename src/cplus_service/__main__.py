@@ -48,6 +48,9 @@ def main() -> None:
         host=os.environ.get("CPLUS_HOST", "0.0.0.0"),  # noqa: S104
         port=int(os.environ.get("CPLUS_PORT", "8080")),
         log_level=os.environ.get("CPLUS_LOG_LEVEL", "info"),
+        # A line per request is noise at this service's scale (the TV polls),
+        # and costs a little on every one. CPLUS_ACCESS_LOG=1 brings it back.
+        access_log=os.environ.get("CPLUS_ACCESS_LOG", "").lower() in ("1", "true", "yes"),
         # This service is meant to run behind a reverse proxy (Coolify's, a
         # bare Traefik, nginx, ...) which terminates TLS and forwards plain
         # HTTP. Trusting the forwarded headers is what lets the app know the

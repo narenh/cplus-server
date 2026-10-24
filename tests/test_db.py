@@ -53,7 +53,12 @@ async def _seed_user_and_action(session: AsyncSession) -> tuple[User, Action]:
     await session.flush()
 
     user = User(seerr_user_id=42, plex_username="someone")
-    action = Action(name="Stream Now", download_client_id=5, quality_profile_id=profile.id)
+    action = Action(
+        name="Stream Now",
+        display_title="Stream Now",
+        download_client_id=5,
+        quality_profile_id=profile.id,
+    )
     session.add_all([user, action])
     await session.flush()
     return user, action
@@ -111,10 +116,20 @@ async def test_action_names_are_unique(session: AsyncSession) -> None:
     session.add(profile)
     await session.flush()
 
-    session.add(Action(name="Stream Now", download_client_id=1, quality_profile_id=profile.id))
+    session.add(Action(
+        name="Stream Now",
+        display_title="Stream Now",
+        download_client_id=1,
+        quality_profile_id=profile.id),
+    )
     await session.commit()
 
-    session.add(Action(name="Stream Now", download_client_id=2, quality_profile_id=profile.id))
+    session.add(Action(
+        name="Stream Now",
+        display_title="Stream Now",
+        download_client_id=2,
+        quality_profile_id=profile.id),
+    )
     with pytest.raises(IntegrityError):
         await session.commit()
 
@@ -220,7 +235,12 @@ async def test_a_profile_in_use_by_an_action_cannot_be_deleted(
     profile = QualityProfile(name="p", rules=[])
     session.add(profile)
     await session.flush()
-    session.add(Action(name="Stream Now", download_client_id=1, quality_profile_id=profile.id))
+    session.add(Action(
+        name="Stream Now",
+        display_title="Stream Now",
+        download_client_id=1,
+        quality_profile_id=profile.id),
+    )
     await session.commit()
 
     with pytest.raises(IntegrityError):
@@ -238,8 +258,18 @@ async def test_permissions_grant_a_subset_of_actions(session: AsyncSession) -> N
     await session.flush()
 
     user = User(seerr_user_id=1, plex_username="someone")
-    stream = Action(name="Stream Now", download_client_id=1, quality_profile_id=profile.id)
-    add4k = Action(name="Add 4K", download_client_id=2, quality_profile_id=profile.id)
+    stream = Action(
+        name="Stream Now",
+        display_title="Stream Now",
+        download_client_id=1,
+        quality_profile_id=profile.id,
+    )
+    add4k = Action(
+        name="Add 4K",
+        display_title="Add 4K",
+        download_client_id=2,
+        quality_profile_id=profile.id,
+    )
     session.add_all([user, stream, add4k])
     await session.flush()
 

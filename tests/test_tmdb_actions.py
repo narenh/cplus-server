@@ -180,21 +180,6 @@ async def test_the_shape_matches_one_line_of_the_movie_stream(
 
 
 @respx.mock
-async def test_display_title_falls_back_to_the_name(
-    client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
-) -> None:
-    await signed_in(client, plex_headers)
-    action = await request_action(db, route)
-    action.display_title = None
-    await db.commit()
-    await grant(db, await only_user(db), action)
-
-    body = (await client.get(actions_url(route), headers=plex_headers)).json()
-
-    assert body["actions"][0]["display_title"] == action.name
-
-
-@respx.mock
 async def test_an_admins_button_copy_is_used_when_set(
     client: httpx.AsyncClient, db: AsyncSession, plex_headers: dict, route: str
 ) -> None:

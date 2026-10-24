@@ -21,17 +21,10 @@
   {# Said on the page rather than in the docs, because it is the whole of what
      the checkbox commits to and nobody reads the docs before ticking a box. #}
   <p class="hint warn">
-    Notifications are delivered <strong>in plaintext</strong> through
-    <code>{{ relay_host }}</code>, a forwarding service run by the Canopy+
-    maintainers rather than by you. Apple has to be able to read a notification
-    to display it, so there is no arrangement where the relay forwards without
-    seeing the contents.
-  </p>
-  <p class="hint">
-    Each notification carries a media title and a username. The relay stores
-    none of it and keeps no record of which devices belong to which instance —
-    but it does see it in passing. If that is not acceptable for your instance,
-    leave this off; everything else works without it.
+    Notifications go through <code>{{ relay_host }}</code>, a relay run by the
+    Canopy+ maintainers. It sees each notification (a media title and a
+    username) but stores nothing. If that's not OK, leave notifications off;
+    everything else still works.
   </p>
 
   {% if error %}
@@ -43,9 +36,7 @@
 
   <section class="card">
     <p class="empty">
-      Notifications are off. Nothing is sent, no device can register, and the
-      app is told so by <code>GET /capabilities</code> — so it will not ask
-      anyone for permission it cannot use.
+      Notifications are off. Nothing is sent and devices can't register.
     </p>
   </section>
 
@@ -168,9 +159,8 @@
             </table>
       </div>
       <p class="hint">
-        A device removed here comes back the next time that app launches and
-        registers again. To stop one for good, sign out of the app on it.
-        Devices Apple reports as gone are removed on their own.
+        A removed device re-registers next time the app opens. To stop it for good,
+        sign out of the app on that device.
       </p>
     {% endif %}
   </section>

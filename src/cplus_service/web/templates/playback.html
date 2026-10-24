@@ -10,17 +10,11 @@
   <h2>Playback events</h2>
   {% include "partials/playback_switch.html" %}
   <p class="hint">
-    Canopy+'s player reports what it is doing — start, pause, resume, stop, and
-    the moments Plex's own webhooks never mention: each chapter change, the
-    intro starting and ending, the credits beginning. Each Apple TV names
-    itself by the room set in Canopy+'s settings. This server forwards every
-    event to every webhook below, for home automations: lights down on
-    <code>started</code>, back up on <code>credits_started</code>.
-  </p>
-  <p class="hint">
-    The app checks <code>GET /capabilities</code> and only sends while this is
-    on. Nothing is stored: the list at the bottom of this page is kept in
-    memory and is gone after a restart.
+    Canopy+ reports playback events (start, pause, resume, stop, chapter
+    changes, intro start and end, credits start), and cplus forwards each one to
+    the webhooks below, for things like dimming the lights. Each Apple TV is
+    named by its room in Canopy+. Events aren't stored; the recent list below
+    clears on restart.
   </p>
 </section>
 
@@ -29,10 +23,8 @@
 <section class="card">
   <h2>What a webhook receives</h2>
   <p class="hint">
-    One <code>POST</code> per event, with a JSON body. Every key is always
-    present; the ones that do not apply to an event are <code>null</code>.
-    Delivery is attempted once, with a {{ timeout }}-second limit, and never
-    retried — an automation that fires late is worse than one that does not.
+    One JSON <code>POST</code> per event; keys that don't apply are
+    <code>null</code>. Each is sent once, with a {{ timeout }}-second timeout.
   </p>
 
   <ul class="playback-fields">

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cplus_service.db.models import ApnsDevice, Config, NotificationPreference, User
 from cplus_service.notify import prefs
 from cplus_service.notify.types import NotificationType
+from cplus_service.settings import NOTIFICATIONS_ENV
 
 from .conftest import (
     RELAY_API_KEY,
@@ -76,7 +77,7 @@ async def test_the_page_says_what_enabling_commits_to(
 
     body = (await client.get("/admin/notifications")).text
 
-    assert "plaintext" in body
+    assert "It sees each notification" in body
     assert "relay.test" in body
 
 
@@ -565,3 +566,30 @@ async def test_deleting_a_user_takes_their_devices_with_them(
 
     assert response.status_code == 200
     assert (await db.execute(select(ApnsDevice))).scalars().all() == []
+
+
+# --------------------------------------------------------------------------- #
+# Deployments without notifications (the published image)
+# --------------------------------------------------------------------------- #
+
+
+async def test_without_the_switch_the_tab_is_gone(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, monkeypatch
+) -> None:
+    monkeypatch.delenv(NOTIFICATIONS_ENV)
+    await signed_in(client, db)
+
+    assert (await client.get("/admin/notifications")).status_code == 404
+    assert (await client.post("/admin/notifications/enabled")).status_code == 404
+    page = await client.get("/admin/grabs")
+    assert 'href="/admin/notifications"' not in page.text
+
+
+async def test_without_the_switch_nothing_is_offered_even_if_it_was_on(
+    client: httpx.AsyncClient, db: AsyncSession, configured: Config, monkeypatch
+) -> None:
+    await enable_notifications(db, configured)
+    monkeypatch.delenv(NOTIFICATIONS_ENV)
+
+    capabilities = (await client.get("/capabilities")).json()
+    assert capabilities["notifications"] is False
