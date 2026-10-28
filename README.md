@@ -7,14 +7,6 @@ permissioned subset of Prowlarr search/grab functionality to their Seerr users �
 without those users ever seeing the Prowlarr API key. It is consumed by the
 Canopy+ tvOS client but is built as a generic service any Seerr admin can run.
 
-**Out of scope, for now:** Sonarr and Radarr. This service talks to Prowlarr
-(search, grab, indexers, download clients) and Seerr (auth, plus an allowlisted
-set of request operations) and nothing else. No library sync. The Prowlarr-backed side is
-**movies-only** when driven by IMDB ID. Two things sit outside that: the
-built-in **Request** actions, one for films and one for TV, which are keyed by
-TMDB id and never touch Prowlarr at all; and **free-text search**, which is not category-scoped
-and returns whatever Prowlarr indexes.
-
 ---
 
 ## Setup Instructions
@@ -263,7 +255,7 @@ docker/entrypoint.sh    migrate, then serve
 scripts/demo.py         offline + live REPL-style driver
 tests/                  unit + ASGI end-to-end tests
 examples/               docker-compose.yml for running the published image
-parked/                 the old audiobook aligner, kept out of the build
+parked/                 an audiobook aligner, kept out of the build
 ```
 
 ---
@@ -406,9 +398,8 @@ A choice is a **match** plus an optional **tie-break**:
 release name, and for two copies of the same film at the same resolution the
 larger file is the less compressed one.
 
-`choices` defaults to empty, and empty means one undifferentiated pool — which
-is exactly how every profile behaved before choices existed, so a stored
-profile that predates them needs no migration and does not change behaviour.
+`choices` defaults to empty, and empty means one undifferentiated pool: every
+candidate that survives the filters is ranked together by the preference rules.
 
 **Preference rules** — rank the survivors *within* a choice. Position **is**
 load-bearing: rules apply in the order they appear in the profile, each
@@ -455,7 +446,7 @@ before any profile's own rules run. There is no per-profile toggle.
   than returning no recommendation.
 
 The engine does not do this itself: it takes the effective candidate set as an
-argument, because the orchestration belongs in stage 2's search endpoint.
+argument, because the orchestration belongs in the search endpoint.
 `preferred_indexer_candidates(candidates, preferred_indexer_id)` implements the
 rule for the caller to apply.
 
@@ -463,9 +454,8 @@ rule for the caller to apply.
 
 ## Prowlarr client
 
-Async from the start (`httpx`), because search latency is dominated by Prowlarr
-fanning out to indexers and stage 2 will want concurrent searches. Nothing calls
-it concurrently yet.
+Async (`httpx`), because search latency is dominated by Prowlarr fanning out to
+indexers, and the search endpoint issues its Prowlarr calls concurrently.
 
 ```python
 async with ProwlarrClient(url, api_key) as prowlarr:
@@ -485,8 +475,7 @@ and non-2xx responses both surface as `ProwlarrError`, which carries
 
 ## Data model
 
-SQLite via SQLAlchemy 2.0 async + Alembic. Most tables are not populated until
-stage 2; they exist now so the migration history has one starting point.
+SQLite via SQLAlchemy 2.0 async + Alembic.
 
 | Table | Contents |
 |---|---|
@@ -542,7 +531,7 @@ No login step, no session token. The header is `X-Plex-Token`.
    Seerr session to file the request as the user.
 
 The mapping is **persisted and survives a restart**, so restarting the service
-no longer 401s every client until its next launch. Only a SHA-256 fingerprint
+does not 401 every client until its next launch. Only a SHA-256 fingerprint
 is stored, never the token itself, so the table cannot yield a working Plex
 credential even if the database file leaks.
 
@@ -574,20 +563,15 @@ Neither sign-in endpoint takes authentication — they *are* how you
 authenticate. So whatever they use to decide "is this caller an admin?" must
 not be something a caller can supply.
 
-The Seerr URL used to be a field on the login form, filled in on first run and
-remembered, because setting it needed an admin session and getting a session
-needed it. That circularity had a much worse answer than it looked: an
-unauthenticated visitor could point *your* login page at a Seerr instance of
-their own, have it reply `{"permissions": 2}`, and be handed an admin session
-on your install — no knowledge of your Seerr, your Plex account or anything
-else required. Since `config` is a singleton, the same request also repointed
-every tvOS client at the attacker's instance.
-
-So it moved to `CPLUS_SEERR_URL`, and **no request to this service can change
-it**. The login page and the config page display it; neither can set it, and
-`POST /admin/config/seerr-url` no longer exists. Prowlarr stays in the database
-— it holds credentials, but it has no say in identity, so pointing it elsewhere
-cannot make anyone an admin.
+That is why the Seerr URL comes from `CPLUS_SEERR_URL` and **no request to this
+service can change it**. Sign-in asks Seerr whether the caller is an admin, so
+whoever can choose the Seerr instance can choose the answer: a visitor able to
+set it could point *your* login page at a Seerr of their own, have it reply
+`{"permissions": 2}`, and be handed an admin session on your install — and,
+since `config` is a singleton, repoint every tvOS client at their instance too.
+The login page and the config page display the URL; neither can set it.
+Prowlarr is configured in the database — it holds credentials, but it has no
+say in identity, so pointing it elsewhere cannot make anyone an admin.
 
 **Changing it flushes every cached identity** — both `plex_token_sessions` and
 `admin_sessions`, wholesale. Every row was resolved against whichever instance
@@ -606,10 +590,6 @@ can be *detected* across restarts. The URL itself is not stored: there is
 exactly one answer to "which Seerr is this install using?", the environment,
 and everything that displays it reads it from there rather than from a copy
 that could drift. A restart that changes nothing flushes nothing.
-
-Note that the first start after upgrading to this scheme *does* flush, because
-the fingerprint begins empty — those rows were resolved against a URL the
-migration deletes, so nothing can prove what they were resolved against.
 
 ---
 
@@ -687,14 +667,12 @@ typed it. This service does not judge the name — it cannot know which symbols 
 given tvOS version ships — so the admin UI warns about anything outside the
 dozen it suggests rather than refusing it, and **the client is expected to fall
 back** (Canopy+ uses `arrow.down.circle`) when it cannot draw one. Null means
-the client picks for itself, which is what every action did before the field
-existed.
+the client picks for itself.
 
 **`confirm_body` is the copy the client shows when confirming, or null.** A
 client asks before it grabs, and the sentence it asks with is the admin's to
 write: "Add to Library" and "Stream Now" are not the same promise and should
-not read the same way. Null means the client uses its own wording, which is
-what every action did before the field existed.
+not read the same way. Null means the client uses its own wording.
 
 Two placeholders may appear in it, `{release}` and `{size}`, and **the client
 substitutes them, not this service.** The copy has to work for a release this
@@ -1099,8 +1077,8 @@ Authorisation is Seerr's, with one addition:
 * Delete is left to Seerr's inline rule: your own, or anything if you manage
   requests.
 
-Response bodies are passed through **verbatim**, so a client that previously
-talked to Seerr directly only has to change its base URL and swap the API key
+Response bodies are passed through **verbatim**, so a client written against
+Seerr's API only has to change its base URL and swap the API key
 for its Plex token.
 
 ---
@@ -1177,8 +1155,8 @@ instead — see
 `POST /request` covers one door: a user presses Request in the app, this service
 files it with Seerr, writes an `activity_log` row and pushes to the admin.
 Anyone who instead opens Seerr in a browser and requests there came through the
-other door, and used to be invisible — no row, no notification, nothing saying
-something was waiting for approval.
+other door, and without this would be invisible — no row, no notification,
+nothing saying something was waiting for approval.
 
 `POST /webhooks/seerr` is that other door. Seerr already notifies webhook
 subscribers about every request; this accepts those posts and does exactly what
@@ -1224,15 +1202,11 @@ A line in the cplus log means it arrived, and names the reason:
 
 | Log line | Fix |
 |---|---|
-| `no secret is configured` | The webhook is off, or the running build predates it. Generate a secret on the Configuration tab |
+| `no secret is configured` | The webhook is off. Generate a secret on the Configuration tab |
 | `the Authorization header did not match` | Re-copy the secret. Rotating it on the Configuration tab does not update Seerr |
 | `the Authorization header was missing` | Seerr's **Authorization Header** field is empty, or a proxy stripped the header |
 | `the body was not valid JSON` | A syntax error in a customised JSON payload template |
 | `Seerr webhook test received` | **It worked.** Seerr reported a failure for some other reason — check that the agent is saved, not just filled in |
-
-A 404 rather than any of these means the running build predates the endpoint:
-the image has to be rebuilt and `alembic upgrade head` run, which
-`docker/entrypoint.sh` does on start.
 
 ### What it accepts
 
@@ -1474,8 +1448,8 @@ grab request makes no call to qBittorrent, and nothing tracking does can turn a
 successful grab into a failed one. An unreachable qBittorrent, a refused
 password, a torrent that never shows up: each ends that grab's tracking in
 `failed` with a sentence saying why, and changes nothing else. With tracking off
-or not configured, a grab behaves exactly as it did before tracking existed, and
-`grab_id` comes back `null` so the app keeps its own timers.
+or not configured, a grab is not tracked and `grab_id` comes back `null`, so the
+app keeps its own timers.
 
 ### What it needs
 
@@ -1629,9 +1603,9 @@ a music library — author as artist, the files as tracks) and uploads an
 **alignment** for a book: a `version: 1` JSON file, made elsewhere from the
 book's audio and its epub.
 
-cplus doesn't make alignments. It used to, in a sidecar container that needed
-about 2 GB of memory and several CPU-hours a book. That aligner is parked in
-[`parked/`](parked/README.md), outside the image. cplus only checks, stores and
+cplus doesn't make alignments: that takes about 2 GB of memory and several
+CPU-hours a book. An aligner that does is kept in [`parked/`](parked/README.md),
+outside the image. cplus only checks, stores and
 serves alignments, which costs nothing while no one is reading.
 
 ### Uploading an alignment
@@ -1782,7 +1756,7 @@ fields differs from what is stored (`dirty-save.js`, via `data-original`).
 While a write is in flight the card it belongs to dims, and the fragment that
 comes back flashes the accent tint once as it settles — both out of the classes
 htmx sets on its own (`.htmx-request`, `.htmx-added`), which is the whole of
-the "it saved" signal now that the page does not reload. And a write the server
+the "it saved" signal, since the page does not reload. And a write the server
 refuses surfaces in one toast (`htmx-errors.js`), since htmx will not swap a
 4xx body and the rejection would otherwise be silent.
 
@@ -1810,8 +1784,7 @@ under 15 GB, biggest file, then everything else; break ties by…* — generated
 drift from the behaviour. It is rendered by the *preview* response and swapped
 into place out of band, because the builder fragment only re-renders on a
 structural change: a reading that ignored the checkbox you just ticked would be
-worse than none. The profile list uses the same reading instead of
-listing rule type names. It also calls out a choice that matches everything
+worse than none. The profile list shows the same reading. It also calls out a choice that matches everything
 while sitting above another one, which silently kills every choice below it.
 
 **The preview.** A panel beside the form that ranks a candidate set through the
@@ -1844,7 +1817,7 @@ point of those rules, and browsers submit multi-select options in document
 order, not click order. A choice's fields are checkboxes instead, since a
 choice asks "is it one of these?" and the tick order means nothing.
 
-Before saving, the decoded rules and choices are validated through stage 1's
+Before saving, the decoded rules and choices are validated through the engine's
 pydantic schema. Stored JSON therefore can never hold a shape the engine will
 not accept, and an unknown token like `hdr_match: NOT_A_TAG` comes back as a
 form error instead of a broken profile. The preview treats the same invalidity
@@ -1875,28 +1848,19 @@ and says so rather than erroring.
 
 ---
 
-## Cross-stage notes
+## Event types and admin routes
 
-Three places where a later stage's needs diverged from an earlier stage's
-guess. The first two were collapsed; the rest are deliberate.
-
-**Admin verbs drifted from stage 2's stubs.** The stubs named
-`PUT /admin/quality-profiles/{id}`, `DELETE /admin/actions/{id}` and
-`PUT /admin/users/{id}/permissions`. HTML forms can only issue GET and POST, so
-those became `POST .../{id}` and `POST .../{id}/delete`. Stage 2's
-`GET /admin/users/{id}/permissions` was dropped — the permissions matrix is
-rendered on `GET /admin/users` instead — and stage 3 added routes the stubs did
-not anticipate (`/quality-profiles/new`, `/quality-profiles/rows`,
-`/users/{id}/delete`, and the login/PIN routes).
+**Admin routes use GET and POST only.** HTML forms can issue nothing else, so an
+update is `POST .../{id}` and a delete is `POST .../{id}/delete` (for example
+`POST /admin/quality-profiles/{id}` and `POST /admin/actions/{id}/delete`). The
+permissions matrix is rendered on `GET /admin/users`.
 
 **Requests are their own event type.** A request is neither a search nor a
 Prowlarr grab, so filing one (`POST /request`) and deleting one's own
 (`DELETE /seerr/requests/{id}`) are recorded as `activity_log.event_type ==
 "request"`, with `detail.kind == "request"` / `"request_delete"`. A request gets
-no `grabs` row — nothing reached Prowlarr. Before this type existed, a filed
-request was stored as `grab` with `detail.kind == "request"`; the backfill
-migration rewrites those rows. A request filed in Seerr's own UI and relayed
-back by `POST /webhooks/seerr` is that same type and kind, with
+no `grabs` row — nothing reached Prowlarr. A request filed in Seerr's own UI and
+relayed back by `POST /webhooks/seerr` is that same type and kind, with
 `detail.source == "seerr"` saying where it came from — see
 [Requests filed in Seerr](#requests-filed-in-seerr).
 
@@ -1904,27 +1868,25 @@ back by `POST /webhooks/seerr` is that same type and kind, with
 (`POST /manager/grab`), the unrestricted manager search (`GET /manager/search`),
 and a manager approving/declining/deleting a request (`/seerr/requests/*`) are
 recorded as `activity_log.event_type == "admin"`, with `detail.kind` naming the
-operation (`grab`, `search`, `request_approve`, ...). They used to reuse
-`grab`/`search`, which conflated the admin's own work with a user's action grab
-and made the two indistinguishable except by a null `action_id` — the same thing
-a grab whose action was later deleted looks like. Whether a delete is `admin` or
-`request` is decided by the caller's capacity, not the route: Seerr lets any
-user delete their own pending request and a manager delete any, so the route is
-ungated and the row is attributed accordingly. The stored `event_type` is a
-plain `String(32)`, not a constrained enum, so the new values needed no schema
-change. Migration `97cb1bac43d5` backfills the history: it rewrites the rows
-whose old shape is unambiguous (a filed request, a request decision, an
-action-free grab, the manager's unrestricted search) and leaves any row whose
-shape predates those markers alone.
+operation (`grab`, `search`, `request_approve`, ...). This keeps the admin's own
+work apart from a user's action grab; otherwise the only difference would be a
+null `action_id`, which is also what a grab whose action was later deleted looks
+like. Whether a delete is `admin` or `request` is decided by the caller's
+capacity, not the route: Seerr lets any user delete their own pending request
+and a manager delete any, so the route is ungated and the row is attributed
+accordingly. The stored `event_type` is a plain `String(32)`, not a constrained
+enum.
 
-That fixes the activity log. The grabs page reads the `grabs` table instead,
-where the same ambiguity is still a null `action_id` — so it labelled every
-manager grab, the normal way an admin fills a request, as a grab whose action
-had been deleted. `grabs.via_manager` records which of the two it was, as a
-property of how the grab was made rather than a lookup, so it stays true no
-matter what happens to the actions table afterwards. Migration `a1d6f30b24e9`
-adds it and backfills from the activity log, which is the only record of which
-historical grabs had no action.
+The grabs page reads the `grabs` table, where the same ambiguity would be a null
+`action_id`. `grabs.via_manager` records whether a grab was a manager grab — the
+normal way an admin fills a request — as a property of how the grab was made
+rather than a lookup, so it stays true no matter what happens to the actions
+table afterwards.
+
+**Devices never choose a download client.** Which client a grab lands in is the
+admin's decision, made once on the Actions page; a device has no basis for
+choosing. An action-free grab takes Prowlarr's default, and `POST /manager/grab`
+accepts no `download_client_id` — `extra="forbid"` answers one with a 422.
 
 **Permission changes are not immediate.** Revoking an action takes effect at
 the user's next `/register` call, because `/titles/{imdb_id}/actions` and
@@ -1932,27 +1894,6 @@ the user's next `/register` call, because `/titles/{imdb_id}/actions` and
 Seerr. The UI says so rather than papering over it. Removing the user entirely
 *is* immediate — the delete cascades to their token mappings and browser
 sessions.
-
-### Resolved
-
-*Download clients in the client contract.* Nothing a Swift client shows should
-involve a download client or its id: which client a grab lands in is the
-admin's decision, made once on the Actions page, and a device has no basis for
-choosing. tvOS never knew about them; the iOS admin app did, through a picker
-fed by `GET /manager/download-clients` and a `download_client_id` on
-`POST /manager/grab`. The app has dropped the picker, so both are gone and an
-action-free grab takes Prowlarr's default. `extra="forbid"` means a build that
-still sends the field gets a 422, which is why the app update ships first.
-
-*Two admin sign-in paths.* Stage 2's `POST /auth` assumed the browser would run
-the PIN flow and hand over a token; stage 3 proxies the flow server-side, so
-nothing called it. It has been removed along with `POST /auth/logout`
-(superseded by `POST /admin/logout`), leaving one sign-in path and one
-admin-bit check.
-
-*Dead `deps.get_admin` / `AdminDep`.* Stage 2 wrote it for stage 3 to wire in,
-but a browser needs a redirect rather than 401 JSON. Removed in favour of
-`api/routes/admin/deps.require_admin_page`.
 
 ---
 
