@@ -102,13 +102,66 @@ your proxy's TLS.
    button title is what the app prints on the button. Name one "Add to library
    in HD" and title its button "Play Now" when those are the right words for
    two different audiences. Leave it blank and the name is used.
-7. **Assign permissions.** Users appear on the Permissions page the first time
+7. **Point Canopy+ at this instance** — see
+   [Configuring Canopy+](#configuring-canopy).
+8. **Assign permissions.** Users appear on the Permissions page the first time
    their client signs in, so have each user open the app once, then tick the
    actions they may use — including the built-in *Request* action.
-8. *Optional:* **set up the Seerr webhook**, on the Configuration tab, if you
+9. *Optional:* **set up the Seerr webhook**, on the Configuration tab, if you
    want requests people file in Seerr's own UI logged and pushed to you the way
    in-app ones already are. It generates a secret to paste into Seerr's webhook
    settings — see [Requests filed in Seerr](#requests-filed-in-seerr).
+
+### Configuring Canopy+
+
+Nobody types an address into the Apple TV. Canopy+ finds this service through
+your Plex server: Plex has nowhere to keep a server-wide setting that a client
+can read, so the address goes in a collection's description instead.
+
+1. **Pick a collection.** Any collection, in any library, works — including one
+   you create just for this — as long as it is in a library **every Canopy+
+   user can see**. The app looks only through the libraries the signed-in
+   account has access to, so a marker in a library someone is not shared on is
+   invisible to them.
+2. **Add the marker to its description.** In Plex Web, open the collection,
+   choose *Edit*, and add this line to the **Summary** field:
+
+   ```
+   _canopy_host: https://cplus.example.com
+   ```
+
+   Use the address your Apple TVs can reach this service on — normally the
+   public HTTPS URL behind your reverse proxy, not `localhost` or the
+   container's internal address.
+3. **Make sure the field is locked** (the padlock beside *Summary*), so a
+   metadata refresh cannot overwrite it.
+4. **Sign in to Canopy+.** The app scans for the marker once, at sign-in, and
+   remembers what it found. A device that was already signed in before you
+   added the marker has to sign out and back in to pick it up.
+
+The marker can share the field with a real description. It must sit on a line
+of its own, the keyword matches in any case, and Canopy+ removes that line
+before showing the description to anyone. Only the first word after the
+keyword is read, so a remark after the URL on the same line is ignored. A value
+with no scheme is read as `https://`; anything other than `http` or `https` is
+ignored.
+
+What happens at sign-in:
+
+* **Found, and the instance answers.** The device registers, checks that this
+  instance is configured against the same Plex server it signed in to (see
+  [Binding](#binding)), and binds to it. The user now appears on the
+  Permissions page.
+* **Found, but the instance is unreachable.** Nothing is recorded; the app
+  tries again on its next launch, so an instance that was down during a
+  sign-in is picked up once it is back.
+* **No marker anywhere.** The app records that this Plex server has no cplus
+  instance and does not look again until the user signs out.
+
+If more than one collection carries a marker, the library with the lowest
+section id is tried first, and a marker that will not bind falls through to the
+next, so a stale one left elsewhere cannot shadow a working one. Every device
+resolves them in the same order.
 
 ### Environment variables
 
